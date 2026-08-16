@@ -1,0 +1,83 @@
+/**
+ * ==========================================================================
+ * LumenLight 工作流管理器样式
+ * 作用：定义提示词面板内工作流管理区域的样式，包括工作流
+ *       下拉选择器与状态提示文本。
+ * 对应组件：js/components/WorkflowManager.js
+ * ==========================================================================
+ */
+
+/* ==================== 工作流管理器 ==================== */
+
+/* 工作流管理器容器：精简外框，只保留下拉框和状态栏的垂直排列 */
+.workflow-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* 工作流头部 */
+.workflow-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 工作流头部标签 */
+.workflow-header label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #ffffff;
+    opacity: 0.8;
+}
+
+/* ==================== 工作流选择器 ==================== */
+
+/* 工作流下拉选择框 */
+.workflow-selector {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.2);
+    color: #ffffff;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+/* 选择框聚焦 */
+.workflow-selector:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+/* 下拉选项样式 */
+.workflow-selector option {
+    background: #0f0f12;
+    color: #ffffff;
+}
+
+/* ==================== 状态显示 ==================== */
+
+/* 工作流状态文本 */
+.workflow-status {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.2);
+    color: #9ca3af;
+    transition: all 0.3s ease;
+}
+
+/* 成功状态 */
+.workflow-status.success {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+}
+
+/* 错误状态 */
+.workflow-status.error {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}

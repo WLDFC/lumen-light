@@ -1,0 +1,148 @@
+/**
+ * ==========================================================================
+ * LumenLight 全局样式文件
+ * 作用：定义应用的全局基础样式、CSS 变量、画布样式以及左下角视图控制面板样式
+ * ==========================================================================
+ */
+
+/* 全局重置 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* 页面基础样式 */
+body { overflow: hidden; font-family: -apple-system, sans-serif; }
+
+/* ==================== CSS 变量（主题色） ==================== */
+:root {
+    --canvas-bg: #0f0f12;          /* 画布背景色（深色主题） */
+    --icon-color: #fff;            /* 图标/文字颜色（深色主题） */
+    --icon-bg: rgba(27,28,33,1);  /* 控件背景色（深色主题） */
+    --accent: #3b82f6;             /* 主题强调色（蓝色） */
+}
+
+/* ==================== 画布样式 ==================== */
+canvas {
+    position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: var(--canvas-bg);  /* 使用主题变量背景色 */
+    cursor: default;
+}
+
+/* 按住空格准备平移画布时显示抓取光标 */
+canvas.space-panning { cursor: grab !important; }
+
+/* 拖动画布时显示抓取光标 */
+canvas.panning { cursor: grabbing !important; }
+
+/* ==================== 左下角视图控制面板 ==================== */
+.viewport-controls {
+    position: fixed;
+    bottom: 20px;                  /* 距离底部 20px */
+    left: 20px;                    /* 距离左侧 20px */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 1000;                 /* 确保在最上层 */
+}
+
+/* 自适应/适配按钮 */
+.fit-btn {
+    background: var(--icon-bg);
+    color: var(--icon-color);
+    border: none;
+    padding: 6px 10px;
+    border-radius: 16px;
+    font-size: 11px;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    transition: all 0.2s;
+    white-space: nowrap;
+    min-width: 70px;
+}
+
+/* 自适应按钮悬停效果 */
+.fit-btn:hover {
+    background: var(--accent);
+    color: white;
+    transform: translateY(-2px);
+}
+
+/* 缩放比例指示器 */
+.zoom-indicator {
+    background: var(--icon-bg);
+    color: var(--icon-color);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    backdrop-filter: blur(10px);
+    text-align: center;
+    pointer-events: none;          /* 不接收鼠标事件 */
+}
+
+/* ==================== 全局滚动条样式 ====================
+   细滚动条 + 透明轨道，所有面板统一风格
+   （Chrome/Edge 走 webkit 规则，Firefox 走 scrollbar-width） */
+*::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: #2a2a2e;
+    border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: #a0a0a0;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2e transparent;
+}
+
+/* ==================== 画布视频播放器覆盖层 ====================
+   双击画布视频时弹出的就地定位播放器，带原生控件
+   （播放/暂停/进度条/音量/全屏），跟随视口平移缩放 */
+.canvas-video-player {
+    position: fixed;
+    z-index: 100;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #000;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+}
+
+.canvas-video-player video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+/* 右上角关闭按钮 */
+.canvas-video-player-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 101;
+}
+
+.canvas-video-player-close:hover {
+    background: rgba(255, 80, 80, 0.8);
+}

@@ -1,0 +1,18 @@
+# 依赖包（可用 npm install 重装）
+node_modules/
+
+# 第三方工具及其模型文件（体积大，不会修改）
+Real-ESRGAN/
+
+# 用户存档数据（应用运行时会不断变化，不属于代码）
+# 注意必须锚定根目录（/save/），否则会误伤源码目录 js/components/save/
+/save/
+
+# 实时保存恢复数据（画布变更自动写入的本地恢复槽位）
+data/autosave/
+
+# 视频生成缓存（临时下载的视频文件，不属于代码）
+data/videos/
+
+# pi 编码智能体完整包（421MB，开源发行时随 release 包分发，不进 git）
+pi/

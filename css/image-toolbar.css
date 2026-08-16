@@ -1,0 +1,298 @@
+/**
+ * ==========================================================================
+ * LumenLight 图片选中工具栏样式
+ * 作用：定义图片被选中时显示的浮动工具栏样式，包括"添加到内容"、
+ *       "高清放大"、"去除背景"、"保存提示词"、"下载"按钮，以及
+ *       图片名称标签、尺寸标签和高清放大三级菜单的样式。
+ *       参考类似可图图片上方的 UI 栏设计。
+ * ==========================================================================
+ */
+
+/* ==================== 工具栏容器 ==================== */
+
+/* 浮动工具栏主容器，fixed 定位跟随屏幕 */
+/* z-index 997：与节点、图片名称/尺寸标签同层，低于顶栏(998)与右侧面板(999)；
+   拖动图片经过顶部工具栏时工具栏被顶栏自然遮住，不遮挡界面框架。
+   子菜单 .upscale-submenu(1001) 与 Toast(9999) 独立挂到 body，不受本层影响 */
+.image-toolbar {
+    position: fixed;
+    z-index: 997;
+    pointer-events: auto;          /* 允许接收鼠标事件 */
+}
+
+/* 工具栏内容区域 */
+.image-toolbar-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* 左右分区两端对齐 */
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(27, 28, 33, 0.8); /* 深色背景，透明度与侧工具栏一致 */
+    border-radius: 10px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    min-width: 60px;
+    height: 50px;             /* 默认高度 */
+    white-space: nowrap;
+}
+
+/* ==================== 工具栏分区 ==================== */
+
+/* 工具栏分区容器（左/中/右） */
+.toolbar-section {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* 左侧分区：左对齐 */
+.toolbar-section.left {
+    flex: 1;
+    justify-content: flex-start;
+}
+
+/* 中间分区：居中对齐 */
+.toolbar-section.center {
+    flex: 1;
+    justify-content: center;
+}
+
+/* 右侧分区：右对齐 */
+.toolbar-section.right {
+    flex: 1;
+    justify-content: flex-end;
+}
+
+/* ==================== 工具栏按钮 ==================== */
+
+/* 通用按钮样式 */
+.toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;  
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    height: 40px;
+}
+
+/* 按钮悬停效果 */
+.toolbar-btn:hover {
+    background: rgba(45, 51, 59, 0.55);
+    transform: scale(0.95);
+}
+
+/* 按钮内图标 */
+.toolbar-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* ==================== 添加到内容按钮 ==================== */
+
+/* "添加到内容"按钮 */
+.add-to-content-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    padding: 0 10px;
+    color: #ffffff;
+}
+
+/* 按钮文字 */
+.add-to-content-btn .btn-text {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* 悬停效果（背景色统一由上方 .toolbar-btn:hover 控制，这里只改图标颜色） */
+.add-to-content-btn:hover {
+    color: #ffffff;
+}
+
+/* 按钮内图标尺寸 */
+.add-to-content-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* ==================== 下载按钮 ==================== */
+
+/* 下载按钮使用蓝色调 */
+.download-btn {
+    color: #60a5fa;
+}
+
+/* 下载按钮悬停（背景色统一由上方 .toolbar-btn:hover 控制，这里只改图标颜色） */
+.download-btn:hover {
+    color: #93c5fd;
+}
+
+/* ==================== 图片名称标签 ==================== */
+
+/* 图片名称标签：显示在工具栏和图片之间 */
+/* z-index 997：低于顶栏(998)与右侧面板(999)，
+   保证标签作为画布的附属注记被界面框架遮住，不会显示到顶栏或面板上 */
+.image-name-label {
+    position: fixed;
+    z-index: 997;
+    font-size: 12px;
+    color: #ffffff;
+    background: transparent;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;          /* 不阻挡鼠标事件 */
+    line-height: 16px;
+}
+
+/* ==================== 图片尺寸标签 ==================== */
+
+/* 图片尺寸标签：显示在图片下方 */
+/* z-index 997：与名称标签一致，同样低于顶栏(998)与右侧面板(999) */
+.image-size-label {
+    position: fixed;
+    z-index: 997;
+    font-size: 11px;
+    color: #ffffff;
+    background: rgba(30, 30, 30, 0.8);
+    padding: 3px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+    backdrop-filter: blur(4px);
+    pointer-events: none;          /* 不阻挡鼠标事件 */
+}
+
+/* ==================== 高清放大菜单样式 ==================== */
+
+/* 高清放大、去除背景、保存提示词按钮（图标 + 文字的组合样式一致） */
+.upscale-btn,
+.rembg-btn,
+.save-tag-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* 组合按钮内图标 */
+.upscale-btn svg,
+.rembg-btn svg,
+.save-tag-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* ==================== 子菜单容器 ==================== */
+
+/* 二级/三级菜单通用样式 */
+.upscale-submenu {
+    background: rgba(40, 40, 40, 0.98);
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 100px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* 二级菜单：动漫/真实选择（fixed 定位由 JS 控制） */
+.upscale-submenu.type-menu {
+    /* 使用 fixed 定位，由 JS 设置位置 */
+}
+
+/* 三级菜单：倍数选择（fixed 定位由 JS 控制） */
+.upscale-submenu.scale-menu {
+    /* 使用 fixed 定位，由 JS 设置位置 */
+}
+
+/* ==================== 类型按钮（动漫/真实） ==================== */
+
+.upscale-type-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    position: relative;
+    box-sizing: border-box;
+}
+
+/* 类型按钮悬停 */
+.upscale-type-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 类型图标 */
+.type-icon {
+    font-size: 14px;
+}
+
+/* ==================== 倍数按钮（2x/4x） ==================== */
+
+.upscale-scale-btn {
+    display: block;
+    width: 100%;
+    padding: 8px 16px;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+/* 倍数按钮悬停 */
+.upscale-scale-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ==================== 处理中提示 Toast ==================== */
+
+/* Toast 提示容器 */
+.upscale-toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: white;
+    z-index: 9999;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* 处理中状态（蓝色） */
+.upscale-toast.processing {
+    background: rgba(59, 130, 246, 0.95);
+}
+
+/* 成功状态（绿色） */
+.upscale-toast.success {
+    background: rgba(34, 197, 94, 0.95);
+}
+
+/* 错误状态（红色） */
+.upscale-toast.error {
+    background: rgba(239, 68, 68, 0.95);
+}

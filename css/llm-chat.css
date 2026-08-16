@@ -1,0 +1,650 @@
+/**
+ * ==========================================================================
+ * LumenLight LLM 聊天窗口样式
+ * ==========================================================================
+ * 作用：定义右侧面板 LLM 模式下的聊天消息区、待发送图片预览、
+ *       输入栏、工具栏（上传/清空/尺寸/模型/发送）及图片灯箱样式，
+ *       与面板整体深色主题保持一致。
+ * 对应组件：js/components/LlmChat.js
+ * ==========================================================================
+ */
+
+/* ==================== 聊天窗口整体布局 ==================== */
+.llm-chat {
+    display: flex;
+    flex-direction: column;   /* 纵向排列：上方消息区 + 下方输入栏 */
+    flex: 1;                  /* 占满父容器（面板内容区）剩余空间 */
+    min-height: 0;            /* 允许子元素收缩，配合消息区内部滚动 */
+    /* 父容器（comfyContent/llmContent）有内边距，这里用负 margin 抵消，
+       让聊天窗口顶满整个面板区域 */
+    margin: -20px;
+    margin-left: -26px;       /* 左侧比其他边多 6px 内边距，需多抵消一点 */
+}
+
+/* ==================== 消息区 ==================== */
+.llm-chat-messages {
+    flex: 1;                  /* 撑满输入栏以外的全部高度 */
+    min-height: 0;            /* flex 布局中允许收缩，否则不会被裁剪、无法滚动 */
+    overflow-y: auto;         /* 消息过多时垂直滚动 */
+    display: flex;
+    flex-direction: column;   /* 消息按时间从上到下排列 */
+    gap: 18px;                /* 相邻消息的间距 */
+    padding: 18px;             /* 内边距，避免消息气泡靠边 */
+}
+
+/* 空状态提示（无任何对话时显示的引导文字） */
+.llm-chat-empty {
+    margin: auto;             /* 配合父级 flex，水平垂直居中 */
+    color: #6b7280;           /* 弱化的灰色，仅作提示 */
+    font-size: 13px;
+    text-align: center;
+}
+
+/* 单条消息容器 */
+.llm-msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 88%;           /* 限制气泡最大宽度，避免占满整行 */
+}
+
+/* 用户消息靠右，模型回复靠左（聊天软件惯例） */
+.llm-msg.user {
+    align-self: flex-end;     /* 在消息区（纵向 flex）中靠右 */
+    align-items: flex-end;    /* 气泡内的图片等元素也靠右对齐 */
+}
+
+.llm-msg.assistant {
+    align-self: flex-start;
+    align-items: flex-start;
+}
+
+/* 消息文本气泡 */
+.llm-msg-text {
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #ffffff;
+    white-space: pre-wrap;    /* 保留用户输入的换行和空格 */
+    word-break: break-word;   /* 长单词/长链接自动换行，防止撑破气泡 */
+}
+
+/* 用户消息：蓝底白字 */
+.llm-msg.user .llm-msg-text {
+    background: #3b82f6;
+    color: #ffffff;
+    border-bottom-right-radius: 3px;   /* 靠右的角收小，形成"对话指向"效果 */
+}
+
+/* 模型回复：深灰底 */
+.llm-msg.assistant .llm-msg-text {
+    background: #2a2b31;
+    border-bottom-left-radius: 3px;    /* 靠左的角收小 */
+}
+
+/* 错误消息：红色系提示 */
+.llm-msg.error .llm-msg-text {
+    background: rgba(239, 68, 68, 0.12);   /* 半透明红底 */
+    color: #f87171;
+}
+
+/* 思考中：等待模型回复时的灰色提示文字 */
+.llm-msg.thinking .llm-msg-text {
+    color: #9ca3af;
+    animation: llm-thinking-pulse 1.2s ease-in-out infinite;   /* 呼吸闪烁 */
+}
+
+/* 呼吸动画：透明度在 1 和 0.4 之间循环渐变 */
+@keyframes llm-thinking-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* 消息附带的图片（缩略图形式展示在文字上方） */
+.llm-msg-images {
+    display: flex;
+    flex-wrap: wrap;          /* 多图时自动换行 */
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+/* 单张消息图片容器：作为删除按钮的定位基准 */
+.llm-msg-image-wrap {
+    position: relative;
+}
+
+.llm-msg-image {
+    max-width: 140px;
+    max-height: 140px;
+    border-radius: 6px;
+    object-fit: cover;        /* 裁剪填充，保持缩略图统一比例 */
+}
+
+/* 消息图片右上角的删除按钮，悬停图片时才出现 */
+.llm-msg-image-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.llm-msg-image-wrap:hover .llm-msg-image-remove {
+    display: flex;
+}
+
+/* ==================== 用户消息气泡下方的操作栏 ==================== */
+/* 纯图标按钮栏（重新编辑等），跟随用户消息靠右对齐 */
+.llm-msg-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+/* 图标按钮：与项目其他图标统一——无描边、透明底、白色线条 */
+.llm-msg-action-btn {
+    position: relative;               /* 作为悬停气泡提示的定位基准 */
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #ffffff;                   /* 白色线条（SVG 用 currentColor 继承） */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0.75;                    /* 默认稍弱，避免抢走消息内容的注意力 */
+    transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.llm-msg-action-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    opacity: 1;
+}
+
+.llm-msg-action-btn:active {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.llm-msg-action-btn svg {
+    display: block;                   /* 消除 svg 基线空隙 */
+}
+
+/* 悬停气泡提示：内容取自按钮的 data-tip 属性，显示在按钮上方靠右 */
+.llm-msg-action-btn::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    padding: 3px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.88);
+    color: #ffffff;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: nowrap;              /* 提示文字不换行 */
+    opacity: 0;                       /* 默认隐藏，hover 时淡入 */
+    pointer-events: none;             /* 提示本身不拦截鼠标事件 */
+    transition: opacity 0.15s ease;
+}
+
+.llm-msg-action-btn:hover::after {
+    opacity: 1;
+}
+
+/* ==================== 生成图片展示块与操作栏 ==================== */
+/* 替换原占位气泡的完整块：图片在上、操作按钮栏在下 */
+.llm-gen-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    align-self: flex-start;    /* 与助手消息一致靠左 */
+    gap: 6px;
+    max-width: 88%;            /* 与消息气泡最大宽度一致 */
+}
+
+/* 操作栏：后续新增按钮时自动横向排列 */
+.llm-gen-actions {
+    display: flex;
+    gap: 6px;
+}
+
+/* 白色线条风格的操作按钮（圆形箭头图标 + 文字） */
+.llm-gen-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border: none;                /* 无描边 */
+    border-radius: 12px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.llm-gen-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.llm-gen-btn:active {
+    transform: scale(0.97);    /* 按下时微缩反馈 */
+}
+
+.llm-gen-btn svg {
+    display: block;            /* 消除 svg 基线空隙 */
+    flex-shrink: 0;
+}
+
+/* ==================== 待发送图片预览 ==================== */
+/* 输入框上方：通过 🖼️ 按钮或画布工具栏添加的图片，发送前可预览/移除 */
+.llm-chat-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 12px;          /* 与输入栏左右对齐；无图时不占上方空间 */
+}
+
+/* 有图片时才加上方间距（:not(:empty) 技巧：空容器不加 padding） */
+.llm-chat-attachments:not(:empty) {
+    padding-top: 8px;
+}
+
+/* 单张预览缩略图容器（56px 固定方块） */
+.llm-attachment {
+    position: relative;       /* 作为右上角移除按钮的定位基准 */
+    width: 56px;
+    height: 56px;
+}
+
+.llm-attachment img {
+    width: 100%;
+    height: 100%;
+    border-radius: 6px;
+    object-fit: cover;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+/* 缩略图右上角的移除按钮（红色圆形 ×） */
+.llm-attachment-remove {
+    position: absolute;
+    top: -6px;                /* 超出缩略图边界一半，压在角上 */
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;  /* 让 × 字符在圆内居中 */
+}
+
+/* ==================== 输入栏 ==================== */
+.llm-chat-inputbar {
+    display: flex;
+    flex-direction: column;   /* 从上到下：图片预览 → 输入框 → 工具栏 */
+    gap: 8px;
+    padding: 12px;
+}
+
+/* 多行文本输入框 */
+.llm-chat-inputbar textarea {
+    resize: none;             /* 禁止拖拽调整大小，高度由 rows 属性控制 */
+    padding: 10px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: #0f0f12;      /* 比面板更深一点的底色，突出输入区域 */
+    color: #ffffff;
+    font-size: 13px;
+    font-family: inherit;     /* 继承界面字体，避免浏览器默认衬线字体 */
+    outline: none;            /* 去掉浏览器默认聚焦轮廓，用下方聚焦边框色代替 */
+    transition: border-color 0.15s ease;
+}
+
+/* 聚焦时边框变蓝，提示当前输入位置 */
+.llm-chat-inputbar textarea:focus {
+    border-color: #3b82f6;
+}
+
+/* ==================== 输入框下方工具栏 ==================== */
+/* 从左到右：上传图片、清空对话、尺寸选择、模型选择、发送按钮 */
+.llm-chat-toolbar {
+    display: flex;            /* 横向一行排列 */
+    align-items: center;      /* 所有控件垂直居中对齐 */
+    gap: 4px;                 /* 相邻控件之间的间距 */
+}
+
+/* 工具栏小方块按钮（上传图片、清空对话），内含 16px SVG 线条图标 */
+.llm-tool-btn {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;           /* 空间不足时不被压缩变形 */
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: #ffffff;           /* 图标颜色（SVG 使用 currentColor 继承此值） */
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;  /* 图标在按钮内居中 */
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+/* 悬停：浅色底 + 图标变白 */
+.llm-tool-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+:root {
+    --llm-size-select-width: 78px;    /* 折叠按钮显示 "比例 / 档位"，如 1:1 / 2K */
+}
+
+/* 尺寸下拉容器：给自定义覆盖层提供定位上下文 */
+.llm-size-select-wrap {
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+/* 图片尺寸选择折叠按钮（仅在图像生成模型下显示，由 JS 控制可见性）
+   背景与旁边图标按钮一致（#1b1c21 面板色） */
+.llm-size-select {
+    flex-shrink: 0;
+    width: var(--llm-size-select-width); /* 显示 "1:1 / 2K" 合成文案 */
+    height: 32px;
+    padding: 0 4px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background-color: #1b1c21;
+    color: #ffffff;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    /* 隐藏原生下拉箭头 */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    text-align: center;
+    white-space: nowrap;        /* 文案不换行 */
+    overflow: hidden;           /* 超出部分隐藏 */
+    text-overflow: ellipsis;    /* 超宽时显示省略号，避免半截文字 */
+}
+
+.llm-size-select:focus {
+    border-color: #3b82f6;    /* 聚焦边框变蓝，与输入框一致 */
+}
+
+.llm-size-select option {
+    background-color: #0f0f12;
+    color: #ffffff;
+    text-align: center;
+}
+
+/* 自定义尺寸下拉面板：两段式（比例 + 分辨率档位），向上弹出 */
+.llm-size-options-wrap {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    z-index: 100;
+    width: 200px;
+    max-height: 320px;
+    overflow-y: auto;
+    margin-bottom: 4px;
+    padding: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background-color: #1b1c21;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* 面板内的分段容器 */
+.llm-size-section {
+    margin-bottom: 10px;
+}
+
+.llm-size-section:last-child {
+    margin-bottom: 0;
+}
+
+/* 分段标题（比例 / 分辨率） */
+.llm-size-section-header {
+    padding: 4px 6px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+/* 比例选项网格：两列 */
+.llm-size-ratio-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+.llm-size-option {
+    display: flex;
+    align-items: center;      /* 图标与文字垂直居中对齐 */
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #ffffff;
+    font-size: 13px;
+}
+
+.llm-size-option:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.llm-size-option.active {
+    background-color: rgba(59, 130, 246, 0.2);
+}
+
+.llm-size-option.active .ratio-shape {
+    background-color: #3b82f6;
+}
+
+/* 比例小图标：纯色填充矩形，直观展示宽高比 */
+.llm-size-option-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 18px;              /* 固定容器宽度，内部图标居中 */
+    height: 18px;
+    overflow: hidden;
+    vertical-align: middle;   /* 防止行内元素基线不一致导致偏上/偏下 */
+}
+
+.llm-size-option-icon > .ratio-shape {
+    display: block;           /* flex 容器内使用 block，居中更稳定 */
+    border: none;             /* 去除边框，只保留填充色 */
+    border-radius: 1px;
+    background-color: rgba(255, 255, 255, 0.45);  /* 提高对比度，确保无框也能看清 */
+}
+
+.llm-size-option-text {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 分辨率档位选项网格：三列 */
+.llm-size-tier-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+}
+
+.llm-size-tier-option {
+    padding: 6px 0;
+    border-radius: 6px;
+    text-align: center;
+    cursor: pointer;
+    color: #ffffff;
+    font-size: 13px;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.llm-size-tier-option:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.llm-size-tier-option.active {
+    background-color: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+/* 低于当前模型最低像素要求的档位：禁用态 */
+.llm-size-tier-option.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.llm-size-tier-option.disabled:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 模型 / 质量下拉：已改为 LumenDropdown 图标按钮模式（纯图标触发器 +
+   弹出菜单选择，当前选中在菜单里以青色对勾标记），样式见
+   css/lumen-dropdown.css 的 .lumen-dd-icon-btn 区块。
+   质量框仅在 gpt-image / dall-e 等支持 quality 的模型下显示（JS 控制） */
+
+/* 工具栏弹性占位：把生图按钮组（质量/模型/尺寸/发送）推到工具栏右侧 */
+.llm-toolbar-spacer {
+    flex: 1 1 auto;
+}
+
+/* 发送按钮：工具栏中唯一的强调色（蓝色）按钮 */
+.llm-send-btn {
+    flex-shrink: 0;
+    height: 32px;
+    padding: 0 16px;          /* 左右宽内边距，按钮呈胶囊状 */
+    border: none;
+    border-radius: 6px;
+    background: #3b82f6;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+/* 悬停加深蓝色 */
+.llm-send-btn:hover {
+    background: #2563eb;
+}
+
+/* 等待模型回复时禁用发送，半透明 + 禁用光标提示不可点 */
+.llm-send-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* ==================== 生成图片全屏灯箱 ==================== */
+/* 全屏遮罩层，默认隐藏，点击消息中的图片后显示 */
+.llm-image-lightbox {
+    position: fixed;          /* 相对整个浏览器视口定位，覆盖全屏 */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);   /* 90% 不透明黑底，突出图片 */
+    display: none;            /* 默认隐藏，激活时改为 flex */
+    justify-content: center;
+    align-items: center;      /* 图片在遮罩层中居中 */
+    z-index: 2000;            /* 高于提示词管理窗口，确保原图始终显示在最前面 */
+}
+
+/* 灯箱显示状态（由 JS 添加 active 类触发） */
+.llm-image-lightbox.active {
+    display: flex;
+}
+
+/* 灯箱中的大图：保持原生分辨率，最大不超过视口的 90% */
+.llm-image-lightbox img {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;      /* 完整显示图片，不裁剪 */
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* 灯箱中的视频预览：与图片同规格（资产库双击视频时显示） */
+.llm-image-lightbox video {
+    max-width: 90vw;
+    max-height: 90vh;
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    outline: none;
+}
+
+/* ==================== 视频生成结果块 ==================== */
+
+/* 视频播放器容器（包含 video 元素 + 右上角"添加到画布"按钮） */
+.llm-msg-video-wrap {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #000;
+}
+
+/* 视频播放器：宽度跟随父容器，最大不超过聊天区域 */
+.llm-msg-video {
+    display: block;
+    max-width: 100%;
+    width: 280px;
+    border-radius: 8px;
+}
+
+/* "添加到画布"按钮：悬浮在视频右上角，鼠标悬停时显示 */
+.llm-video-to-canvas-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.llm-msg-video-wrap:hover .llm-video-to-canvas-btn {
+    opacity: 1;
+}
+
+.llm-video-to-canvas-btn:hover {
+    background: rgba(59, 130, 246, 0.8);
+}

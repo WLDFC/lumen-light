@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<!--
+    LumenLight 主页面
+    ================
+    这是整个应用的单页入口文件，负责：
+    1. 引入项目所需的全部 CSS 样式文件。
+    2. 定义页面的 DOM 结构，包括画布层、文件菜单、提示词面板、左下角控制区等。
+    3. 按依赖顺序引入全部 JavaScript 脚本文件。
+
+    页面采用深色主题（data-theme="dark"），所有组件均通过原生 JavaScript 初始化，
+    不依赖 Vue / React 等前端框架。
+-->
+<html lang="zh-CN" data-theme="dark">
+<head>
+    <!-- 页面基础元信息 -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LumenLight</title>
+
+    <!--
+        样式表引入区域
+        ---------------
+        所有 CSS 文件都集中在这里，按从通用到特殊的顺序加载：
+        1. style.css：项目基础样式、CSS 变量、画布默认样式。
+        2. prompt-panel.css：右侧面板（提示词、工作流、缩略图）的样式。
+        3. image-toolbar.css：图片选中时浮动工具栏的样式。
+        4. save-manager.css：顶栏文件菜单及存档相关弹窗的样式。
+        5. prompt-autocomplete.css：提示词输入框自动补全下拉列表的样式。
+        6. llm-chat.css：右侧面板 LLM 聊天窗口的样式。
+        7. top-toolbar.css：画布顶部横向工具栏的样式。
+    -->
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/prompt-panel.css">
+    <link rel="stylesheet" href="css/workflow-manager.css">
+    <link rel="stylesheet" href="css/image-toolbar.css">
+    <link rel="stylesheet" href="css/save-manager.css">
+    <link rel="stylesheet" href="css/prompt-autocomplete.css">
+    <link rel="stylesheet" href="css/llm-chat.css">
+    <link rel="stylesheet" href="css/lumen-dropdown.css">
+    <link rel="stylesheet" href="css/llm-system-prompt.css">
+    <link rel="stylesheet" href="css/settings.css">
+    <link rel="stylesheet" href="css/side-toolbar.css">
+    <link rel="stylesheet" href="css/asset-library.css">
+    <link rel="stylesheet" href="css/recipe-manager.css">
+    <!-- 提示词收藏页左侧模型标签栏样式 -->
+    <link rel="stylesheet" href="css/recipe-models-sidebar.css">
+    <!-- 保存提示词弹窗 / 收藏详情编辑弹窗样式（从 recipe-manager.css 按组件拆分） -->
+    <link rel="stylesheet" href="css/save-tag-dialog.css">
+    <link rel="stylesheet" href="css/tag-detail-dialog.css">
+    <link rel="stylesheet" href="css/node.css">
+    <!-- 顶栏样式放在 save-manager.css / prompt-panel.css 之后，
+         以便覆盖被收纳进顶栏的按钮原有的 fixed 定位相关声明 -->
+    <link rel="stylesheet" href="css/top-toolbar.css">
+</head>
+<body>
+    <!--
+        ==================== 画布层 ====================
+        整个应用最核心的交互区域，所有图片都在这里被绘制、拖拽、缩放。
+        通过 HTML5 Canvas API 渲染，由 js/canvas/Canvas.js 进行管理。
+    -->
+    <canvas id="board"></canvas>
+
+    <!--
+        ==================== 顶部工具栏 ====================
+        画布顶部一条 60px 高的横向工具栏，采用三段式布局：
+        - 左段：文件菜单按钮 + 当前画布名称（原左上角浮动元素）
+        - 中段：图像管理等全局工具按钮，后续新增工具在此追加
+        - 右段：提示词面板开关按钮（原右上角浮动元素）
+        以不透明浮层盖在画布之上，画布尺寸不变；层级低于右侧面板，
+        面板展开时会盖过顶栏右端。
+        对应样式：css/top-toolbar.css
+    -->
+    <div class="top-toolbar" id="topToolbar">
+        <!-- 左段：文件菜单 + 画布名称 -->
+        <div class="top-toolbar-left">
+            <button class="file-menu-btn" id="fileMenuBtn" title="文件菜单"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+            <span class="canvas-name-display" id="canvasNameDisplay" title="当前画布名称">未命名</span>
+            <!-- 实时保存状态（RealtimeSaveManager 驱动，失败才告警）：
+                 ✓ 已自动保存 HH:MM:SS（正常） / ⚠ 保存失败，正在重试（红色） -->
+            <span class="autosave-status" id="autosaveStatus" title="实时保存状态"></span>
+        </div>
+
+        <!-- 中段：工具按钮区（图像管理等功能后续在此添加） -->
+        <div class="top-toolbar-center" id="topToolbarCenter"></div>
+
+        <!-- 右段：提示词面板开关 -->
+        <div class="top-toolbar-right">
+            <button class="prompt-panel-btn" id="promptBtn" title="提示词面板"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
+        </div>
+    </div>
+
+    <!--
+        ==================== 文件菜单下拉框 ====================
+        由顶栏左段的文件菜单按钮触发，fixed 定位悬浮在顶栏下方。
+        必须放在顶栏容器之外，避免被顶栏的高度和层级裁剪。
+        对应组件：js/components/SaveManager.js
+    -->
+    <div class="file-menu-dropdown" id="fileMenuDropdown">
+        <button class="file-menu-item" id="openSaveBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>打开画布</button>
+        <button class="file-menu-item" id="newCanvasBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>新建画布</button>
+        <button class="file-menu-item" id="saveProjectBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>保存画布</button>
+        <button class="file-menu-item" id="saveAsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>另存为</button>
+        <button class="file-menu-item" id="settingsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</button>
+        <button class="file-menu-item" id="helpBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>帮助</button>
+    </div>
+
+    <!--
+        ==================== 右侧面板（全高） ====================
+        这是 ComfyUI 工作流的核心操作区，包含：
+        - 正面 / 负面提示词输入框
+        - 图片缩略图槽位（用于传递给 ComfyUI 的 Edit 类工作流）
+        - 工作流选择、保存、删除
+        - ComfyUI 连接状态指示灯
+        - 运行工作流按钮
+        - LLM 聊天窗口（与大语言模型对话，支持模型选择与图片上传）
+    -->
+    <aside class="prompt-panel-container" id="promptPanel" aria-hidden="true">
+        <!-- 面板头部：模式切换、ComfyUI 状态灯、关闭按钮 -->
+        <header class="prompt-panel-header">
+            <select class="prompt-mode-selector" id="promptMode" aria-label="选择模式">
+                <option value="comfy">Comfy</option>
+                <option value="llm">LLM</option>
+            </select>
+
+            <!-- ComfyUI 连接状态指示灯，显示 ComfyUI 服务是否可连接 -->
+            <div class="comfy-status-indicator" id="comfyStatus" title="ComfyUI 连接状态">
+                <span class="status-dot"></span>
+                <span class="status-text">检测中...</span>
+            </div>
+
+            <!-- 收起右侧面板按钮（图标：双箭头向内收拢） -->
+            <button class="prompt-close-btn" id="closePrompt" aria-label="收起面板"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+        </header>
+
+        <!--
+            ==================== Comfy 模式内容区 ====================
+            包含提示词输入、缩略图槽位、工作流管理、发送按钮。
+        -->
+        <section class="prompt-panel-content" id="comfyContent">
+            <!--
+                正面提示词输入区域：两个独立输入框，折叠交互与负面提示词一致。
+                - 框 1：质量/画风类提示词（长期稳定，少改动）
+                - 框 2：人物/动作/服装等内容提示词（常改动）
+                发送时由 PromptInputManager.getPrompts() 将两个非空框各自
+                trim 后用空行合并为一条正面提示词。默认展开，手动折叠状态
+                记忆在 localStorage（posPrompt1Collapsed / posPrompt2Collapsed）
+            -->
+            <div class="prompt-input-wrap collapsible" id="posPrompt1Wrap">
+                <div class="collapsible-header" id="posPrompt1Header">
+                    <label for="posPrompt">正面提示词 1</label>
+                    <button class="collapse-toggle" id="posPrompt1Toggle" aria-label="展开/收起正面提示词 1" type="button">▶</button>
+                </div>
+                <div class="collapsible-body">
+                    <textarea id="posPrompt" rows="10" placeholder="masterpiece, best quality..."></textarea>
+                </div>
+            </div>
+
+            <div class="prompt-input-wrap collapsible" id="posPrompt2Wrap">
+                <div class="collapsible-header" id="posPrompt2Header">
+                    <label for="posPrompt2">正面提示词 2</label>
+                    <button class="collapse-toggle" id="posPrompt2Toggle" aria-label="展开/收起正面提示词 2" type="button">▶</button>
+                </div>
+                <div class="collapsible-body">
+                    <textarea id="posPrompt2" rows="10"></textarea>
+                </div>
+            </div>
+
+            <!--
+                图片缩略图区域（Edit 工作流槽位上传，与提示词文本无关）。
+                槽位数量由 PanelThumbnailManager 按所选工作流里取图节点
+                （LumenReceiveImageFromCanvas）的个数动态渲染：
+                0 个（纯文生图）时整区隐藏，最多 3 个（与后端槽位上限一致）。
+                点击槽位可打开本地文件选择框上传图片，点击 × 可清空槽位。
+            -->
+            <div class="prompt-input-wrap" id="thumbnailWrap">
+                <div class="image-thumbnails" id="imageThumbnails"></div>
+            </div>
+
+            <!-- 负面提示词输入区域，默认可折叠以节省空间 -->
+            <div class="prompt-input-wrap collapsible collapsed" id="negPromptWrap">
+                <div class="collapsible-header" id="negPromptHeader">
+                    <label for="negPrompt">负面提示词</label>
+                    <button class="collapse-toggle" id="negPromptToggle" aria-label="展开/收起负面提示词" type="button">▶</button>
+                </div>
+                <div class="collapsible-body">
+                    <textarea id="negPrompt" rows="6" placeholder="low quality, blurry..."></textarea>
+                </div>
+            </div>
+
+            <!--
+                ==================== 工作流管理区域 ====================
+                功能：
+                - 从服务器加载已保存的工作流列表
+                - 选择工作流
+                - 保存 / 重命名 / 删除工作流
+            -->
+            <div class="workflow-manager">
+                <div class="workflow-header">
+                    <label>工作流</label>
+                </div>
+
+                <!-- 工作流选择下拉框 -->
+                <select class="workflow-selector" id="workflowSelector">
+                    <option value="">-- 选择工作流 --</option>
+                </select>
+
+                <!-- 当前工作流信息已精简：仅保留工作流选择器，节省面板空间 -->
+
+                <!-- 工作流状态提示文字 -->
+                <div class="workflow-status" id="workflowStatus">未加载工作流</div>
+            </div>
+
+            <!--
+                ComfyUI 动态参数区：随所选工作流探测渲染可调参数
+                （主模型/LoRA/步数+CFG/采样器+降噪/尺寸/数量），
+                与画布 Comfy 生图节点共用 ComfyParamRows 控制器；
+                运行时参数经 /api/comfy-node/run 的 overrides 注入
+            -->
+            <div class="comfy-params" id="comfyParams"></div>
+
+            <!-- 发送当前提示词和工作流到 ComfyUI 生成图片。
+                 左侧小步进器为生成数量（工作流含批次输入时显示，
+                 上下箭头步进 / 直接键入，1-9999），值经参数区状态注入 batch_size -->
+            <div class="prompt-send-row">
+                <div class="count-stepper" id="comfyCountStepper" hidden
+                     title="生成数量（每张为独立任务依次入队，跑完一张落一张），上下箭头步进或直接键入">
+                    <input type="text" class="count-stepper-input" id="comfyCountInput"
+                           inputmode="numeric" maxlength="4" value="1" aria-label="生成数量">
+                    <div class="count-stepper-arrows">
+                        <button type="button" class="count-stepper-arrow" id="comfyCountUp" aria-label="增加数量">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+                        </button>
+                        <button type="button" class="count-stepper-arrow" id="comfyCountDown" aria-label="减少数量">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <button class="prompt-send-btn" id="sendToComfy">🚀 运行工作流</button>
+            </div>
+        </section>
+
+        <!--
+            ==================== LLM 模式内容区 ====================
+            与大语言模型对话或图像生成的窗口：
+            - 上方为消息区（用户消息靠右、模型回复靠左）
+            - 输入框下方提供图片上传、清空对话、图片尺寸选择、模型选择、发送按钮
+            - 当选择图像生成模型（如豆包 seedream）时，尺寸选择框会自动显示
+            对应组件：js/components/LlmChat.js
+        -->
+        <section class="prompt-panel-content hidden" id="llmContent">
+            <div class="llm-chat">
+                <!-- 消息区 -->
+                <div class="llm-chat-messages" id="llmMessages">
+                    <div class="llm-chat-empty" id="llmChatEmpty">发送消息，开始与模型对话</div>
+                </div>
+
+                <!-- 待发送图片预览 -->
+                <div class="llm-chat-attachments" id="llmAttachments"></div>
+
+                <!-- 输入栏 -->
+                <div class="llm-chat-inputbar">
+                    <textarea id="llmInput" rows="8" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+                    <div class="llm-chat-toolbar">
+                        <button class="llm-tool-btn" id="llmUploadBtn" type="button" title="上传图片"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+                        <button class="llm-tool-btn" id="llmClearBtn" type="button" title="清空对话"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+                        <button type="button" class="llm-quality-select" id="llmQualitySelect" aria-label="选择图片生成质量" title="图片生成质量" aria-haspopup="listbox"></button>
+                        <button type="button" class="llm-model-select" id="llmModelSelect" aria-label="选择模型" aria-haspopup="listbox"></button>
+                        <div class="llm-size-select-wrap">
+                            <select class="llm-size-select" id="llmSizeSelect" aria-label="选择生成图片尺寸" title="图片生成尺寸">
+                                <option value="1:1|2K" selected>1:1 / 2K</option>
+                                <option value="9:16|2K">9:16 / 2K</option>
+                                <option value="2:3|2K">2:3 / 2K</option>
+                                <option value="3:4|2K">3:4 / 2K</option>
+                                <option value="4:3|2K">4:3 / 2K</option>
+                                <option value="3:2|2K">3:2 / 2K</option>
+                                <option value="16:9|2K">16:9 / 2K</option>
+                                <option value="auto|2K">自动 / 2K</option>
+                            </select>
+                        </div>
+                        <div class="llm-toolbar-spacer"></div>
+                        <button class="llm-send-btn" id="llmSendBtn" type="button">发送</button>
+                    </div>
+                    <input type="file" id="llmFileInput" accept="image/*,video/*" multiple style="display: none;">
+                </div>
+            </div>
+        </section>
+    </aside>
+
+    <!--
+        ==================== LLM 生成图片全屏灯箱 ====================
+        功能：点击 LLM 聊天窗口中生成的图片后，以全屏方式查看大图，
+              点击遮罩或按 ESC 关闭。图片拖拽到画布请直接在聊天窗口内操作。
+        对应组件：js/components/LlmChat.js
+    -->
+    <div class="llm-image-lightbox" id="llmImageLightbox">
+        <img id="llmLightboxImg" src="" alt="放大图片">
+        <video id="llmLightboxVideo" controls style="display: none;"></video>
+    </div>
+
+    <!--
+        ==================== 左下角视图控制区 ====================
+        功能：
+        - 适应屏幕：将所有图片缩放到适合窗口大小并居中
+        - 当前缩放比例显示
+    -->
+    <div class="viewport-controls">
+        <button class="fit-btn" id="fitBtn" title="适应屏幕">⤢ 适应屏幕</button>
+        <div class="zoom-indicator" id="zoomIndicator">100%</div>
+    </div>
+
+    <!--
+        ==================== JavaScript 脚本引用区域 ====================
+        所有脚本按依赖顺序加载：
+
+        1. 基础配置
+           js/config.js：全局配置和工具函数。
+
+        2. 画布核心模块
+           js/canvas/Viewport.js        视口变换（缩放、平移、坐标转换）
+           js/canvas/ImageManager.js    图片数据管理与命中检测
+           js/canvas/CanvasRenderer.js  画布渲染（图片、边框、尺寸标签）
+           js/canvas/CanvasHitTester.js 画布命中检测与光标决策（纯几何计算）
+           js/canvas/CanvasInteraction.js  鼠标 / 键盘交互（拖拽、框选、删除、连线）
+           js/canvas/CanvasConnections.js  图片连线管理（端口、贝塞尔连线、命中检测）
+           js/canvas/CanvasClipboard.js 剪贴板、文件拖放、粘贴图片
+           js/canvas/Canvas.js          画布主类，组合以上模块
+
+        3. 后端通信
+           js/api/LumenSocket.js        WebSocket 客户端，接收 ComfyUI 生成结果
+
+        4. 右侧面板组件
+           js/components/PromptInputManager.js  提示词输入管理
+           js/components/WorkflowManager.js     工作流 CRUD
+           js/components/PromptAutocomplete.js  提示词自动补全
+           js/components/LlmLightbox.js         LLM 图片灯箱
+           js/components/LlmAttachments.js      LLM 待发送图片附件
+           js/components/LlmSizePicker.js       LLM 比例与分辨率选择面板
+           js/components/LlmImageDrag.js        LLM 图片拖到画布
+           js/components/LlmChat.js             LLM 聊天窗口
+           js/components/LlmSystemPrompt.js     系统提示词管理（弹窗与启用状态）
+           js/components/PromptPanel.js         右侧面板主组件
+
+        5. 图片工具栏与视图控制
+           js/components/UpscaleManager.js      高清放大管理
+           js/components/ImageToolbar.js        图片选中工具栏
+           js/components/Controls.js            左下角视图控制
+
+        6. 文件菜单与存档
+           js/components/SaveManager.js         存档管理
+
+        7. 设置界面
+           js/components/settings/*.js          各分类面板（通用 / API / 抠图模型）
+           js/components/SettingsManager.js     设置弹窗外壳与分类调度
+
+        8. 生成反馈动画
+           js/components/GenerationFeedback.js  生成中的占位动画
+
+        9. 画布实时保存
+           js/components/save/CanvasChangeWatcher.js  共享变更捕获器（hook draw + 全局事件）
+           js/components/save/RealtimeSaveManager.js  实时保存到本地磁盘 data/autosave/（增量），F5 后静默恢复
+
+        10. 应用入口
+           js/app.js                            初始化所有组件并建立连接
+    -->
+    <script defer src="js/config.js"></script>
+    <!-- 节点类型注册表：source 常量与类型谓词的唯一出处（画布各层共用） -->
+    <script defer src="js/utils/NodeTypes.js"></script>
+    <script defer src="js/utils/AssetFolderStore.js"></script>
+    <!-- 提示词词典共享单例：加载/IndexedDB 缓存/搜索索引，补全组件共用一份数据 -->
+    <script defer src="js/utils/PromptDictStore.js"></script>
+    <script defer src="js/canvas/Viewport.js"></script>
+    <script defer src="js/canvas/ImageManager.js"></script>
+    <script defer src="js/canvas/CanvasConnections.js"></script>
+    <!-- 节点文本镜像层（@引用高亮 + 自绘光标），PromptNode/TextNode 共用 -->
+    <script defer src="js/canvas/NodeTextMirror.js"></script>
+    <!-- 节点本体统一放在 js/canvas/nodes/ 下，共享运行时（NodeTextMirror）在外层 -->
+    <script defer src="js/canvas/nodes/BaseCanvasNode.js"></script>
+    <script defer src="js/canvas/nodes/PromptSkillBar.js"></script>
+    <script defer src="js/canvas/nodes/PromptNode.js"></script>
+    <script defer src="js/canvas/nodes/TextNode.js"></script>
+    <!-- 生图节点的提示词/参考图链路收集模块（ImageGenNode 依赖，需先加载） -->
+    <script defer src="js/utils/ImagePipeline.js"></script>
+    <!-- Comfy 工作流参数扫描与覆盖表编译（ComfyGenNode/面板参数区共用） -->
+    <script defer src="js/utils/ComfyParamScanner.js"></script>
+    <!-- 提示词段合并（节点链/面板双正面框共用，拼接处自动补逗号区分中英文） -->
+    <script defer src="js/utils/PromptMerge.js"></script>
+    <script defer src="js/canvas/nodes/ImageGenNode.js"></script>
+    <!-- Comfy 动态参数行控制器：画布 Comfy 生图节点与右侧面板共用 -->
+    <script defer src="js/components/ComfyParamRows.js"></script>
+    <!-- 数量步进器行为层：节点生成按钮旁与面板运行按钮旁共用 -->
+    <script defer src="js/components/CountStepper.js"></script>
+    <script defer src="js/canvas/nodes/ComfyGenNode.js"></script>
+    <!-- LoRA 节点：串在提示词链路中的可堆叠 LoRA 组合（依赖基类与 NodeTypes） -->
+    <script defer src="js/canvas/nodes/LoraNode.js"></script>
+    <!-- 图片显示代理缓存：CanvasRenderer 构造时实例化，需先于其加载 -->
+    <script defer src="js/canvas/ImageProxyCache.js"></script>
+    <script defer src="js/canvas/CanvasRenderer.js"></script>
+    <script defer src="js/canvas/CanvasHitTester.js"></script>
+    <script defer src="js/canvas/CanvasInteraction.js"></script>
+    <script defer src="js/canvas/CanvasClipboard.js"></script>
+    <script defer src="js/canvas/CanvasContextMenu.js"></script>
+    <script defer src="js/canvas/CanvasVideoManager.js"></script>
+    <script defer src="js/components/AssetLibrary.js"></script>
+    <script defer src="js/canvas/Canvas.js"></script>
+    <script defer src="js/api/LumenSocket.js"></script>
+    <script defer src="js/components/PromptInputManager.js"></script>
+    <script defer src="js/components/WorkflowManager.js"></script>
+    <script defer src="js/components/PromptAutocomplete.js"></script>
+    <script defer src="js/components/LlmLightbox.js"></script>
+    <script defer src="js/components/LlmAttachments.js"></script>
+    <script defer src="js/utils/llmResolution.js"></script>
+    <script defer src="js/utils/llmQuality.js"></script>
+    <script defer src="js/components/LlmSizePicker.js"></script>
+    <script defer src="js/components/LlmImageDrag.js"></script>
+    <script defer src="js/components/LlmVideoGen.js"></script>
+    <script defer src="js/components/LlmPiAgent.js"></script>
+    <script defer src="js/components/LumenDropdown.js"></script>
+    <script defer src="js/components/LlmChat.js"></script>
+    <script defer src="js/components/LlmSystemPrompt.js"></script>
+    <script defer src="js/components/PanelThumbnailManager.js"></script>
+    <script defer src="js/components/PanelComfyRunner.js"></script>
+    <script defer src="js/components/PromptPanel.js"></script>
+    <script defer src="js/components/UpscaleManager.js"></script>
+    <script defer src="js/components/ImageToolbar.js"></script>
+    <script defer src="js/components/SaveTagDialog.js"></script>
+    <script defer src="js/components/TagDetailDialog.js"></script>
+    <script defer src="js/components/TagReferenceSlots.js"></script>
+    <script defer src="js/components/SideToolbar.js"></script>
+    <script defer src="js/components/Controls.js"></script>
+    <script defer src="js/components/NewCanvasManager.js"></script>
+    <!-- 存档三件套需先于 SaveManager 加载：SaveManager 构造时会实例化它们 -->
+    <script defer src="js/components/save/ProjectSerializer.js"></script>
+    <script defer src="js/components/save/SaveModal.js"></script>
+    <script defer src="js/components/SaveManager.js"></script>
+    <script defer src="js/components/RecipeManager.js"></script>
+    <!-- 设置分类面板需先于 SettingsManager 加载：SettingsManager 构造时会实例化它们 -->
+    <script defer src="js/components/settings/SettingsGeneralPanel.js"></script>
+    <script defer src="js/components/settings/SettingsApiPanel.js"></script>
+    <script defer src="js/components/settings/SettingsRembgPanel.js"></script>
+    <script defer src="js/components/SettingsManager.js"></script>
+    <script defer src="js/components/PlaceholderManager.js"></script>
+    <script defer src="js/components/GenerationFeedback.js"></script>
+    <!-- 画布实时保存：依赖 SaveManager.serializer，变更捕获器需先于消费者加载 -->
+    <script defer src="js/components/save/CanvasChangeWatcher.js"></script>
+    <script defer src="js/components/save/RealtimeSaveManager.js"></script>
+    <script defer src="js/app.js"></script>
+</body>
+</html>

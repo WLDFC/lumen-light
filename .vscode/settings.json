@@ -1,0 +1,11 @@
+{
+    "editor.fontSize": 17,
+    "accessibility.signals.taskCompleted": {
+        "sound": "on"
+    },
+    "accessibility.signals.chatUserActionRequired": {
+        "sound": "on"
+    },
+    "chat.editor.fontSize": 14,
+    "chat.fontSize": 20
+}

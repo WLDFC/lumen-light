@@ -1,0 +1,57 @@
+/**
+ * ==========================================================================
+ * LumenLight 左侧工具栏样式
+ * 作用：定义画布左侧垂直工具栏（60×200、圆角、深色背景 #1b1c21）的外观，
+ *       以及工具栏内图标按钮的排列与 hover 高亮效果。
+ * 对应组件：js/components/SideToolbar.js
+ * ==========================================================================
+ */
+
+/* ==================== 工具栏容器 ==================== */
+/* 固定定位在画布左侧、垂直居中，距左边缘 6px */
+.side-toolbar {
+    position: fixed;
+    left: 6px;                     /* 距离左边缘 6 像素 */
+    top: 50%;                      /* 垂直居中 */
+    transform: translateY(-50%);   /* 配合 top:50% 实现垂直居中 */
+    width: 48px;                   /* 宽度 48 像素 */
+    height: 160px;                 /* 高度 160 像素 */
+    box-sizing: border-box;        /* 让 padding 计入 60×200 尺寸内 */
+    background-color: rgba(27, 28, 33, 0.80); /* 深色背景，透明度与图片工具栏一致 */
+    backdrop-filter: blur(10px);    /* 毛玻璃效果，与图片工具栏一致 */
+    -webkit-backdrop-filter: blur(10px); /* Safari/Chrome 兼容前缀 */
+    border: none;                  /* 无描边 */
+    border-radius: 12px;           /* 圆角 */
+    display: flex;
+    flex-direction: column;        /* 图标垂直排列 */
+    align-items: center;           /* 图标水平居中 */
+    gap: 4px;                      /* 图标之间的间距 */
+    padding: 7px 0;                /* 上下内边距，使首个图标不贴边 */
+    z-index: 1100;                 /* 层级：低于文件菜单(1200)，高于画布 */
+}
+
+/* ==================== 工具栏图标按钮 ==================== */
+.side-toolbar-btn {
+    width: 37px;                   /* 按钮宽度（整体缩小） */
+    height: 37px;                  /* 按钮高度 */
+    flex-shrink: 0;                /* 防止按钮在列布局中被压缩 */
+    border: none;                  /* 无描边 */
+    border-radius: 9px;            /* 按钮圆角 */
+    background: transparent;       /* 默认透明背景 */
+    color: #ffffff;                /* 白色线条图标 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.15s ease; /* 平滑的 hover 过渡 */
+}
+
+/* hover 高亮：背景微亮，提示可点击 */
+.side-toolbar-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 按下时反馈：稍微更亮一些 */
+.side-toolbar-btn:active {
+    background-color: rgba(255, 255, 255, 0.18);
+}

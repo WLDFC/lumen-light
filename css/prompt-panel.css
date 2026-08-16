@@ -1,0 +1,813 @@
+/**
+ * ==========================================================================
+ * LumenLight 提示词面板样式
+ * 作用：定义右上角提示词面板的样式，包括触发按钮、可拖拽面板容器、
+ *       头部区域、提示词输入框、发送按钮以及图片缩略图区域。
+ *       工作流管理区域样式已拆分至 workflow-manager.css。
+ * 当前默认宽度：420px（可通过拖拽左边框调整，范围 260px-500px）
+ * ==========================================================================
+ */
+
+/* ==================== 顶栏触发按钮 ==================== */
+
+/* 打开/关闭提示词面板的圆形按钮，位于顶栏右段，由 flex 布局定位 */
+.prompt-panel-btn {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;       /* 顶栏已提供底色，按钮本身透明 */
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    transition: background 0.2s ease, opacity 0.3s ease;
+}
+
+/* 触发按钮悬停效果 */
+.prompt-panel-btn:hover {
+    background: #3b82f6;
+    color: white;
+}
+
+/* 面板打开时隐藏触发按钮 */
+.prompt-panel-btn.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* ==================== 提示词面板容器 ==================== */
+
+/* 主面板容器，fixed 定位在右侧 */
+.prompt-panel-container {
+    position: fixed;
+    top: 5px;                      /* 上边距 5px */
+    right: 5px;                    /* 右边距 5px */
+    bottom: 5px;                   /* 下边距 5px */
+    width: 480px;                  /* 默认宽度 */
+    min-width: 450px;              /* 最小宽度 */
+    max-width: 700px;              /* 最大宽度 */
+    z-index: 999;
+    border-radius: 12px;           /* 四角圆角 */
+    background: rgba(27, 28, 33, 1);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(128, 128, 128, 0.5);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);  /* 轻微投影 */
+    display: flex;
+    flex-direction: column;
+    /* 初始隐藏状态 */
+    transform: translateX(calc(100% + 20px));
+    opacity: 0;
+    visibility: hidden;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    /* 移除 CSS resize，改用 JS 实现左边框拖拽 */
+    overflow: hidden;              /* 防止内容溢出 */
+}
+
+/* 面板显示状态 */
+.prompt-panel-container.show {
+    transform: translateX(0);
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ==================== 左边框拖拽条 ==================== */
+
+/* 可拖拽调整面板宽度的竖条 */
+.prompt-resize-handle {
+    position: absolute;
+    left: 0;                       /* 贴在左边 */
+    top: 0;
+    bottom: 0;
+    width: 6px;                    /* 拖拽区域宽度 */
+    cursor: ew-resize;             /* 左右拖拽光标 */
+    z-index: 100;                  /* 确保在最上层 */
+    background: transparent;       /* 默认透明 */
+    transition: background 0.2s;
+}
+
+/* 悬停或拖拽时显示蓝色提示条 */
+.prompt-resize-handle:hover,
+.prompt-resize-handle.dragging {
+    background: rgba(59, 130, 246, 0.5);  /* 半透明蓝色 */
+    width: 4px;
+    box-shadow: 2px 0 8px rgba(59, 130, 246, 0.3);
+}
+
+/* ==================== 面板头部 ==================== */
+
+/* 面板头部区域 */
+.prompt-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 20px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 12px 12px 0 0;
+    flex-shrink: 0;
+    position: relative;
+    margin-left: 6px;              /* 给左边拖拽条留空间 */
+}
+
+/* 模式切换下拉框：幽灵下拉按钮（无边框，文字 + 箭头一体，
+   样式对齐提示词节点技能栏触发器 .prompt-skill-trigger）。
+   去掉原生 select 外观，箭头用内联 SVG 背景实现，点击弹原生下拉。
+   宽度由 PromptPanel._syncModeWidth 按当前选中项文字实时测定
+   （原生 select 默认按最宽 option 撑宽，短文字时箭头会离得太远） */
+.prompt-mode-selector {
+    flex: none;
+    width: auto;
+    margin-right: 10px;
+    padding: 7px 26px 7px 12px;      /* 右侧 26px 为箭头区 */
+    border: none;
+    border-radius: 6px;
+    background-color: transparent;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.6)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 12px 12px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: background-color 0.12s ease;
+}
+
+/* 悬停：半透明白叠加（与技能触发器同款反馈，不换底色） */
+.prompt-mode-selector:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 下拉框选项文字颜色 */
+.prompt-mode-selector option {
+    background: #0f0f12;
+    color: #ffffff;
+}
+
+/* 下拉框悬停/聚焦 */
+.prompt-mode-selector:hover,
+.prompt-mode-selector:focus {
+    border-color: #3b82f6;
+}
+
+/* ==================== ComfyUI 连接状态指示灯 ==================== */
+
+/* 连接状态指示器容器 */
+.comfy-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    font-size: 11px;
+    margin-right: 40px;
+    transition: all 0.3s ease;
+}
+
+/* 状态圆点 */
+.comfy-status-indicator .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;          /* 默认灰色 */
+    transition: all 0.3s ease;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+/* 状态文字 */
+.comfy-status-indicator .status-text {
+    color: #9ca3af;
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+/* 已连接状态：绿色 */
+.comfy-status-indicator.connected .status-dot {
+    background: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+    animation: pulse-green 2s infinite;
+}
+
+.comfy-status-indicator.connected .status-text {
+    color: #22c55e;
+}
+
+/* 未连接状态：红色 */
+.comfy-status-indicator.disconnected .status-dot {
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+.comfy-status-indicator.disconnected .status-text {
+    color: #ef4444;
+}
+
+/* 绿色脉冲动画 */
+@keyframes pulse-green {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}
+
+/* ==================== 关闭按钮 ==================== */
+
+/* 面板右上角收起按钮：默认无边框透明（与旁边的幽灵下拉同款），
+   悬停时才浮现灰色圆形高亮 */
+.prompt-close-btn {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+/* 收起按钮悬停：浮现灰色圆形（半透明白叠加） */
+.prompt-close-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ==================== 面板内容区 ==================== */
+
+/* 面板主内容区 */
+.prompt-panel-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 20px 20px;       /* 顶部收紧，内容整体上移贴近头部 */
+    padding-left: 26px;            /* 左边多加一点空间，避开拖拽条 */
+    gap: 16px;
+    overflow-y: auto;
+    border-radius: 0 0 12px 12px;
+}
+
+/* 内容区隐藏状态 */
+.prompt-panel-content.hidden {
+    display: none;
+}
+
+/* ==================== 输入框包装器 ==================== */
+
+/* 提示词输入框容器 */
+.prompt-input-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* ==================== 输入框标题和输入框 ==================== */
+
+/* 输入框标题 */
+.prompt-input-wrap label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #ffffff;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* 提示词输入框 */
+.prompt-input-wrap textarea {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(15, 15, 18, 1);
+    color: #ffffff;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: none;
+    box-sizing: border-box;
+}
+
+/* 输入框聚焦 */
+.prompt-input-wrap textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+/* ==================== 可折叠面板（负面提示词） ==================== */
+
+/* 可折叠容器 */
+.prompt-input-wrap.collapsible {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+/* 折叠面板标题栏 */
+.collapsible-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+    user-select: none;
+}
+
+.collapsible-header:hover {
+    background: rgba(0, 0, 0, 0.25);
+    border-color: rgba(128, 128, 128, 0.4);
+}
+
+/* 折叠/展开按钮 */
+.collapse-toggle {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: #ffffff;
+    font-size: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.collapse-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+/* 折叠面板内容体 */
+.collapsible-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+    max-height: 300px;
+    opacity: 1;
+    margin-top: 8px;
+    transition: max-height 0.25s ease, opacity 0.25s ease, margin-top 0.25s ease;
+}
+
+/* 折叠状态：隐藏内容体 */
+.prompt-input-wrap.collapsible.collapsed .collapsible-body {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+}
+
+/* 折叠状态：标题栏略微变灰，提示用户处于折叠状态 */
+.prompt-input-wrap.collapsible.collapsed .collapsible-header {
+    opacity: 0.7;
+}
+
+.prompt-input-wrap.collapsible.collapsed .collapsible-header:hover {
+    opacity: 1;
+}
+
+/* ==================== 发送按钮 ==================== */
+
+/* 发送提示词按钮 */
+.prompt-send-btn {
+    margin-top: auto;
+    margin-bottom: 10px;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    background: #3b82f6;
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+/* 发送按钮悬停 */
+.prompt-send-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* ==================== 图片缩略图区域 ==================== */
+
+/* 缩略图容器（与各提示词框的间距统一交给内容区的 gap: 16px） */
+.image-thumbnails {
+    display: flex;
+    gap: 6px;
+}
+
+/* 单个缩略图槽位 */
+.thumbnail-slot {
+    width: 50px;
+    height: 50px;
+    border-radius: 6px;
+    border: 2px dashed rgba(128, 128, 128, 0.4);
+    background: rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    overflow: hidden;
+}
+
+/* 缩略图槽位悬停 */
+.thumbnail-slot:hover {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* 已有图片的槽位 */
+.thumbnail-slot.has-image {
+    border-style: solid;
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+/* 缩略图占位符 */
+.thumbnail-placeholder {
+    font-size: 20px;
+    color: rgba(128, 128, 128, 0.6);
+    font-weight: 300;
+    user-select: none;
+}
+
+/* 缩略图图片 */
+.thumbnail-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 4px;
+}
+
+/* 删除缩略图按钮 */
+.thumbnail-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.9);
+    border: none;
+    color: white;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+/* 悬停槽位时显示删除按钮 */
+.thumbnail-slot:hover .thumbnail-remove {
+    opacity: 1;
+}
+
+/* 删除按钮悬停 */
+.thumbnail-remove:hover {
+    background: rgba(239, 68, 68, 1);
+}
+
+
+/* ==================== Comfy 动态参数区 ==================== */
+/* 与画布 Comfy 生图节点共用 ComfyParamRows 控制器渲染的参数行
+   （comfy-param-* / comfy-* 系类名）。文字与控件规格对齐本面板的
+   comfy 模式（标签/控件 12px，同 .workflow-selector 一档），
+   在 #comfyContent 作用域内定义，不影响画布节点的 --ns 体系样式 */
+#comfyContent .comfy-params {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* 单行配置项：标签在上，控件在下（与画布节点同构） */
+#comfyContent .comfy-param-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#comfyContent .comfy-param-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #ffffff;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    user-select: none;
+}
+
+/* 下拉与数值输入：对齐 .workflow-selector 的凹陷控件规格 */
+#comfyContent .comfy-model-select,
+#comfyContent .comfy-sampler-select,
+#comfyContent .comfy-count-select,
+#comfyContent .comfy-num-input {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.2);
+    color: #ffffff;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    cursor: pointer;
+}
+
+#comfyContent .comfy-num-input {
+    cursor: text;
+    caret-color: #6cebff;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+#comfyContent .comfy-model-select:focus,
+#comfyContent .comfy-sampler-select:focus,
+#comfyContent .comfy-count-select:focus,
+#comfyContent .comfy-num-input:focus {
+    border-color: #3b82f6;
+}
+
+/* 原生 spinner 在深色主题下过亮，隐藏后用键盘/滚轮调值 */
+#comfyContent .comfy-num-input::-webkit-outer-spin-button,
+#comfyContent .comfy-num-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#comfyContent .comfy-model-select option,
+#comfyContent .comfy-sampler-select option,
+#comfyContent .comfy-count-select option {
+    background: #0f0f12;
+    color: #ffffff;
+}
+
+/* 参数合并行：两组「标签+输入框」左右并排各占一半 */
+#comfyContent .comfy-param-pair {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+#comfyContent .comfy-param-pair > .comfy-param-row {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* 尺寸行：宽 × 高 同行 */
+#comfyContent .comfy-size-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#comfyContent .comfy-size-x {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* LoRA 行：文件下拉 + 启用勾选框 */
+#comfyContent .comfy-lora-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#comfyContent .comfy-lora-row .comfy-model-select {
+    flex: 1;
+    min-width: 0;
+}
+
+#comfyContent .comfy-lora-enable {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* 未启用的 LoRA 下拉半透明置灰（与画布节点一致） */
+#comfyContent .comfy-model-select[data-lora-off] {
+    opacity: 0.4;
+}
+
+/* LoRA 叠加区：可折叠的堆叠条目（loraStack 模式，面板独有）。
+   折叠结构复用提示词框的 .collapsible-header / .collapsible-body /
+   .collapse-toggle，展开态的显隐规则在本作用域补充定义 */
+#comfyContent .comfy-lorastack {
+    display: flex;
+    flex-direction: column;
+}
+
+#comfyContent .comfy-lorastack .collapsible-body {
+    max-height: 45vh;
+    overflow-y: auto;
+}
+
+#comfyContent .comfy-lorastack.collapsed .collapsible-body {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    overflow-y: hidden;
+}
+
+#comfyContent .comfy-lorastack.collapsed .collapsible-header {
+    opacity: 0.7;
+}
+
+#comfyContent .comfy-lorastack.collapsed .collapsible-header:hover {
+    opacity: 1;
+}
+
+/* 单个叠加条目：凹陷卡片，容纳「lora 文件下拉」+「强度合并行」 */
+#comfyContent .comfy-lorastack-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+#comfyContent .comfy-lorastack-entry + .comfy-lorastack-entry {
+    margin-top: 8px;
+}
+
+/* 条目头行：文件下拉占满 + 右侧删除按钮 */
+#comfyContent .comfy-lorastack-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#comfyContent .comfy-lorastack-head .comfy-model-select {
+    flex: 1;
+    min-width: 0;
+}
+
+#comfyContent .comfy-lorastack-remove {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.2);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#comfyContent .comfy-lorastack-remove:hover {
+    border-color: rgba(239, 68, 68, 0.6);
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+/* 空列表提示文字 */
+#comfyContent .comfy-lorastack-empty {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    padding: 2px 0 4px;
+    line-height: 1.5;
+}
+
+/* 添加按钮：虚线边框弱化样式，整行宽度 */
+#comfyContent .comfy-lorastack-add {
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px dashed rgba(128, 128, 128, 0.4);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-top: 8px;
+}
+
+#comfyContent .comfy-lorastack-add:hover {
+    border-color: #3b82f6;
+    color: #ffffff;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+
+/* ==================== 数量步进器（运行按钮左侧） ==================== */
+/* 运行行：数量步进器 + 运行按钮同排；原按钮的沉底外边距移到行上 */
+#comfyContent .prompt-send-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    margin-top: auto;
+    margin-bottom: 10px;
+}
+
+#comfyContent .prompt-send-row .prompt-send-btn {
+    flex: 1;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* 步进器：数值框 + 右侧上下箭头列（工作流含批次输入时显示），
+   深色凹陷规格与工作流下拉一致 */
+#comfyContent .count-stepper {
+    display: flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+}
+
+#comfyContent .count-stepper[hidden] {
+    display: none;
+}
+
+#comfyContent .count-stepper-input {
+    width: 40px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #ffffff;
+    font-size: 12px;
+    font-family: inherit;
+    text-align: center;
+    padding: 0;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+#comfyContent .count-stepper-input::-webkit-outer-spin-button,
+#comfyContent .count-stepper-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#comfyContent .count-stepper-arrows {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    padding: 0 3px;
+    border-left: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+#comfyContent .count-stepper-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 13px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+#comfyContent .count-stepper-arrow:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+#comfyContent .count-stepper-arrow:active {
+    background: rgba(255, 255, 255, 0.18);
+}

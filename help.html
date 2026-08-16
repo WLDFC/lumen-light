@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>流光 · 使用教程</title>
+    <link rel="stylesheet" href="css/help.css">
+</head>
+<body>
+    <header class="help-header">
+        <span class="help-logo">流光 · 使用教程</span>
+    </header>
+
+    <div class="help-layout">
+        <aside class="help-toc">
+            <p class="toc-title">目录</p>
+            <!-- 目录由 js/help.js 从正文 h2 自动生成 -->
+        </aside>
+
+        <main class="help-content">
+            <h1>流光（LumenLight）使用教程</h1>
+            <p>流光是一个 <strong>AI 绘画工作台</strong>：无限画布 + ComfyUI 工作流 + LLM 对话绘图。
+            本教程从启动到进阶，覆盖画布的全部功能。按左侧目录跳转阅读。</p>
+            <div class="help-tip">本页通过左上角菜单栏的 <strong>☰ → 帮助</strong> 打开，随时可以回来查阅。</div>
+
+            <!-- ==================== 1 ==================== -->
+            <h2 data-toc="1 · 快速开始">1 · 快速开始</h2>
+            <h3>启动</h3>
+            <ol>
+                <li><strong>绿色版用户</strong>：解压后双击 <code>start-server.bat</code> 即可——
+                项目已内置 Node 运行时（<code>runtime/node.exe</code>）和全部依赖，
+                无需安装任何环境；</li>
+                <li>开发者：首次使用先安装依赖（<code>npm install</code>），再启动后端
+                （<code>node server.js</code>，默认端口 8080）；</li>
+                <li>浏览器打开 <code>http://localhost:8080</code>，即可进入画布。</li>
+            </ol>
+            <h3>连接 ComfyUI</h3>
+            <p>流光的 Comfy 生图能力依赖本地 ComfyUI（默认地址 <code>127.0.0.1:8188</code>，
+            可用环境变量 <code>COMFY_API_URL</code> 修改）。启动 ComfyUI 后，打开右侧面板，
+            头部的<strong>状态灯</strong>变绿即表示连接正常。</p>
+            <div class="help-tip">不使用 ComfyUI 也可以工作：LLM 生图节点与右侧 LLM 对话模式只依赖 API 配置（见「设置」一章）。</div>
+
+            <!-- ==================== 2 ==================== -->
+            <h2 data-toc="2 · 界面总览">2 · 界面总览</h2>
+            <figure class="help-figure">
+                <img src="image/help/01-overview.png" alt="界面总览">
+                <figcaption>画布 + 右侧面板（Comfy 模式）</figcaption>
+            </figure>
+            <ul>
+                <li><strong>左上角 ☰ 文件菜单</strong>：打开画布 / 新建画布 / 保存画布 / 另存为 / 设置 / 帮助；</li>
+                <li><strong>顶栏</strong>：画布名称、自动保存时间、右侧「提示词」按钮开关右侧面板；</li>
+                <li><strong>无限画布</strong>：所有图片与节点的工作区；</li>
+                <li><strong>右侧面板</strong>：可在「Comfy 提示词」与「LLM 对话框」两种模式间切换；</li>
+                <li><strong>左下角视图控制</strong>：自适应屏幕按钮 + 当前缩放百分比。</li>
+            </ul>
+            <figure class="help-figure">
+                <img src="image/help/02-file-menu.png" alt="文件菜单">
+                <figcaption>左上角 ☰ 文件菜单</figcaption>
+            </figure>
+
+            <!-- ==================== 3 ==================== -->
+            <h2 data-toc="3 · 画布基础操作">3 · 画布基础操作</h2>
+            <table>
+                <tr><th>操作</th><th>方式</th></tr>
+                <tr><td>缩放画布</td><td>鼠标滚轮（或左下角百分比旁的自适应屏幕）</td></tr>
+                <tr><td>平移画布</td><td>按住 <code>空格</code> 拖动，或直接拖动空白处</td></tr>
+                <tr><td>上传图片</td><td>把图片文件<strong>拖入画布</strong>，或复制截图后 <code>Ctrl+V</code> 直接粘贴</td></tr>
+                <tr><td>选择</td><td>点击对象；空白处拖动框选多个对象</td></tr>
+                <tr><td>移动</td><td>拖动已选中的对象</td></tr>
+                <tr><td>复制 / 剪切</td><td><code>Ctrl+C</code> / <code>Ctrl+X</code>（对选中的图片与节点生效）</td></tr>
+                <tr><td>粘贴</td><td><code>Ctrl+V</code>：剪贴板里有外部图片时优先粘贴图片，否则粘贴内部复制的对象</td></tr>
+                <tr><td>删除</td><td><code>Delete</code> 删除选中对象（节点连线会一并清理）</td></tr>
+                <tr><td>添加节点</td><td>画布空白处<strong>右键</strong>，选择节点类型</td></tr>
+            </table>
+            <figure class="help-figure">
+                <img src="image/help/03-context-menu.png" alt="画布右键菜单">
+                <figcaption>右键菜单：提示词 / 生图 / Comfy 生图 / LoRA / 文本 五种节点</figcaption>
+            </figure>
+            <div class="help-tip">选中图片后会出现浮动工具栏，提供<strong>高清放大</strong>与<strong>AI 抠图</strong>入口（见第 11 章）。</div>
+
+            <!-- ==================== 4 ==================== -->
+            <h2 data-toc="4 · 提示词节点">4 · 提示词节点</h2>
+            <figure class="help-figure">
+                <img src="image/help/04-prompt-node.png" alt="提示词节点">
+                <figcaption>提示词节点：标题栏 + 输入区 + 技能栏 + 左右端口</figcaption>
+            </figure>
+            <p>提示词节点是画布上的可视化提示词容器。右键菜单创建后直接输入文字；
+            它有两个端口：<strong>左端口</strong>接收内容，<strong>右端口</strong>输出给下游。</p>
+            <h3>串联与合并</h3>
+            <p>多个提示词节点可以串联（A 的右端口连 B 的左端口），生图节点会沿链路把
+            所有节点文本合并为一条提示词，<strong>段间空行、拼接处自动补逗号</strong>
+            （区分中英文，详见第 8 章）。</p>
+            <h3>参考图与 @图片N 引用</h3>
+            <p>把画布图片连到提示词节点的左端口，节点顶部会出现<strong>参考图缩略图条</strong>，
+            每张图带序号徽标（①②③…），顺序即发送给生图 API 的参考图顺序。
+            点击缩略图会在光标处插入 <code>@图片N</code> 引用标记（正文中以青色高亮显示），
+            告诉模型这张图应该用在哪里。</p>
+
+            <!-- ==================== 5 ==================== -->
+            <h2 data-toc="5 · 技能系统">5 · 技能系统</h2>
+            <p>提示词节点底部有<strong>技能栏</strong>：左边下拉选择技能，右边圆形按钮执行。
+            技能会调用聊天模型处理节点文字（和连入的参考图），结果直接替换节点内容。</p>
+            <figure class="help-figure">
+                <img src="image/help/05-skill-menu.png" alt="技能下拉菜单">
+                <figcaption>技能下拉：内置技能 + 用户自定义技能</figcaption>
+            </figure>
+            <h3>内置技能</h3>
+            <ul>
+                <li><strong>优化提示词</strong>：扩写与补细节；</li>
+                <li><strong>反推图像</strong>：连线一张图，让模型反推出提示词。</li>
+            </ul>
+            <h3>自定义技能（data/skills/*.md）</h3>
+            <p>在项目的 <code>data/skills/</code> 文件夹里放一个 <code>.md</code> 文件，
+            <strong>刷新页面即生效</strong>，无需重启。文件名 = 技能 id。</p>
+            <p>文件由<strong>头文件（元数据）</strong>和<strong>正文（指令）</strong>组成：
+            头部用两行 <code>---</code> 包裹，正文就是发给模型的指令。</p>
+            <pre><code>---
+id: translate-en
+name: 翻译提示词
+icon: globe
+inputText: true
+inputImages: false
+---
+你是绘画提示词翻译专家。把用户发来的提示词翻译成英文，
+只输出翻译结果，不要任何解释。</code></pre>
+            <h3>头文件字段说明</h3>
+            <table>
+                <tr><th>字段</th><th>必填</th><th>说明</th></tr>
+                <tr><td><code>id</code></td><td>✓</td><td>唯一标识，仅字母/数字/下划线/连字符，与文件名一致</td></tr>
+                <tr><td><code>name</code></td><td>✓</td><td>技能下拉里显示的名称（最长 50 字）</td></tr>
+                <tr><td><code>icon</code></td><td></td><td>图标键名：<code>zap</code> <code>eye</code> <code>type</code> <code>star</code> <code>globe</code> <code>heart</code> <code>flag</code>，缺省 <code>star</code></td></tr>
+                <tr><td><code>inputText</code></td><td></td><td>是否把节点文字发给模型（默认 false）</td></tr>
+                <tr><td><code>inputImages</code></td><td></td><td>是否把连入节点的参考图发给模型（默认 false，可选输入）</td></tr>
+                <tr><td><code>requireImages</code></td><td></td><td>是否必须连线参考图（为 true 且没连线时拒绝执行）</td></tr>
+            </table>
+            <div class="help-tip">编写指令的建议：结尾加一句「只输出结果本身，不要解释」；
+            涉及图片时提醒模型「保留 @图片N 标记不要改动」，否则优化后的文本会与连线图片对不上号。
+            与内置技能同 id 时内置优先。</div>
+
+            <!-- ==================== 6 ==================== -->
+            <h2 data-toc="6 · 生图节点">6 · 生图节点</h2>
+            <p>生图节点没有右端口，只接收上游提示词。有两条平行链路：</p>
+            <h3>LLM 生图节点</h3>
+            <figure class="help-figure">
+                <img src="image/help/06-llm-node.png" alt="LLM 生图节点">
+                <figcaption>模型下拉 + 比例/分辨率 + 质量 + 数量</figcaption>
+            </figure>
+            <p>调用 <strong>API 生图模型</strong>（在设置里配置厂商与模型，见第 11 章）。
+            数量为 1-8 张，多张时<strong>并发请求</strong>，每张独立出图。</p>
+            <h3>Comfy 生图节点</h3>
+            <figure class="help-figure">
+                <img src="image/help/07-comfy-node.png" alt="Comfy 生图节点">
+                <figcaption>工作流下拉 + 动态参数区 + 数量步进器 + 生成按钮</figcaption>
+            </figure>
+            <p>选择一个 ComfyUI 工作流后，节点会<strong>自动扫描工作流 JSON</strong>，
+            把里面可调的参数渲染成表单：主模型、模板内嵌 LoRA（带启用开关）、
+            步数+CFG、采样器+降噪、尺寸、数量——<strong>工作流里有什么就显示什么</strong>。
+            生成时参数由后端注入工作流后提交 ComfyUI。</p>
+            <ul>
+                <li><strong>数量 = 独立任务数</strong>：数量 N 会向 ComfyUI 队列循环入队 N 个任务
+                （每个任务独立随机种子），<strong>跑完一张立刻回传落一张</strong>；</li>
+                <li>某张提交失败会自动中止剩余任务，已完成的不受影响；</li>
+                <li>超过 100 张时会弹窗确认，防止误操作刷爆队列；</li>
+                <li>生成结果按占位图先进先出逐张替换，占位图位置即出图位置。</li>
+            </ul>
+            <div class="help-tip">画布节点的正面提示词来自<strong>连入的提示词节点链</strong>；
+            负面提示词固定取右侧面板负面框的内容。</div>
+
+            <!-- ==================== 7 ==================== -->
+            <h2 data-toc="7 · LoRA 节点">7 · LoRA 节点</h2>
+            <p>LoRA 节点串在提示词链路中（提示词 → LoRA → Comfy 生图），可以不断
+            「+ 添加 LoRA」堆叠多个条目，每条包含：</p>
+            <ul>
+                <li><strong>文件下拉</strong>：来自 ComfyUI 的 lora 清单；<strong>选空 = 此条不生效</strong>；</li>
+                <li><strong>模型强度 / CLIP 强度</strong>：数值输入框。</li>
+            </ul>
+            <p>提交时由后端以「图拼接」方式动态注入，<strong>追加在工作流模板内嵌 LoRA
+            之后</strong>（叠加语义）。注意 LoRA 只对 Comfy 生图链路生效，LLM 生图不涉及。</p>
+
+            <!-- ==================== 8 ==================== -->
+            <h2 data-toc="8 · 提示词合并规则">8 · 提示词合并规则</h2>
+            <p>「多个提示词节点」与「面板双正面框」共用同一套合并规则：</p>
+            <ol>
+                <li>每段先<strong>去除首尾空白</strong>，空段剔除；</li>
+                <li>段与段之间用<strong>空行</strong>分隔；</li>
+                <li>拼接处<strong>自动补逗号</strong>，并区分中英文：</li>
+            </ol>
+            <table>
+                <tr><th>前段结尾</th><th>拼接处</th></tr>
+                <tr><td>已有 <code>，</code> 或 <code>,</code></td><td>不补</td></tr>
+                <tr><td>中文字符（如「……咖啡店」）</td><td>补全角 <code>，</code></td></tr>
+                <tr><td>英文/数字/符号（如 <code>...quality</code>）</td><td>补半角 <code>,</code></td></tr>
+            </table>
+            <p>例：框 1 = <code>masterpiece, best quality</code>，
+            框 2 = <code>1girl, coffee shop</code>，合并发送结果为：</p>
+            <pre><code>masterpiece, best quality,
+
+1girl, coffee shop</code></pre>
+            <div class="help-tip">用中文提示词的模型（Wan / Z-Image / Qwen 系编码器）可以直接写中文；
+            CLIP 架构的动漫模型请用英文 tag——敲中文后从补全下拉选英文词即可自动转换。</div>
+
+            <!-- ==================== 9 ==================== -->
+            <h2 data-toc="9 · 右侧面板">9 · 右侧面板</h2>
+            <h3>Comfy 模式</h3>
+            <figure class="help-figure">
+                <img src="image/help/08-panel-comfy.png" alt="面板 Comfy 模式">
+                <figcaption>双正面框 + 缩略图槽位 + 负面提示词 + 工作流 + 参数区 + 数量步进器</figcaption>
+            </figure>
+            <ul>
+                <li><strong>正面提示词 1 / 2</strong>：两个独立输入框，均可折叠（标题栏点击），
+                状态自动记忆。框 1 适合放质量/画风类长期提示词，框 2 放人物动作等内容。
+                运行时两框自动<strong>空行 + 补逗号</strong>合并（见第 8 章）；</li>
+                <li><strong>图片缩略图槽位</strong>：槽位数量跟随所选工作流里的取图节点数
+                （0-3 个，纯文生图工作流自动隐藏），点击上传、点 × 清除；
+                对应 ComfyUI Edit 类工作流的取图节点；</li>
+                <li><strong>负面提示词</strong>：默认折叠；</li>
+                <li><strong>工作流</strong>：下拉选择，选后下方出现动态参数区；</li>
+                <li><strong>数量步进器</strong>：运行按钮左侧，上下箭头步进或直接键入（1-9999），
+                超过 100 会弹窗确认。</li>
+            </ul>
+            <h3>LLM 对话模式</h3>
+            <figure class="help-figure">
+                <img src="image/help/09-panel-llm.png" alt="面板 LLM 对话模式">
+                <figcaption>LLM 对话：模型选择、多模态输入、图片预览</figcaption>
+            </figure>
+            <ul>
+                <li>选择对话模型（在设置的 API 页配置）后直接聊天；</li>
+                <li>支持<strong>图片附件</strong>多模态输入；对话生成的图片可<strong>拖回画布</strong>继续加工；</li>
+                <li>点击图片可打开<strong>灯箱</strong>全屏预览；</li>
+                <li>选择生图模型时会出现比例/分辨率选择面板。</li>
+            </ul>
+
+            <!-- ==================== 10 ==================== -->
+            <h2 data-toc="10 · 文件与存档">10 · 文件与存档</h2>
+            <ul>
+                <li><strong>保存画布 / 另存为</strong>：把当前画布（图片 + 节点 + 连线 + 提示词 + 视口）
+                存到 <code>save/存档名/</code> 目录；</li>
+                <li><strong>打开画布</strong>：从存档列表恢复；</li>
+                <li><strong>新建画布</strong>：清空当前画布与面板提示词（有确认框）；</li>
+                <li><strong>自动保存</strong>：画布内容变化时自动快照到浏览器（IndexedDB），
+                意外刷新后自动恢复；</li>
+                <li><strong>实时保存</strong>：同时把画布实时写入本地磁盘
+                <code>data/autosave/</code>，顶栏显示最近保存时间；
+                启动时若检测到磁盘上有未收尾的会话，会弹窗询问是否恢复。</li>
+            </ul>
+            <div class="help-tip">顶栏「已自动保存 HH:MM:SS」说明实时保存正常工作；
+            存档目录与自动保存互为双保险。</div>
+
+            <!-- ==================== 11 ==================== -->
+            <h2 data-toc="11 · 图像工具">11 · 图像工具</h2>
+            <p>点击画布上的图片会出现浮动工具栏，提供两个本地图像工具：</p>
+            <ul>
+                <li><strong>高清放大</strong>：调用本地 Real-ESRGAN（Vulkan GPU 加速），
+                放大结果落在画布上；</li>
+                <li><strong>AI 抠图</strong>：本地 RMBG-2.0 模型推理（onnxruntime），
+                去除背景；模型文件可在设置里下载管理。</li>
+            </ul>
+            <figure class="help-figure">
+                <img src="image/help/10-settings-general.png" alt="设置 - 通用">
+                <figcaption>设置：通用（缩放锚点 / 画布显示质量 / 提示词补全开关）</figcaption>
+            </figure>
+
+            <!-- ==================== 12 ==================== -->
+            <h2 data-toc="12 · 设置详解">12 · 设置详解</h2>
+            <h3>通用</h3>
+            <ul>
+                <li><strong>显示图片缩放锚点</strong>：关闭后四角锚点不绘制，但缩放功能保留；</li>
+                <li><strong>画布显示质量</strong>：缩小查看时绘制低分辨率副本提升性能
+                （放大/保存始终用原图）；</li>
+                <li><strong>提示词自动补全</strong>：开关画布节点与面板输入框的中文 tag 补全。</li>
+            </ul>
+            <h3>API</h3>
+            <figure class="help-figure">
+                <img src="image/help/11-settings-api.png" alt="设置 - API">
+                <figcaption>多厂商 API 配置与用途绑定</figcaption>
+            </figure>
+            <p>内置提供商可直接填 Key；也支持添加自定义 OpenAI 兼容厂商（端点 + Key + 模型列表）。
+            配置好后按<strong>用途绑定</strong>模型：对话 / 生图各用哪个模型。</p>
+            <h3>抠图模型</h3>
+            <figure class="help-figure">
+                <img src="image/help/12-settings-rembg.png" alt="设置 - 抠图模型">
+                <figcaption>抠图模型下载 / 续传 / 删除</figcaption>
+            </figure>
+
+            <!-- ==================== 13 ==================== -->
+            <h2 data-toc="13 · 常见问题">13 · 常见问题</h2>
+            <table>
+                <tr><th>现象</th><th>处理</th></tr>
+                <tr><td>状态灯「未连接」</td><td>确认 ComfyUI 已启动且地址为 <code>127.0.0.1:8188</code>（自定义地址用环境变量 <code>COMFY_API_URL</code>）</td></tr>
+                <tr><td>模型下拉显示「不在清单」</td><td>该模型文件已被删除或改名——重新在清单里选择现存的模型，并建议重存一次工作流模板</td></tr>
+                <tr><td>运行提示「缺少提示词」</td><td>面板正面提示词为空，先填写；画布节点则需连入提示词节点</td></tr>
+                <tr><td>补全下拉没弹出</td><td>检查设置 → 通用 → 提示词自动补全是否开启；首次使用需加载词典（约 14MB，之后走本地缓存）</td></tr>
+                <tr><td>中文提示词出图效果差</td><td>CLIP 架构模型只认英文 tag——用补全或技能转英文；Wan / Z-Image / Qwen 系可直接中文</td></tr>
+                <tr><td>端口 8080 被占用</td><td>结束占用进程，或修改 <code>server.js</code> 的监听端口后重启</td></tr>
+                <tr><td>生成很久没动静</td><td>看 ComfyUI 界面的队列状态；大数量是逐任务排队，跑完一张落一张</td></tr>
+            </table>
+
+            <div class="help-tip">更多细节（依赖安装、目录结构）见项目根目录的
+            <code>README.md</code> 与 <code>依赖.txt</code>。</div>
+        </main>
+    </div>
+
+    <script src="js/help.js"></script>
+</body>
+</html>

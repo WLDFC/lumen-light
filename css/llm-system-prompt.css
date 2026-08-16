@@ -1,0 +1,258 @@
+/* ==========================================================================
+   LumenLight 系统提示词弹窗样式
+   对应组件：js/components/LlmSystemPrompt.js
+   色板遵循项目配色美学规范：底层 #0f0f12、面板 #1b1c21、强调 #3b82f6/#60a5fa
+   ========================================================================== */
+
+/* ---------- 面板头部的入口按钮 ----------
+   仅 LLM 对话框模式显示（Comfy 模式下由 JS 隐藏）；
+   收起按钮是绝对定位（right: 12px，宽 32px），这里右移 44px 让出位置避免重叠。
+   无边框无底色的纯线稿按钮（与收起按钮的轻量风格一致），
+   悬停按配色规范用半透明白叠加，不换底色 */
+.llm-system-prompt-btn {
+    flex-shrink: 0;
+    width: 32px;                     /* 与旁边收起按钮同级（32px 正圆） */
+    height: 32px;
+    margin-right: 48px;              /* 收起按钮占 right:12px 起 32px 宽，留 4px 间隙 */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: #fff;                     /* 图标纯白（skill 色板） */
+    cursor: pointer;
+    outline: none;
+    transition: color 0.15s, background 0.15s;
+}
+
+.llm-system-prompt-btn:hover {
+    color: #60a5fa;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.llm-system-prompt-btn:active {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* ---------- 弹窗遮罩与对话框 ---------- */
+.llm-sp-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.llm-sp-dialog {
+    width: 620px;
+    max-width: 92vw;
+    max-height: 86vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- 头部：标题 + 场景页签 + 关闭 ---------- */
+.llm-sp-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.llm-sp-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.llm-sp-tabs {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.llm-sp-tab {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.llm-sp-tab:hover {
+    color: #ffffff;
+}
+
+.llm-sp-tab.active {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+.llm-sp-close {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+}
+
+.llm-sp-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+/* ---------- 提示词列表 + 新建 ---------- */
+.llm-sp-toolbar {
+    display: flex;
+    gap: 8px;
+}
+
+.llm-sp-list {
+    flex: 1;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #0f0f12;
+    color: #ffffff;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+}
+
+.llm-sp-new {
+    flex-shrink: 0;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+}
+
+.llm-sp-new:hover {
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* ---------- 名称与内容编辑区 ---------- */
+.llm-sp-name {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #0f0f12;
+    color: #ffffff;
+    font-size: 13px;
+    outline: none;
+}
+
+.llm-sp-name:focus,
+.llm-sp-content:focus,
+.llm-sp-list:focus {
+    border-color: #3b82f6;
+}
+
+.llm-sp-content {
+    min-height: 300px;
+    padding: 10px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #0f0f12;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+}
+
+/* ---------- 启用勾选 ---------- */
+.llm-sp-enable {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    user-select: none;
+}
+
+.llm-sp-enable input {
+    accent-color: #3b82f6;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+.llm-sp-enable input:disabled {
+    cursor: not-allowed;
+}
+
+/* ---------- 底部操作区 ---------- */
+.llm-sp-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.llm-sp-hint {
+    flex: 1;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.llm-sp-footer button {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.llm-sp-footer button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.llm-sp-footer .llm-sp-delete {
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.llm-sp-footer .llm-sp-delete:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.llm-sp-footer .llm-sp-update:hover:not(:disabled),
+.llm-sp-footer .llm-sp-saveas:hover {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.5);
+}

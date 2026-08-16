@@ -1,0 +1,153 @@
+{
+  "602": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "808",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "负面词"
+    }
+  },
+  "604": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "808",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "763": {
+    "inputs": {
+      "seed": -1
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "随机种子"
+    }
+  },
+  "781": {
+    "inputs": {
+      "seed": [
+        "763",
+        0
+      ],
+      "steps": 30,
+      "cfg": 5,
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "806",
+        0
+      ],
+      "positive": [
+        "604",
+        0
+      ],
+      "negative": [
+        "602",
+        0
+      ],
+      "latent_image": [
+        "862",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "793": {
+    "inputs": {
+      "samples": [
+        "781",
+        0
+      ],
+      "vae": [
+        "807",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "806": {
+    "inputs": {
+      "unet_name": "anima\\miaomiaoHarem_anima14.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "807": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "808": {
+    "inputs": {
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "857": {
+    "inputs": {
+      "load_workflow": true,
+      "seed": 497245299764027,
+      "override_positive": "",
+      "override_negative": ""
+    },
+    "class_type": "LumenLoadWorkflow",
+    "_meta": {
+      "title": "💡 Load Workflow from Canvas"
+    }
+  },
+  "859": {
+    "inputs": {
+      "auto_send": true,
+      "lumen_target": "",
+      "images": [
+        "793",
+        0
+      ]
+    },
+    "class_type": "LumenSendImageRealtime",
+    "_meta": {
+      "title": "💡 To Canvas (Image)"
+    }
+  },
+  "862": {
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  }
+}

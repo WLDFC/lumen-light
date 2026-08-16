@@ -1,0 +1,431 @@
+/**
+ * 收藏详情弹窗样式（tag-detail-dialog.css）
+ *
+ * 作用：定义提示词收藏页的详情编辑弹窗（TagDetailDialog）的视觉样式，
+ *       左右分栏布局——左栏大图展示，右栏编辑面板（名字输入、模型
+ *       单选标签、参考图槽位、Copy 按钮、提示词多行编辑框、保存按钮）。
+ *       含参考图槽位子组件（TagReferenceSlots）的槽位与选图面板样式
+ *       （tag-ref- 前缀，槽位视觉沿用 comfy 提示词栏的上传框）。
+ *
+ * 配套文件：
+ *   js/components/TagDetailDialog.js   # 弹窗结构与交互逻辑
+ *   js/components/TagReferenceSlots.js # 参考图槽位子组件
+ *
+ * 层级关系：
+ *   遮罩 z-index 1500，高于收藏页（1200），低于灯箱（2000）——
+ *   弹窗内点击大图还能再打开灯箱看原生分辨率。
+ *
+ * 配色遵循项目深色主题色板：
+ *   面板背景 #1b1c21，图片区底 #0f0f12，
+ *   通用边框 rgba(128,128,128,0.3)，悬停叠加 rgba(255,255,255,0.1)，
+ *   主操作绿 #22c55e，删除红 #ef4444，槽位强调蓝 rgba(59,130,246,…)。
+ */
+
+/* 全屏遮罩：层级高于收藏页（1200），低于灯箱（2000）——
+   弹窗内点击大图还能再打开灯箱看原生分辨率 */
+.tag-detail-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    box-sizing: border-box;
+    background: rgba(15, 15, 18, 0.7);
+}
+
+.tag-detail-dialog.is-open {
+    display: flex;
+}
+
+/* 弹窗面板：左右分栏，近全屏（保留四周呼吸空间） */
+.tag-detail-panel {
+    position: relative;
+    display: flex;
+    width: min(1280px, 100%);
+    height: min(800px, 100%);
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* 右上角关闭按钮：圆形半透明 */
+.tag-detail-close-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.tag-detail-close-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+/* 左栏：大图展示区，深色底衬托图片 */
+.tag-detail-left {
+    flex: 1.6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 16px;
+    background: #0f0f12;
+}
+
+/* 大图：自适应缩放（不超过左栏尺寸），点击可打开灯箱看原图 */
+.tag-detail-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 6px;
+    cursor: zoom-in;
+}
+
+/* 右栏：编辑面板，固定宽度便于排版 */
+.tag-detail-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 20px;
+    border-left: 1px solid rgba(128, 128, 128, 0.2);
+    overflow-y: auto;            /* 长提示词时面板自身滚动 */
+}
+
+/* 模块分组间距：模型标签组与"参考图"标签之间拉开（8 gap + 12 = 20px），
+   使"名字 / 模型 / 参考图 / 提示词"四个模块有清晰的视觉分组 */
+.tag-detail-model-chips + .tag-detail-label {
+    margin-top: 12px;
+}
+
+/* 提示词标题行：左侧"提示词"文字 + 右侧 Copy 按钮；
+   与上方参考图槽位拉开同样距离（8 gap + 12 = 20px） */
+.tag-detail-prompt-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+}
+
+/* "名字" / "模型" / "提示词" 标签文字 */
+.tag-detail-label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* 名字输入框 */
+.tag-detail-name-input {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-sizing: border-box;
+    background: #0f0f12;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+}
+
+.tag-detail-name-input:focus {
+    border-color: #22c55e;
+}
+
+/* 模型标签组：横向排列，超出换行 */
+.tag-detail-model-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* 单个模型标签按钮：样式与保存弹窗的标签一致 */
+.tag-detail-model-chip {
+    padding: 5px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tag-detail-model-chip:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* 选中状态：绿色实心 */
+.tag-detail-model-chip.is-selected {
+    border-color: #22c55e;
+    background: #22c55e;
+    color: #fff;
+}
+
+/* ==================== 参考图槽位（TagReferenceSlots） ==================== */
+/*
+ * 样式沿用 ComfyUI 提示词栏图片槽位（prompt-panel.css 的 thumbnail-slot）：
+ * 50px 虚线框 + ＋ 占位，悬停提亮，有图后转实线边框。
+ */
+
+/* 槽位容器：横向排列，放不下换行 */
+.tag-ref-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    position: relative;   /* 作为选图面板的定位基准 */
+}
+
+/* 单个槽位：空槽虚线框；有图后实线边框（见 has-image）
+ * 注意不设 overflow:hidden —— 右上角删除按钮定位在 -6px 超出槽位边界，
+ * 图片的圆角裁切由 .tag-ref-img 自身负责 */
+.tag-ref-slot {
+    width: 50px;
+    height: 50px;
+    flex-shrink: 0;
+    border-radius: 6px;
+    border: 2px dashed rgba(128, 128, 128, 0.4);
+    background: rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;   /* 作为右上角删除按钮的定位基准 */
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+/* 空槽位悬停：提亮提示可点击添加 */
+.tag-ref-slot:hover {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* 空槽位占位符 ＋ */
+.tag-ref-placeholder {
+    font-size: 20px;
+    color: rgba(128, 128, 128, 0.6);
+    line-height: 1;
+    user-select: none;
+}
+
+/* 已有图片的槽位：实线边框，点击看大图 */
+.tag-ref-slot.has-image {
+    border-style: solid;
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+/* 槽位内缩略图：填满槽位，圆角跟随槽位内沿（6px 圆角 - 2px 边框） */
+.tag-ref-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 4px;
+    display: block;
+}
+
+/* 槽位右上角删除按钮（红色圆形 ×），悬停槽位时显示 */
+.tag-ref-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #fff;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.tag-ref-slot.has-image:hover .tag-ref-remove {
+    display: flex;
+}
+
+/* 隐藏的本地文件选择 input */
+.tag-ref-file-input {
+    display: none;
+}
+
+/* ---- 选图面板（画布图片网格 + 本地文件入口） ---- */
+
+/* 面板：覆盖在槽位下方，不挤压编辑面板布局；
+   宽度按一行 6 格计算（6×48 + 5×6 间距 + 20 内边距 ≈ 338） */
+.tag-ref-picker {
+    position: absolute;
+    top: 58px;               /* 槽位高度 50 + 间距 8 */
+    left: 0;
+    z-index: 3;
+    width: 340px;
+    padding: 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    background: #1b1c21;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* 画布图片网格：一行 6 个缩略图 */
+.tag-ref-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    max-height: 170px;      /* 最多约 3 行，超出滚动 */
+    overflow-y: auto;
+}
+
+/* 单个画布图片选项 */
+.tag-ref-picker-cell {
+    width: 100%;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #0f0f12;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.tag-ref-picker-cell:hover {
+    border-color: #22c55e;
+}
+
+.tag-ref-picker-cell img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* 画布无图片时的提示文案 */
+.tag-ref-picker-empty {
+    display: none;
+    padding: 8px 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* 面板底部：本地文件按钮 */
+.tag-ref-picker-footer {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 10px;
+}
+
+.tag-ref-picker-local-btn {
+    padding: 4px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tag-ref-picker-local-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* Copy 按钮：透明底，成功后变绿 */
+.tag-detail-copy-btn {
+    padding: 4px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tag-detail-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.tag-detail-copy-btn.is-copied {
+    background: #22c55e;
+    color: #fff;
+}
+
+/* 提示词多行编辑框：占据面板剩余高度 */
+.tag-detail-prompt-input {
+    flex: 1;
+    min-height: 160px;
+    padding: 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-sizing: border-box;
+    background: #0f0f12;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+}
+
+.tag-detail-prompt-input:focus {
+    border-color: #22c55e;
+}
+
+/* 保存按钮：绿色实心主操作 */
+.tag-detail-save-btn {
+    align-self: flex-end;
+    padding: 6px 20px;
+    border: 0;
+    border-radius: 8px;
+    background: #22c55e;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tag-detail-save-btn:hover {
+    background: #16a34a;
+}
+
+.tag-detail-save-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 窄屏适配：左右分栏改为上下布局，图片在上编辑在下 */
+@media (max-width: 720px) {
+    .tag-detail-panel {
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    .tag-detail-left {
+        flex: none;
+        min-height: 40vh;
+    }
+
+    .tag-detail-right {
+        border-left: 0;
+        border-top: 1px solid rgba(128, 128, 128, 0.2);
+        overflow: visible;
+    }
+
+    .tag-detail-prompt-input {
+        min-height: 120px;
+    }
+}

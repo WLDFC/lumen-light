@@ -1,0 +1,613 @@
+{
+  "76": {
+    "inputs": {
+      "image": "c950af66bacb2580ea568230860faa94.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "1图编辑"
+    }
+  },
+  "98": {
+    "inputs": {
+      "images": [
+        "115",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "100": {
+    "inputs": {
+      "seed": 36542766123562
+    },
+    "class_type": "easy seed",
+    "_meta": {
+      "title": "随机种"
+    }
+  },
+  "101": {
+    "inputs": {
+      "unet_name": "flux\\flux-2-klein-4b.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "102": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "103": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "105": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "102",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "106": {
+    "inputs": {
+      "conditioning": [
+        "105",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "107": {
+    "inputs": {
+      "image": [
+        "316",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
+  "109": {
+    "inputs": {
+      "noise_seed": [
+        "100",
+        0
+      ]
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "110": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "101",
+        0
+      ],
+      "positive": [
+        "186",
+        0
+      ],
+      "negative": [
+        "106",
+        0
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFG引导器"
+    }
+  },
+  "111": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "112": {
+    "inputs": {
+      "steps": 4,
+      "width": [
+        "107",
+        0
+      ],
+      "height": [
+        "107",
+        1
+      ]
+    },
+    "class_type": "Flux2Scheduler",
+    "_meta": {
+      "title": "Flux2调度器"
+    }
+  },
+  "113": {
+    "inputs": {
+      "width": [
+        "107",
+        0
+      ],
+      "height": [
+        "107",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "空Latent图像（Flux2）"
+    }
+  },
+  "114": {
+    "inputs": {
+      "noise": [
+        "109",
+        0
+      ],
+      "guider": [
+        "110",
+        0
+      ],
+      "sampler": [
+        "111",
+        0
+      ],
+      "sigmas": [
+        "112",
+        0
+      ],
+      "latent_image": [
+        "113",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "115": {
+    "inputs": {
+      "samples": [
+        "114",
+        0
+      ],
+      "vae": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "116": {
+    "inputs": {
+      "clip_name": "Qwen3-4B-Q4_K_M.gguf",
+      "type": "flux2"
+    },
+    "class_type": "CLIPLoaderGGUF",
+    "_meta": {
+      "title": "CLIPLoader (GGUF)"
+    }
+  },
+  "117": {
+    "inputs": {
+      "pixels": [
+        "316",
+        0
+      ],
+      "vae": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "118": {
+    "inputs": {
+      "conditioning": [
+        "105",
+        0
+      ],
+      "latent": [
+        "117",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "121": {
+    "inputs": {
+      "unet_name": "flux-2-klein-9b-Q6_K.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "140": {
+    "inputs": {
+      "image": "4b3da9cf256462df9d01936cb68008ad.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "2图编辑"
+    }
+  },
+  "142": {
+    "inputs": {
+      "conditioning": [
+        "118",
+        0
+      ],
+      "latent": [
+        "239",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "152": {
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "空Latent图像（Flux2）"
+    }
+  },
+  "164": {
+    "inputs": {
+      "文件夹路径": "C:\\Users\\WLDFC\\Desktop\\批量",
+      "索引模式": "全部",
+      "图像索引": 0,
+      "正规化": "正规",
+      "读取文本块": "禁用"
+    },
+    "class_type": "ZML_LoadImageFromPath",
+    "_meta": {
+      "title": "批量编辑"
+    }
+  },
+  "183": {
+    "inputs": {
+      "image": "3e3af7c59df37923dc26438a7bc4e091.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "3图编辑"
+    }
+  },
+  "185": {
+    "inputs": {
+      "pixels": [
+        "334",
+        0
+      ],
+      "vae": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "186": {
+    "inputs": {
+      "conditioning": [
+        "142",
+        0
+      ],
+      "latent": [
+        "185",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "219": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "164",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "239": {
+    "inputs": {
+      "pixels": [
+        "333",
+        0
+      ],
+      "vae": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "255": {
+    "inputs": {
+      "image": "ComfyUI_temp_gzcks_00016_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "257": {
+    "inputs": {
+      "float": 1.5
+    },
+    "class_type": "Primitive float [Crystools]",
+    "_meta": {
+      "title": "(放大倍率)浮点元节点"
+    }
+  },
+  "261": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_erpgj_00001_.png&type=temp&subfolder=&rand=0.9155086848143892"
+          }
+        ]
+      },
+      "image_a": [
+        "255",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "图像对比"
+    }
+  },
+  "268": {
+    "inputs": {
+      "image": "c950af66bacb2580ea568230860faa94.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "局部重绘"
+    }
+  },
+  "269": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "268",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "288": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_arkgo_00001_.png&type=temp&subfolder=&rand=0.5598026439109995"
+          }
+        ]
+      },
+      "image_b": [
+        "268",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "图像对比"
+    }
+  },
+  "294": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_vtusf_00007_.png&type=temp&subfolder=&rand=0.8788306878669618"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_vtusf_00008_.png&type=temp&subfolder=&rand=0.46806872910995"
+          }
+        ]
+      },
+      "image_a": [
+        "115",
+        0
+      ],
+      "image_b": [
+        "76",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "图像对比"
+    }
+  },
+  "295": {
+    "inputs": {
+      "image": "f00dabe39e78e011f6d30175ead9649b.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "扩图"
+    }
+  },
+  "312": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_eraeb_00001_.png&type=temp&subfolder=&rand=0.4136707331066505"
+          }
+        ]
+      },
+      "image_b": [
+        "295",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "图像对比"
+    }
+  },
+  "313": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "295",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "316": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 1,
+      "image": [
+        "331",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "缩放图像（比例）"
+    }
+  },
+  "325": {
+    "inputs": {
+      "auto_send": true,
+      "images": [
+        "115",
+        0
+      ]
+    },
+    "class_type": "LumenSendImageRealtime",
+    "_meta": {
+      "title": "💡 To Canvas (Image)"
+    }
+  },
+  "331": {
+    "inputs": {
+      "slot": "1",
+      "wait_for_image": true,
+      "force_reload": true,
+      "seed": 0
+    },
+    "class_type": "LumenReceiveImageFromCanvas",
+    "_meta": {
+      "title": "💡 From Canvas (Edit Image)"
+    }
+  },
+  "333": {
+    "inputs": {
+      "slot": "2",
+      "wait_for_image": true,
+      "force_reload": true,
+      "seed": 0
+    },
+    "class_type": "LumenReceiveImageFromCanvas",
+    "_meta": {
+      "title": "💡 From Canvas (Edit Image)"
+    }
+  },
+  "334": {
+    "inputs": {
+      "slot": "3",
+      "wait_for_image": true,
+      "force_reload": true,
+      "seed": 0
+    },
+    "class_type": "LumenReceiveImageFromCanvas",
+    "_meta": {
+      "title": "💡 From Canvas (Edit Image)"
+    }
+  }
+}

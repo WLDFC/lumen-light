@@ -1,0 +1,440 @@
+/**
+ * 提示词收藏页面样式（recipe-manager.css）
+ *
+ * 作用：定义顶栏"提示词"按钮、全屏提示词收藏弹窗、瀑布流卡片网格、
+ *       卡片信息栏（名字 + Copy）、模型角标、删除按钮、空状态提示
+ *       的视觉样式。只包含收藏页面本体，弹窗组件样式已按组件拆分。
+ *
+ * 配套文件：
+ *   js/components/RecipeManager.js   # 收藏页结构与交互逻辑
+ *   css/save-tag-dialog.css          # 保存提示词弹窗（SaveTagDialog）
+ *   css/tag-detail-dialog.css        # 收藏详情编辑弹窗（TagDetailDialog）
+ *   css/llm-chat.css                 # 灯箱（z-index 2000）层级高于本弹窗（1200）
+ *
+ * 配色遵循项目深色主题色板：
+ *   弹窗面板背景 #1b1c21，内容区背景 #0f0f12，
+ *   通用边框 rgba(128,128,128,0.3)，
+ *   悬停叠加 rgba(255,255,255,0.1)，按下 rgba(255,255,255,0.18)，
+ *   删除红 #ef4444，主操作/选中绿 #22c55e。
+ */
+
+/* ===== 顶栏入口按钮 ===== */
+
+/* 按钮处于展开状态（弹窗打开）时的激活底色 */
+.recipe-trigger-btn[aria-expanded="true"] {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+/* ===== 弹窗整体 ===== */
+
+/* 全屏遮罩层：默认隐藏，覆盖整个视口，半透明深色背景压暗底层画布 */
+.recipe-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 1200; /* 低于灯箱(2000)，高于普通界面 */
+    display: none;
+    padding: 24px;
+    box-sizing: border-box;
+    background: rgba(15, 15, 18, 0.92);
+}
+
+/* 打开状态：由 JS 切换 is-open 类后显示 */
+.recipe-dialog.is-open {
+    display: flex;
+}
+
+/* 弹窗主体面板：几乎覆盖全屏，深色面板背景 + 圆角边框 */
+.recipe-dialog-panel {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+}
+
+/* ===== 顶部状态栏（标题 + 关闭按钮） ===== */
+
+/* 状态栏：固定 30px 高度，左右布局，不随内容滚动 */
+.recipe-dialog-header {
+    height: 30px;
+    min-height: 30px;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+/* 标题组：书本图标 + "提示词"文字横向排列 */
+.recipe-dialog-title-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: #fff;
+}
+
+/* 标题书本图标尺寸（随状态栏高度缩放） */
+.recipe-dialog-title-group > svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* 标题文字 */
+.recipe-dialog-title-group h2 {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 600;
+}
+
+/* 关闭按钮：小尺寸方形热区 */
+.recipe-dialog-close {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+}
+
+/* 关闭按钮内部 × 图标尺寸 */
+.recipe-dialog-close > svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* 关闭按钮悬停：半透明白叠加 */
+.recipe-dialog-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 关闭按钮按下：更深的叠加反馈 */
+.recipe-dialog-close:active {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* ===== 内容区 ===== */
+
+/*
+ * 内容区改为左右分栏：
+ *   左侧 220px 模型标签侧栏（独立滚动，样式见 recipe-models-sidebar.css）
+ *   右侧瀑布流卡片区（自身滚动，空状态提示覆盖其上）
+ * 整体不再滚动，由两侧子区域各自管理溢出。
+ */
+.recipe-dialog-content {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    padding: 0;
+    background: #0f0f12;
+}
+
+/* 右侧卡片区：占满剩余宽度，自身滚动 */
+.recipe-cards-area {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
+    padding: 24px;
+}
+
+/* ===== 顶部工具行：标签名 + 搜索栏 ===== */
+
+/* 横向 flex：左边标签名，右边搜索栏（预留右侧扩展位） */
+.recipe-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 74px;             /* 与原标题行等高，保持网格下移 90px 不变 */
+    margin: 0 0 16px;
+}
+
+/*
+ * 卡片区左上角显示当前筛选的模型标签名（未筛选时显示"全部"）。
+ * 文字区随 .recipe-toolbar 的 74px 撑起（原 74px + 16px 下边距
+ * = 90px，后续右侧还要放其他内容，预留横向空间）。
+ * aria-live="polite" 让切换标签时屏幕阅读器自动播报。
+ */
+.recipe-current-model {
+    margin: 0;
+    font-size: 36px;          /* 大字号醒目标题 */
+    font-weight: 700;         /* 加粗 */
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;  /* 超长标签名省略号截断 */
+}
+
+/* ===== 搜索栏 ===== */
+
+/* 搜索框容器：相对定位，放大镜图标绝对定位在左端 */
+.recipe-search-box {
+    position: relative;
+    flex-shrink: 0;
+}
+
+/* 搜索框内左端的放大镜图标 */
+.recipe-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(255, 255, 255, 0.5);  /* 色板：说明/提示文字 */
+    pointer-events: none;     /* 图标不拦截点击，点击落到 input 上 */
+}
+
+/* 搜索输入框：400x40，左侧留出图标位置 */
+.recipe-search-input {
+    width: 400px;
+    height: 40px;
+    padding: 0 12px 0 38px;   /* 左侧 38px 给放大镜图标让位 */
+    border: 1px solid rgba(128, 128, 128, 0.3);  /* 色板：通用边框 */
+    border-radius: 10px;
+    box-sizing: border-box;
+    background: rgba(27, 28, 33, 1);  /* 色板 --icon-bg 的半透明档：面板上轻微凹陷 */   
+    color: #fff;              /* 色板：主文字 */
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.recipe-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);  /* 色板：占位文字 */
+}
+
+.recipe-search-input:hover {
+    border-color: rgba(128, 128, 128, 0.4);  /* 色板：悬停加强边框 */
+}
+
+.recipe-search-input:focus {
+    border-color: rgba(59, 130, 246, 0.6);  /* 色板：聚焦边框（强调蓝） */
+}
+
+/* ===== 瀑布流网格 ===== */
+
+/*
+ * CSS 多列瀑布流：大屏 6 列，卡片高低交错自然排列。
+ * 注意：多列布局按"先填满一列再进入下一列"排列，非严格从左到右。
+ */
+.recipe-grid {
+    column-count: 6;
+    column-gap: 16px;
+}
+
+/* 收藏卡片：禁止被拆分到两列，卡片间距通过底部外边距实现 */
+.recipe-card {
+    position: relative;
+    min-width: 0;
+    break-inside: avoid;
+    margin-bottom: 16px;
+    overflow: hidden;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+}
+
+/* 卡片图片：宽度撑满列宽，保持原始宽高比完整显示，点击可放大 */
+.recipe-card img {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    cursor: zoom-in;
+}
+
+/* ===== 删除按钮（卡片右上角） ===== */
+
+/* 悬停卡片时才显示删除按钮 */
+.recipe-card:hover .recipe-remove-btn {
+    display: flex;
+}
+
+/* 红色圆形 × 按钮：绝对定位在卡片右上角，默认隐藏 */
+.recipe-remove-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 1;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+/* ===== Copy 复制按钮（卡片底部） ===== */
+
+/* 无边框透明按钮：与卡片底色融合，悬停时叠加半透明白 */
+.recipe-copy-btn {
+    display: block;
+    width: calc(100% - 12px);
+    margin: 6px;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+}
+
+/* 悬停反馈 */
+.recipe-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 复制成功状态：JS 短暂添加 is-copied 类，整钮变绿提示 Copied */
+.recipe-copy-btn.is-copied {
+    border-color: #22c55e;
+    background: #22c55e;
+    color: #fff;
+}
+
+/* ===== 空状态提示 ===== */
+
+/* 居中覆盖在卡片区上的"暂无收藏"提示，不阻挡鼠标操作 */
+.recipe-empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    pointer-events: none;
+}
+
+.recipe-empty-state p {
+    margin: 0;
+    font-size: 14px;
+}
+
+/* 已迁出至 css/save-tag-dialog.css：保存提示词弹窗（SaveTagDialog）样式 */
+
+/* ===== 卡片底部信息栏（名字 + Copy） ===== */
+
+/* 信息栏：左侧名字占 2/3，右侧 Copy 按钮占剩余空间 */
+.recipe-card-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+}
+
+/* 名字：占信息栏约 2/3 宽度，超长省略号截断（完整内容见 title 提示）；
+   双击进入原地重命名（类似桌面重命名），悬停时亮起提示可编辑 */
+.recipe-card-name {
+    flex: 0 0 66%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: #fff;
+    font-size: 12px;
+    cursor: text;                /* 文本光标暗示可编辑 */
+}
+
+/* 悬停时轻微提亮，提示这是一个可交互元素 */
+.recipe-card-name:hover {
+    color: rgba(34, 197, 94, 0.9);
+}
+
+/* 双击名字后出现的行内重命名输入框：与名字占同样的 2/3 空间 */
+.recipe-card-name-input {
+    flex: 0 0 66%;
+    min-width: 0;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid rgba(34, 197, 94, 0.6);
+    border-radius: 6px;
+    box-sizing: border-box;
+    background: #0f0f12;
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+}
+
+.recipe-card-name-input:focus {
+    border-color: #22c55e;
+}
+
+/* Copy 按钮：占据信息栏剩余空间（约 1/3），复用原有交互样式 */
+.recipe-card-info .recipe-copy-btn {
+    flex: 1;
+    width: auto;
+    margin: 0;
+    padding: 4px 6px;
+    font-size: 12px;
+}
+
+/* ===== 卡片左上角模型角标 ===== */
+
+/* 半透明深色胶囊，覆盖在图片左上角，保证任何图片上均可读 */
+.recipe-model-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 1;
+    display: flex;               /* flex 垂直居中，避免行高系数导致文字偏上 */
+    align-items: center;
+    max-width: calc(100% - 36px);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    height: 20px;                /* 固定高度，与 flex 配合实现精确居中 */
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(15, 15, 18, 0.75);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;              /* 行高设为 1，配合 flex 消除行盒额外空间 */
+    padding-bottom: 1px;         /* 光学补偿：拉丁小写串降部少，视觉重心偏上，下移 1px */
+    pointer-events: none;        /* 不阻挡图片点击查看原图 */
+}
+
+/* 已迁出至 css/tag-detail-dialog.css：收藏详情编辑弹窗（TagDetailDialog）样式 */
+
+/* ===== 响应式断点 ===== */
+
+/* 中等屏幕：瀑布流降为 4 列 */
+@media (max-width: 1100px) {
+    .recipe-grid {
+        column-count: 4;
+    }
+}
+
+/* 小屏幕：缩小弹窗留白，瀑布流降为 2 列，侧栏缩窄 */
+@media (max-width: 720px) {
+    .recipe-dialog {
+        padding: 12px;
+    }
+
+    .recipe-cards-area {
+        padding: 16px;
+    }
+
+    .recipe-grid {
+        column-count: 2;
+    }
+
+    .recipe-models-sidebar {
+        width: 160px;   /* 窄屏下 220px 太占空间，缩到 160px */
+    }
+}

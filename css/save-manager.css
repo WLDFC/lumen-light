@@ -1,0 +1,327 @@
+/**
+ * ==========================================================================
+ * LumenLight 存档管理器样式
+ * 作用：定义顶栏左段的文件菜单按钮、画布名称、下拉选项，
+ *       以及保存/打开存档模态框的样式。采用深色主题。
+ *
+ * 对应组件（HTML 结构由 JS 动态生成）：
+ *   js/components/SaveManager.js       # 文件菜单、打开/保存/另存为模态框
+ *   js/components/NewCanvasManager.js  # 新建画布确认框（复用本文件的模态框样式）
+ *
+ * 配色遵循项目深色主题规范（见 css/style.css 中的 CSS 变量）：
+ *   面板背景 #1b1c21、底层背景 #0f0f12、强调色 #3b82f6
+ * ==========================================================================
+ */
+
+/* ==================== 文件菜单按钮 ==================== */
+/* 位于顶栏左段，由 .top-toolbar-left 的 flex 布局定位，不再使用 fixed */
+.file-menu-btn {
+    flex-shrink: 0;                /* 防止顶栏空间不足时按钮被压缩 */
+    width: 40px;                   /* 与顶栏其他图标按钮保持一致的 40px 触控尺寸 */
+    height: 40px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;       /* 顶栏已提供 #1b1c21 底色，按钮本身透明 */
+    color: #ffffff;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, transform 0.1s ease;
+}
+
+/* 悬停：叠加半透明白（深色主题标准悬停做法，不换底色） */
+.file-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 按下：叠加更亮的半透明白并轻微缩小，提供按压反馈 */
+.file-menu-btn:active {
+    transform: scale(0.95);
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* ==================== 当前画布名称显示 ==================== */
+/* 位于顶栏左段、文件菜单按钮右侧 */
+.canvas-name-display {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 500;
+    pointer-events: none;          /* 纯展示元素，不拦截鼠标事件 */
+    user-select: none;             /* 禁止选中文字，避免点击时误选 */
+    max-width: 200px;              /* 限制宽度，超长存档名不挤占顶栏其他区域 */
+    overflow: hidden;
+    text-overflow: ellipsis;       /* 超长部分显示省略号 */
+    white-space: nowrap;           /* 存档名强制单行显示 */
+}
+
+/* ==================== 实时保存状态 ==================== */
+/* 位于顶栏左段、画布名右侧，由 RealtimeSaveManager 驱动（失败才告警）：
+   ✓ 已自动保存 HH:MM:SS（灰色，正常路径静默刷新时间戳）
+   ⚠ 保存失败，正在重试（红色，仅同步失败需要用户注意时出现） */
+.autosave-status {
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    pointer-events: none;          /* 纯展示元素，不拦截鼠标事件 */
+    user-select: none;
+    white-space: nowrap;
+}
+
+.autosave-status.failed {
+    color: #ff5555;
+}
+
+.autosave-status.synced {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* ==================== 文件菜单下拉框 ==================== */
+/* 悬浮在顶栏（60px 高）下方 4px 处 */
+.file-menu-dropdown {
+    position: fixed;
+    top: 52px;                     /* 实测值：恰好贴住文件菜单按钮（40px）底部，含按钮在顶栏中的内边距偏移 */
+    left: 12px;                    /* 与顶栏左内边距对齐 */
+    z-index: 1200;                 /* 高于画布内容，低于模态框遮罩(2000) */
+    min-width: 160px;
+    background: rgba(27, 28, 33, 1);   /* 面板背景色 #1b1c21 */
+    border: 1px solid rgba(75, 85, 99, 0.5);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);   /* 投影增强悬浮层次感 */
+    display: none;                 /* 默认隐藏，由 SaveManager 的 toggleMenu 切换 */
+    flex-direction: column;        /* 菜单项纵向排列 */
+    padding: 6px;
+    backdrop-filter: blur(8px);    /* 背景轻微模糊，透出下方画布 */
+}
+
+/* 展开状态：SaveManager 添加/移除 .show 类控制显示 */
+.file-menu-dropdown.show {
+    display: flex;
+}
+
+/* 菜单项：打开画布 / 保存画布 / 另存为 / 新建画布 */
+.file-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;                      /* 图标与文字间距 */
+    width: 100%;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #ffffff;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+/* 菜单项内 SVG 图标：固定尺寸，不被压缩 */
+.file-menu-item svg {
+    flex-shrink: 0;
+}
+
+/* 悬停：叠加半透明白背景（比遮罩底色略亮，指示可点击） */
+.file-menu-item:hover {
+    background: rgba(55, 65, 81, 0.8);
+}
+
+/* ==================== 模态框遮罩层 ==================== */
+/* 全屏遮罩，SaveManager/NewCanvasManager 通过 .show 类控制显示 */
+.save-modal-overlay {
+    position: fixed;
+    inset: 0;                      /* 铺满整个视口 */
+    z-index: 2000;                 /* 最高层：压住菜单(1200)与画布所有内容 */
+    /* 不使用 backdrop-filter（全屏模糊会导致弹窗内光标/悬停卡顿），
+       用更深的半透明遮罩保证弹窗专注度 */
+    background: rgba(0, 0, 0, 0.75);
+    display: none;
+    align-items: center;           /* 弹窗垂直居中 */
+    justify-content: center;       /* 弹窗水平居中 */
+}
+
+/* 显示遮罩：flex 布局让内部 .save-modal 居中 */
+.save-modal-overlay.show {
+    display: flex;
+}
+
+/* ==================== 模态框主体 ==================== */
+/* 打开画布 / 另存为 / 新建画布确认框共用的卡片容器 */
+.save-modal {
+    width: 90%;                    /* 小屏自适应：占视口 90% 宽 */
+    max-width: 420px;              /* 大屏不超过 420px，保持紧凑 */
+    background: #1b1c21;           /* 面板背景，浮于遮罩之上 */
+    border: 1px solid rgba(75, 85, 99, 0.6);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);   /* 大投影突出弹窗层次 */
+    color: #ffffff;
+}
+
+/* 弹窗标题：如"打开画布""另存为""新建画布" */
+.save-modal h3 {
+    margin: 0 0 16px 0;            /* 底部留出与输入框/列表的间距 */
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+/* ==================== 输入框 ==================== */
+/* 另存为流程输入存档名称使用（promptSaveAsName） */
+.save-modal-input {
+    width: 100%;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(75, 85, 99, 0.6);
+    border-radius: 8px;
+    background: #0f0f12;           /* 内嵌区域回落到底层背景色，形成凹陷层次 */
+    color: #ffffff;
+    font-size: 14px;
+    box-sizing: border-box;        /* padding 计入宽度，防止撑破弹窗 */
+}
+
+/* 占位提示文字：使用禁用/占位档灰色 */
+.save-modal-input::placeholder {
+    color: #9ca3af;
+}
+
+/* 聚焦：边框变为强调色蓝，去除浏览器默认 outline */
+.save-modal-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+/* ==================== 存档列表 ==================== */
+/* "打开画布"弹窗中列出 save/ 目录下的所有存档 */
+.save-list {
+    max-height: 260px;             /* 存档过多时列表内部滚动，弹窗高度稳定 */
+    overflow-y: auto;
+    margin-bottom: 16px;
+    border: 1px solid rgba(75, 85, 99, 0.4);
+    border-radius: 8px;
+    background: #0f0f12;           /* 内嵌列表用底层背景色，与弹窗主体区分 */
+}
+
+/* 空状态提示：save/ 目录没有任何存档时显示 */
+.save-list-empty {
+    padding: 24px;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 14px;
+}
+
+/* 单条存档项：左侧名称、右侧更新时间 */
+.save-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(75, 85, 99, 0.3);   /* 项与项之间的分隔线 */
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+/* 最后一条不加底边框，避免与列表外边框重叠出双线 */
+.save-list-item:last-child {
+    border-bottom: none;
+}
+
+/* 悬停：叠加半透明白背景 */
+.save-list-item:hover {
+    background: rgba(55, 65, 81, 0.6);
+}
+
+/* 选中态：蓝色半透明底 + 左侧强调色竖条，指示当前待打开的存档 */
+.save-list-item.selected {
+    background: rgba(59, 130, 246, 0.25);
+    border-left: 3px solid #3b82f6;
+}
+
+/* 存档名称：主体信息，白色最优先层级 */
+.save-list-item-name {
+    font-size: 14px;
+    color: #ffffff;
+}
+
+/* 更新时间：次要信息，弱化灰色 */
+.save-list-item-date {
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+/* ==================== 模态框按钮组 ==================== */
+/* 默认两按钮布局（取消/保存 或 取消/打开）：次要按钮居左、主按钮居右 */
+.save-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* 新建画布确认框的三按钮布局：主按钮居左强调，次要按钮靠右 */
+.save-modal-actions-3 {
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;     /* 与提示文字拉开距离，避免挤在一起 */
+}
+
+/* 弹窗通用按钮：尺寸紧凑，交由 .primary/.secondary 决定配色 */
+.save-modal-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+/* 次要按钮：灰色底（取消、直接新建等低权重操作） */
+.save-modal-btn.secondary {
+    background: #374151;
+    color: #ffffff;
+}
+
+/* 次要按钮悬停：提亮一档 */
+.save-modal-btn.secondary:hover {
+    background: #4b5563;
+}
+
+/* 主按钮：强调色蓝（保存、打开、保存并新建等主要操作） */
+.save-modal-btn.primary {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+/* 主按钮悬停：加深一档 */
+.save-modal-btn.primary:hover {
+    background: #2563eb;
+}
+
+/* 禁用态：半透明 + 禁用光标（如"保存并新建"执行中防重复点击） */
+.save-modal-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ==================== 状态提示文字 ==================== */
+/* 弹窗内的反馈信息：错误原因、保存进度说明、确认框询问文字等 */
+.save-modal-status {
+    margin-top: 12px;
+    font-size: 13px;
+    color: #9ca3af;
+    min-height: 18px;              /* 预留一行高度，避免文字出现时弹窗跳动 */
+}
+
+/* 错误提示：红色（如存档名重复、保存失败） */
+.save-modal-status.error {
+    color: #f87171;
+}
+
+/* 成功提示：绿色（如保存完成） */
+.save-modal-status.success {
+    color: #34d399;
+}

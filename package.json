@@ -1,0 +1,43 @@
+{
+  "_comment_项目说明": "本文件是 Node.js 项目的配置中心：项目信息、依赖清单（npm install 依据）、命令快捷方式。注意 JSON 不支持 // 注释，以下 _comment_ 开头的字段仅作说明用途，npm 会自动忽略。",
+  "name": "lumen-light",
+  "version": "1.0.0",
+  "description": "流光 LumenLight：AI 绘画工作台（画布 + ComfyUI 工作流 + LLM 对话绘图）",
+  "main": "index.js",
+  "_comment_main": "入口文件声明。本项目直接用 node server.js 启动后端，此项实际未使用",
+  "scripts": {
+    "_comment": "命令快捷方式，通过 npm run <名称> 执行",
+    "test": "jest"
+  },
+  "_comment_scripts_test": "运行 npm test 时执行 jest，自动跑 test/ 目录下的全部单元测试",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "_comment_type": "模块规范：commonjs 使用 require/module.exports（区别于 esm 的 import/export）",
+  "_comment_dependencies_用途": "生产环境必需的第三方库，换电脑后执行 npm install 即可按此清单装齐",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "onnxruntime-node": "^1.27.0",
+    "sharp": "^0.35.3",
+    "uuid": "^13.0.0",
+    "ws": "^8.20.0"
+  },
+  "_comment_dependencies": {
+    "cors": "跨域资源共享支持（允许前端跨域访问后端接口）",
+    "express": "Web 服务器框架（server.js 用它搭建后端路由）",
+    "uuid": "生成全局唯一 ID（图片、存档等对象的标识）",
+    "ws": "WebSocket 库（js/api/LumenSocket.js 与 ComfyUI 实时通信）"
+  },
+  "_comment_devDependencies_用途": "仅开发阶段使用的工具库，不会参与生产部署",
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "supertest": "^7.2.2"
+  },
+  "_comment_devDependencies": {
+    "jest": "单元测试框架（test/ 目录下的测试由它执行，npm test 触发）",
+    "supertest": "HTTP 接口测试工具（模拟请求测试 routes/ 下的路由，配合 jest 使用）"
+  },
+  "_comment_版本号": "版本前的 ^ 符号表示允许自动升级小版本（如 ^5.2.1 可装 5.3.0 但不装 6.0.0）；精确版本由 package-lock.json 锁定"
+}

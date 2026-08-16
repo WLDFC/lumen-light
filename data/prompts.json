@@ -1,0 +1,24 @@
+{
+    "prompts": [
+        {
+            "id": "e94e7725-3d8c-44ea-a7ce-8470024ffe45",
+            "name": "3D风格",
+            "scene": "image",
+            "content": "3D风格",
+            "createdAt": 1788379969969,
+            "updatedAt": 1788455874953
+        },
+        {
+            "id": "e44c6101-fdcb-4f02-82d1-827350b43d4d",
+            "name": "古风提示词",
+            "scene": "chat",
+            "content": "用文言文的方式识别图像，不超过200字",
+            "createdAt": 1788380673899,
+            "updatedAt": 1789200343950
+        }
+    ],
+    "active": {
+        "chat": null,
+        "image": null
+    }
+}

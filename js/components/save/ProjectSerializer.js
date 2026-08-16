@@ -1,0 +1,458 @@
+/**
+ * ==========================================================================
+ * LumenLight 存档序列化器（从 SaveManager.js 拆出）
+ * 作用：画布状态 <-> 存档数据（project.json 结构）的双向转换。
+ *   - 收集（保存方向）：图片 / 提示词节点 / 连线 / 提示词 / 视口 -> 存档数据
+ *   - 恢复（打开方向）：存档数据 -> 重建画布对象（图片、节点、连线）
+ *   - 保存成功后的文件名映射回写（applySavedMappings）
+ * 不含任何 DOM 模态框逻辑（见 SaveModal.js）和 HTTP 通信（留在 SaveManager.js）。
+ * 依赖：window.canvas（Canvas 实例）、全局 PromptNode 类
+ * ==========================================================================
+ */
+
+class ProjectSerializer {
+    /**
+     * 构造函数
+     * @param {Canvas} canvas - 画布主类实例
+     */
+    constructor(canvas) {
+        this.canvas = canvas;
+    }
+
+    /**
+     * 获取当前提示词内容
+     * @returns {Object} 包含两个正面框与负面提示词的对象
+     *   （positive 为正面框 1，positive2 为正面框 2）
+     */
+    getPrompts() {
+        const posPrompt = document.getElementById('posPrompt');
+        const posPrompt2 = document.getElementById('posPrompt2');
+        const negPrompt = document.getElementById('negPrompt');
+        return {
+            positive: posPrompt ? posPrompt.value : '',
+            positive2: posPrompt2 ? posPrompt2.value : '',
+            negative: negPrompt ? negPrompt.value : ''
+        };
+    }
+
+    /**
+     * 设置提示词内容
+     * @param {string} positive - 正面提示词（框 1）
+     * @param {string} negative - 负面提示词
+     * @param {string} [positive2] - 正面提示词（框 2，旧存档无此字段时为空）
+     */
+    setPrompts(positive, negative, positive2) {
+        const posPrompt = document.getElementById('posPrompt');
+        const posPrompt2 = document.getElementById('posPrompt2');
+        const negPrompt = document.getElementById('negPrompt');
+        if (posPrompt) posPrompt.value = positive || '';
+        if (posPrompt2) posPrompt2.value = positive2 || '';
+        if (negPrompt) negPrompt.value = negative || '';
+    }
+
+    /**
+     * 获取当前视口状态
+     * @returns {Object} 视口缩放和平移状态
+     */
+    getViewport() {
+        const viewport = this.canvas.viewport;
+        return {
+            scale: viewport.scale,
+            offsetX: viewport.offsetX,
+            offsetY: viewport.offsetY
+        };
+    }
+
+    /**
+     * 设置视口状态
+     * @param {Object} viewport - 视口状态对象
+     */
+    setViewport(viewport) {
+        if (!viewport) return;
+        const vp = this.canvas.viewport;
+        vp.scale = viewport.scale || 1;
+        vp.offsetX = viewport.offsetX || 0;
+        vp.offsetY = viewport.offsetY || 0;
+        vp.updateIndicator();
+    }
+
+    /**
+     * 收集当前画布上的连线数据用于存档
+     * 只保留引用了有效图片的连线（prune 掉指向已删除图片的残留）；
+     * 保存时按 fromId 排序，保证同源连线的 order 顺序稳定可复现。
+     * @returns {Array} 连线数据数组 [{fromId, toId, order}]
+     */
+    getConnectionsData() {
+        if (!this.canvas.connections) return [];
+        this.canvas.connections.prune();
+        return this.canvas.connections.connections
+            .slice()
+            .sort((a, b) => a.fromId === b.fromId ? a.order - b.order : 0)
+            .map(c => ({ fromId: c.fromId, toId: c.toId, order: c.order }));
+    }
+
+    /**
+     * 视频对象的封面文件名：画布视频的封面是首帧 PNG（data URL），
+     * 存档文件名必须是 .png——若沿用 .mp4 视频名，后端会把 PNG 字节
+     * 写进 .mp4 文件（存档里出现"损坏的视频"，且恢复时封面加载异常）
+     * @param {string} name - 视频对象名（通常为 xxx.mp4）
+     * @returns {string} xxx.png
+     */
+    _coverFilename(name) {
+        const base = (name || '').replace(/\.[^.]+$/, '');
+        return (base || 'video') + '.png';
+    }
+
+    /**
+     * 收集当前画布上所有图片的存档数据（轻量模式，实时保存用）
+     * 提示词节点没有图像数据，序列化为独立字段 nodes，
+     * 后端存入 project.json，恢复时按 type 重建。
+     * @returns {Array} 图片数据数组
+     */
+    collectImages() {
+        // 过滤掉生成反馈占位图与面板节点（提示词/生图/文本节点单独收集）
+        return this.canvas.images.images
+            .filter(img => !NodeTypes.isPlaceholder(img.source) &&
+                           !NodeTypes.isPanelNode(img.source))
+            .map(img => ({
+                id: img.id,                       // 图片唯一ID（保存后回写映射用）
+                src: this._normalizeSrc(img.img.src),
+                filename: NodeTypes.isVideo(img.source)
+                    ? this._coverFilename(img.name)
+                    : (img.name || `image_${img.id}.png`),
+                x: img.x,
+                y: img.y,
+                width: img.width,
+                height: img.height,
+                name: img.name,
+                source: img.source,
+                prompt: img.prompt || '',
+                negativePrompt: img.negativePrompt || '',
+                // 视频对象额外保存视频地址（恢复时重建 videoEl）
+                ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
+            }));
+    }
+
+    /**
+     * 收集图片数据（手动存档专用，异步弹性模式）。
+     * 先并发 HEAD 探测源文件是否存在：
+     *   - 存在 → 相对路径（后端 copyFile，零编码开销）；
+     *   - 不存在（被外部删除）→ 从内存位图编码为 data URL，保证仍可保存。
+     * 只有真正缺失的文件才触发昂贵的同步 PNG 编码，正常保存零卡顿。
+     * @returns {Promise<Array>} 图片数据数组
+     */
+    async collectImagesForSave() {
+        const filtered = this.canvas.images.images
+            .filter(img => !NodeTypes.isPlaceholder(img.source) &&
+                           !NodeTypes.isPanelNode(img.source));
+
+        return Promise.all(filtered.map(async img => {
+            const rawSrc = img.img.src || '';
+            let src = rawSrc;
+
+            if (!rawSrc.startsWith('data:') && !rawSrc.startsWith('blob:')) {
+                const relative = this._normalizeSrc(rawSrc);
+                const exists = await this._fileExists(relative);
+                src = exists ? relative : this._toDataUrl(img.img);
+            }
+
+            return {
+                id: img.id,
+                src,
+                filename: NodeTypes.isVideo(img.source)
+                    ? this._coverFilename(img.name)
+                    : (img.name || `image_${img.id}.png`),
+                x: img.x,
+                y: img.y,
+                width: img.width,
+                height: img.height,
+                name: img.name,
+                source: img.source,
+                prompt: img.prompt || '',
+                negativePrompt: img.negativePrompt || '',
+                // 视频对象额外保存视频地址（恢复时重建 videoEl）
+                ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
+            };
+        }));
+    }
+
+    /**
+     * HEAD 探测服务器文件是否存在（localhost 上并发极快）
+     * @param {string} relativePath - 相对路径
+     * @returns {Promise<boolean>}
+     */
+    async _fileExists(relativePath) {
+        try {
+            const res = await fetch('/' + relativePath, { method: 'HEAD' });
+            return res.ok;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * 将同源绝对 URL 转为相对路径（去除 origin 前缀）。
+     * 浏览器中 img.src 始终返回解析后的绝对 URL，如不去除 origin，
+     * 后端会误认为是远程 URL 而发起 HTTP 自下载（多余且脆弱）。
+     * @param {string} src - 图片 src（可能是绝对 URL 或相对路径）
+     * @returns {string} 相对路径或原始值
+     */
+    _normalizeSrc(src) {
+        if (!src) return src;
+        const origin = location.origin;
+        if (src.startsWith(origin + '/')) {
+            return decodeURIComponent(src.slice(origin.length + 1));
+        }
+        return src;
+    }
+
+    /**
+     * 从 Image 元素的内存位图提取 data URL（自包含保存用）。
+     * 已经是 data: URL 的直接返回（避免无谓的重编码）；
+     * 服务器路径的图片通过临时 Canvas 重编码为 PNG——
+     * 即使源文件已被外部删除，只要图片仍在画布上显示就能保存。
+     * @param {HTMLImageElement} imageEl - 图片 DOM 元素
+     * @returns {string} data URL
+     */
+    _toDataUrl(imageEl) {
+        const src = imageEl.src || '';
+        // 已经是 data URL：直接复用，不重编码
+        if (src.startsWith('data:')) return src;
+        // 图片未加载成功（naturalWidth = 0）：无法绘制，回退为相对路径
+        if (!imageEl.naturalWidth) return this._normalizeSrc(src);
+        // 从内存位图绘制到临时 Canvas 并导出为 PNG data URL
+        if (!this._tempCanvas) this._tempCanvas = document.createElement('canvas');
+        const c = this._tempCanvas;
+        c.width = imageEl.naturalWidth;
+        c.height = imageEl.naturalHeight;
+        c.getContext('2d').drawImage(imageEl, 0, 0);
+        return c.toDataURL('image/png');
+    }
+
+    /**
+     * 收集当前画布上所有 DOM 节点的存档数据（提示词/生图/文本节点）
+     * @returns {Array} 节点数据数组（按各自 toJSON 序列化）
+     */
+    collectNodes() {
+        return this.canvas.images.images
+            .filter(img => NodeTypes.isPanelNode(img.source))
+            .map(node => node.toJSON());
+    }
+
+    /**
+     * 保存成功后，把后端实际写入的文件名回写到画布图片对象
+     * 覆盖保存会重建整个 images 目录，同名图片的实际文件名可能与上次不同
+     * （如 llm_image.png → llm_image_1.png），不回写会导致画布 src 指向
+     * 已被其他图片占用的新文件，出现"添加到内容显示错图"的问题
+     * @param {Object} result - 保存接口返回（含 images: [{id, filename}]）
+     */
+    applySavedMappings(result) {
+        if (!result || !Array.isArray(result.images) || !result.name) return;
+
+        for (const meta of result.images) {
+            if (!meta.id || !meta.filename) continue;
+            const target = this.canvas.images.images.find(img => img.id === meta.id);
+            if (!target) continue;
+
+            // 视频对象的存档文件名是 .png 封面（_coverFilename），
+            // 不能回写到 name——name 必须保持视频文件名（.mp4），
+            // 它是 data/videos 回退定位与展示的依据
+            if (!NodeTypes.isVideo(target.source)) {
+                target.name = meta.filename;
+            }
+
+            // 地址未变化时跳过，避免无谓的重新加载
+            // （img.src 读取返回绝对地址，这里用 URL 解析成同格式再比较）
+            const newSrc = new URL(
+                `save/${encodeURIComponent(result.name)}/images/${encodeURIComponent(meta.filename)}`,
+                location.href
+            ).href;
+            if (target.img.src !== newSrc) {
+                target.img.src = newSrc;
+            }
+
+            // 视频对象：播放地址同步指向存档内归档副本（覆盖保存后
+            // data/videos 原件可能已被清理，存档内副本成为唯一数据源）
+            if (NodeTypes.isVideo(target.source) && meta.videoFile) {
+                const newVideoUrl =
+                    `save/${encodeURIComponent(result.name)}/videos/${encodeURIComponent(meta.videoFile)}`;
+                if (target.videoUrl !== newVideoUrl) {
+                    target.videoUrl = newVideoUrl;
+                }
+            }
+        }
+    }
+
+    // ==================== 恢复画布 ====================
+
+    /**
+     * 恢复画布状态
+     * @param {Object} data - 存档数据（images 中每项含可加载的 src）
+     */
+    async restoreProject(data) {
+        // 清空当前画布图片和选择状态（DOM 节点需先销毁元素）
+        for (const img of this.canvas.images.images) {
+            if (typeof img.destroy === 'function') img.destroy();
+        }
+        this.canvas.images.images = [];
+        this.canvas.images.selectedIds.clear();
+
+        // 恢复提示词（prompt2 为正面框 2，旧存档无此字段时恢复为空）
+        this.setPrompts(data.prompt, data.negativePrompt, data.prompt2);
+
+        // 恢复视口状态
+        this.setViewport(data.viewport);
+
+        // 恢复图片
+        // 存档中的图片 id → 恢复后新图片 id 的映射（连线数据按存档 id 存储，需换算）
+        const idMap = new Map();
+        const loadPromises = data.images.map(imgData => {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    // 一次性回调：添加后立即解绑，
+                    // 防止后续修改图片 src（如保存后回写存档地址）时重复添加
+                    img.onload = null;
+                    const newId = LumenLight.generateId();
+                    idMap.set(imgData.id, newId);
+                    const imageObj = {
+                        id: newId,
+                        name: imgData.name || imgData.filename,
+                        img: img,
+                        x: imgData.x,
+                        y: imgData.y,
+                        width: imgData.width,
+                        height: imgData.height,
+                        selected: false,
+                        source: imgData.source || 'save',
+                        prompt: imgData.prompt || '',
+                        negativePrompt: imgData.negativePrompt || '',
+                        created: Date.now()
+                    };
+                    // 视频对象：恢复播放地址。优先用存档内归档副本（读取接口已把
+                    // videoUrl 重写为 save/<名>/videos/）；旧存档的元数据没有
+                    // videoUrl 字段，按原始文件名回退到 data/videos/（生成时的
+                    // 落盘位置，文件仍在即可播放）。历史上 name 曾被误写成
+                    // 封面名（.png），这里归一化回视频扩展名 .mp4 再查找
+                    if (NodeTypes.isVideo(imageObj.source)) {
+                        const fallbackName = (imgData.name || '')
+                            .replace(/\.[^.]+$/, '.mp4');
+                        const videoUrl = imgData.videoUrl ||
+                            (fallbackName ? '/data/videos/' + fallbackName : '');
+                        if (videoUrl) {
+                            this.canvas.videoManager.restoreVideoElement(imageObj, videoUrl);
+                        }
+                    }
+                    this.canvas.images.images.push(imageObj);
+                    resolve(true);
+                };
+                // 加载失败（文件被外部删除等）：跳过这张图片，不阻塞整体恢复
+                img.onerror = () => {
+                    console.warn('存档图片加载失败，已跳过:', imgData.filename || imgData.src);
+                    resolve(false);
+                };
+                img.src = imgData.src;
+            });
+        });
+
+        await Promise.all(loadPromises);
+
+        // 恢复提示词节点（在连线之前，连线端点可能指向节点）
+        this.restoreNodes(data.nodes, idMap);
+
+        // 恢复连线：按映射换算 id 后重建，指向已不存在图片的连线直接丢弃
+        this.restoreConnections(data.connections, idMap);
+
+        // 重绘画布
+        this.canvas.draw();
+    }
+
+    /**
+     * 按存档数据重建画布连线（restoreProject 的辅助方法）
+     * 存档中的 fromId/toId 是保存时的图片 id，恢复后图片分配了新 id，
+     * 必须通过 idMap 换算；任一端映射缺失（如旧版存档）则跳过该连线。
+     * @param {Array} connections - 存档连线数据 [{fromId, toId, order}]
+     * @param {Map<string, string>} idMap - 存档图片 id → 新图片 id 映射
+     */
+    restoreConnections(connections, idMap) {
+        this.canvas.connections.clear();
+        if (!Array.isArray(connections) || connections.length === 0) return;
+
+        for (const c of connections) {
+            const fromId = idMap.get(c.fromId);
+            const toId = idMap.get(c.toId);
+            if (!fromId || !toId) continue;
+            const conn = this.canvas.connections.add(fromId, toId);
+            // add 生成的 order 是追加序号，这里以存档 order 覆盖，
+            // 保证恢复后的顺序与保存时一致
+            if (conn) conn.order = c.order;
+        }
+    }
+
+    /**
+     * 按存档数据重建 DOM 节点（restoreProject 的辅助方法）
+     * 与图片一样分配新 id 并记入 idMap，保证指向节点的连线也能正确换算。
+     * @param {Array} nodes - 存档节点数据（提示词节点与生图节点混排）
+     * @param {Map<string, string>} idMap - 存档 id → 新 id 映射（与图片共用）
+     */
+    restoreNodes(nodes, idMap) {
+        if (!Array.isArray(nodes)) return;
+        for (const n of nodes) {
+            let node = null;
+            if (n.type === NodeTypes.SOURCE.PROMPT_NODE) {
+                node = new PromptNode(
+                    this.canvas, n.x, n.y, n.text,
+                    { width: n.width, height: n.height }
+                );
+            } else if (n.type === NodeTypes.SOURCE.TEXT_NODE) {
+                // 文本节点：备注/注释，仅恢复几何与文本
+                node = new TextNode(
+                    this.canvas, n.x, n.y, n.text,
+                    { width: n.width, height: n.height }
+                );
+            } else if (n.type === NodeTypes.SOURCE.IMAGE_GEN_NODE) {
+                // 生图节点：恢复几何与全部工具栏选择状态
+                node = new ImageGenNode(this.canvas, n.x, n.y, {
+                    width: n.width,
+                    height: n.height,
+                    model: n.model,
+                    ratio: n.ratio,
+                    tier: n.tier,
+                    quality: n.quality,
+                    count: n.count
+                });
+            } else if (n.type === NodeTypes.SOURCE.COMFY_GEN_NODE) {
+                // Comfy 生图节点：恢复几何与全部选择状态
+                // （工作流/模型清单由节点构造后自行异步加载并回填）
+                node = new ComfyGenNode(this.canvas, n.x, n.y, {
+                    width: n.width,
+                    height: n.height,
+                    workflowId: n.workflowId,
+                    models: n.models,
+                    loraEnabled: n.loraEnabled,
+                    steps: n.steps,
+                    cfg: n.cfg,
+                    sampler: n.sampler,
+                    sizeW: n.sizeW,
+                    sizeH: n.sizeH,
+                    denoise: n.denoise,
+                    count: n.count
+                });
+            } else if (n.type === NodeTypes.SOURCE.LORA_NODE) {
+                // LoRA 节点：恢复几何与条目列表（文件清单由节点自行异步加载）
+                node = new LoraNode(this.canvas, n.x, n.y, {
+                    width: n.width,
+                    height: n.height,
+                    entries: n.entries
+                });
+            } else {
+                continue;  // 未来扩展其他节点类型在这里分发
+            }
+            this.canvas.images.images.push(node);
+            idMap.set(n.id, node.id);
+        }
+    }
+}
+
+// 将 ProjectSerializer 类暴露到全局作用域
+window.ProjectSerializer = ProjectSerializer;

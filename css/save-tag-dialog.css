@@ -1,0 +1,170 @@
+/**
+ * "保存提示词"弹窗样式（save-tag-dialog.css）
+ *
+ * 作用：定义图片工具栏"保存提示词"弹窗（SaveTagDialog）的视觉样式，
+ *       含全屏遮罩、紧凑居中面板、名字输入框、模型单选标签组、底部按钮。
+ *
+ * 配套文件：
+ *   js/components/SaveTagDialog.js  # 弹窗结构与交互逻辑
+ *
+ * 层级关系：
+ *   遮罩 z-index 1200，与收藏页弹窗同级，低于灯箱（2000）。
+ *
+ * 配色遵循项目深色主题色板：
+ *   面板背景 #1b1c21，输入底 #0f0f12，
+ *   通用边框 rgba(128,128,128,0.3)，悬停叠加 rgba(255,255,255,0.1)，
+ *   选中绿 #22c55e。
+ */
+
+/* 全屏遮罩：点击空白处可关闭，层级与收藏弹窗一致（低于灯箱 2000） */
+.save-tag-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+    background: rgba(15, 15, 18, 0.6);
+}
+
+.save-tag-dialog.is-open {
+    display: flex;
+}
+
+/* 弹窗面板：紧凑居中小卡片 */
+.save-tag-dialog-panel {
+    width: 360px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* 弹窗标题栏 */
+.save-tag-dialog-header {
+    padding: 12px 16px 0;
+}
+
+.save-tag-dialog-header h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+}
+
+/* 弹窗表单区 */
+.save-tag-dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+}
+
+/* "名字" / "模型" 标签文字 */
+.save-tag-dialog-label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* 名字输入框：深色凹陷底 + 聚焦时描边高亮 */
+.save-tag-name-input {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-sizing: border-box;
+    background: #0f0f12;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+}
+
+.save-tag-name-input:focus {
+    border-color: #22c55e;
+}
+
+/* 模型标签组：横向排列，超出换行 */
+.save-tag-model-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* 单个模型标签按钮：默认描边幽灵样式 */
+.save-tag-model-chip {
+    padding: 5px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.save-tag-model-chip:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* 选中状态：绿色实心 */
+.save-tag-model-chip.is-selected {
+    border-color: #22c55e;
+    background: #22c55e;
+    color: #fff;
+}
+
+/* 标签清单为空时的占位提示（后端模型标签全部被删除时出现） */
+.save-tag-models-empty {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* 弹窗底部按钮区 */
+.save-tag-dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 16px 14px;
+}
+
+/* 取消按钮：透明底 + 半透明边框 */
+.save-tag-cancel-btn {
+    padding: 6px 14px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.save-tag-cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 保存按钮：绿色实心主操作 */
+.save-tag-confirm-btn {
+    padding: 6px 16px;
+    border: 0;
+    border-radius: 8px;
+    background: #22c55e;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.save-tag-confirm-btn:hover {
+    background: #16a34a;
+}
+
+/* 保存请求进行中禁用按钮 */
+.save-tag-confirm-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

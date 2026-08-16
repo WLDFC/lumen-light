@@ -1,0 +1,173 @@
+/* ==========================================================================
+   LumenLight 通用自定义下拉（LumenDropdown）样式
+   ==========================================================================
+   视觉遵循 .trae/skills/配色美学/SKILL.md 深色主题色板：
+   面板 #1b1c21、边框 rgba(128,128,128,0.3)、悬停半透明白叠加、
+   按下 0.18、强调 #3b82f6、选中标记青色 #6cebff。
+   触发器沿用调用方的既有类（如 .llm-model-select）获得尺寸与配色，
+   本文件只补：按钮形态重置、展开箭头、菜单浮层与选项样式。
+   ========================================================================== */
+
+/* ---------- 触发器 ---------- */
+
+/* 按钮形态重置：对齐技能栏触发器的观感——透明底、无边框、
+   悬停半透明白叠加（配色美学：叠加式悬停，不换底色）。
+   尺寸/占位沿用调用方的既有类（如 .llm-model-select） */
+button.lumen-dd-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    text-align: left;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background: transparent;
+    border-color: transparent;           /* 保留边框占位，视觉无边框 */
+    color: #ffffff;
+}
+
+button.lumen-dd-trigger:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 展开中：按按下态的叠加强度 */
+.lumen-dd-trigger.lumen-dd-open {
+    background: rgba(255, 255, 255, 0.18);
+    border-color: transparent;
+}
+
+/* 选项图标：纯白线条（Feather 风格，stroke=currentColor） */
+.lumen-dd-trigger .lumen-dd-icon,
+.lumen-dropdown-option .lumen-dd-icon {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    color: #ffffff;
+}
+
+.lumen-dd-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    /* 小尺寸线条图标用细描边，星形/盒形轮廓更清晰（覆盖 svg 属性的 2） */
+    stroke-width: 1.6;
+}
+
+/* 选项文案：超宽截断，悬停看全文（title 由组件写入） */
+.lumen-dd-trigger .lumen-dd-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 展开箭头：随开合旋转 */
+.lumen-dd-trigger .lumen-dd-caret {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    opacity: 0.7;
+    transition: transform 0.15s ease;
+}
+
+.lumen-dd-trigger.lumen-dd-open .lumen-dd-caret {
+    transform: rotate(180deg);
+}
+
+/* ---------- 图标按钮模式 ----------
+   纯图标触发器：小方块 + 白色线条图标，无文字（当前选中在菜单里
+   以青色对勾标记，悬停 title 看全文）。展开时边框与图标变强调蓝，
+   对应用户提供的样式参考图中的蓝色激活态 */
+
+.lumen-dd-trigger.lumen-dd-icon-btn {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
+    background: #1b1c21;                          /* 面板色（配色美学：面板层） */
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    color: #ffffff;
+}
+
+.lumen-dd-trigger.lumen-dd-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);         /* 叠加式悬停，不换底色 */
+    border-color: rgba(128, 128, 128, 0.4);
+}
+
+.lumen-dd-trigger.lumen-dd-icon-btn.lumen-dd-open {
+    background: #1b1c21;
+    border-color: #3b82f6;                        /* 展开中：强调蓝激活态 */
+    color: #3b82f6;
+}
+
+.lumen-dd-trigger.lumen-dd-icon-btn .lumen-dd-icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* ---------- 菜单浮层（挂 body，fixed 定位） ---------- */
+
+.lumen-dropdown-menu {
+    position: fixed;
+    z-index: 1200;                       /* 压过聊天面板与节点(997)/顶栏(998) */
+    min-height: 36px;
+    max-height: 320px;                   /* 长列表内部滚动（如多厂商模型清单） */
+    overflow-y: auto;
+    padding: 5px;
+    background: #1b1c21;                 /* 与尺寸/比例按钮同暗色（配色美学：面板层） */
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    overscroll-behavior: contain;        /* 滚动到底不透传给页面 */
+}
+
+/* ---------- 选项 ---------- */
+
+.lumen-dropdown-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* 悬停：半透明白叠加（配色美学：不换底色） */
+.lumen-dropdown-option:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 键盘导航高亮：与按下态同级的叠加强度 */
+.lumen-dropdown-option.active {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* 选项文案：长模型名截断 */
+.lumen-dropdown-option .dd-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 选中项对勾：青色（与技能菜单、图片选中边框同色） */
+.lumen-dropdown-option .dd-check {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: #6cebff;
+    visibility: hidden;
+}
+
+.lumen-dropdown-option.selected .dd-check {
+    visibility: visible;
+}

@@ -1,0 +1,320 @@
+/**
+ * ==========================================================================
+ * LumenLight 本地资产库窗口样式
+ * 对应组件：js/components/AssetLibrary.js
+ * 位置：屏幕左侧，左侧工具栏按钮旁；300×800，圆角与右侧面板一致(12px)
+ * ==========================================================================
+ */
+
+/* ==================== 窗口容器 ==================== */
+
+.asset-library {
+    position: fixed;
+    left: 62px;                    /* 左侧工具栏(6px + 48px 宽)右侧留出间距 */
+    top: 56px;                     /* 顶栏(48px)下方留出间距，不再垂直居中 */
+    bottom: 100px;                 /* 让出左下角"适应屏幕"按钮与缩放指示器（约80px）*/
+    width: 300px;
+    display: none;
+    flex-direction: column;
+    background: #101014;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 12px;           /* 与右侧面板一致 */
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    z-index: 1150;                 /* 高于左侧工具栏(1100)，低于文件菜单(1200) */
+    overflow: hidden;
+}
+
+.asset-library.show {
+    display: flex;
+}
+
+/* ==================== 头部 ==================== */
+
+.asset-library-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    flex-shrink: 0;
+}
+
+.asset-library-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    user-select: none;
+}
+
+.asset-library-header-spacer {
+    flex: 1;
+}
+
+.asset-library-icon-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.asset-library-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+/* ==================== 标签栏 ==================== */
+
+.asset-library-tagbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+    flex-wrap: wrap;               /* 首行放不下自动换到下一行 */
+    max-height: 90px;              /* 极多标签时的安全上限，超出纵向滚动 */
+    overflow-y: auto;
+    flex-shrink: 0;
+    /* 细滚动条 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128, 128, 128, 0.4) transparent;
+}
+
+.asset-library-tag {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    border: none;                  /* 无轮廓 */
+    background: #1b1c21;           /* 底色与左侧工具栏一致 */
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s ease;
+    flex-shrink: 0;
+}
+
+.asset-library-tag:hover {
+    color: #ffffff;
+}
+
+/* 选中标签：青色文字区分（项目强调色），底色不变 */
+.asset-library-tag.active {
+    color: #6cebff;
+}
+
+.asset-library-tag.active:hover {
+    color: #6cebff;
+}
+
+.asset-library-tag-name {
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.asset-library-tag-del {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    line-height: 1;
+    padding: 0 1px;
+}
+
+.asset-library-tag-del:hover {
+    color: #ef4444;
+}
+
+.asset-library-tag-add {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px dashed rgba(128, 128, 128, 0.45);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    line-height: 20px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.asset-library-tag-add:hover {
+    border-color: #3b82f6;
+    color: #ffffff;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* ==================== 资产网格 ==================== */
+
+.asset-library-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128, 128, 128, 0.4) transparent;
+}
+
+.asset-library-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.asset-card {
+    border-radius: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    background: rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    cursor: grab;
+    user-select: none;
+    transition: border-color 0.15s ease, transform 0.1s ease;
+}
+
+.asset-card:hover {
+    border-color: #3b82f6;
+}
+
+.asset-card:active {
+    cursor: grabbing;
+}
+
+.asset-card-thumb {
+    position: relative;
+    width: 100%;
+    height: 96px;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.asset-card-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.asset-card-video-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* 视频角标：小播放图标；首帧就绪后加底色 */
+.asset-card-play {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    z-index: 1;
+    font-size: 10px;
+    color: #ffffff;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+}
+
+.asset-card-loading {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.asset-card-name {
+    padding: 5px 6px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.7);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ==================== 空状态 / 权限覆盖层 ==================== */
+
+.asset-library-empty {
+    padding: 40px 16px;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    line-height: 1.6;
+}
+
+.asset-library-permission {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 40px 16px;
+    text-align: center;
+}
+
+.asset-library-permission-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+    line-height: 1.6;
+}
+
+.asset-library-permission-btn {
+    padding: 8px 22px;
+    border-radius: 8px;
+    border: none;
+    background: #3b82f6;
+    color: #ffffff;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.asset-library-permission-btn:hover {
+    background: #2563eb;
+}
+
+/* 确认操作按钮排（删除标签等内联确认用） */
+.asset-library-confirm-row {
+    display: flex;
+    gap: 10px;
+}
+
+.asset-library-confirm-btn {
+    padding: 7px 20px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.asset-library-confirm-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.asset-library-confirm-btn.danger {
+    background: #ef4444;
+}
+
+.asset-library-confirm-btn.danger:hover {
+    background: #dc2626;
+}
+
+/* ==================== 工具栏按钮激活态 ==================== */
+/* 窗口打开时，左侧工具栏的文件夹按钮保持蓝色高亮（对齐 hover 体验） */
+.side-toolbar-btn.asset-library-btn.active {
+    background-color: #3b82f6;
+}

@@ -1,0 +1,538 @@
+/**
+ * ==========================================================================
+ * LumenLight 设置界面样式
+ * 作用：定义设置弹窗的左右分栏布局、分类列表、表单输入、模型配置等样式。
+ * ==========================================================================
+ */
+
+/* ==================== 设置弹窗整体 ==================== */
+.settings-modal {
+    position: fixed;          /* 固定定位，脱离文档流 */
+    inset: 0;                /* 等同于 top/right/bottom/left:0，铺满视口 */
+    z-index: 3000;           /* 层级置于其他弹窗之上 */
+    display: flex;           /* 弹性布局，用于居中弹窗主体 */
+    align-items: center;     /* 垂直居中 */
+    justify-content: center; /* 水平居中 */
+    opacity: 0;              /* 初始透明，配合过渡动画 */
+    visibility: hidden;      /* 初始隐藏，避免占位影响交互 */
+    transition: opacity 0.2s ease, visibility 0.2s ease; /* 显示/隐藏过渡动画 */
+}
+
+.settings-modal.show {
+    opacity: 1;             /* 显示时完全不透明 */
+    visibility: visible;     /* 显示时可见 */
+}
+
+/* 遮罩层 */
+.settings-modal-backdrop {
+    position: absolute;     /* 绝对定位，铺满弹窗容器 */
+    inset: 0;               /* 铺满整个视口 */
+    background: rgba(0, 0, 0, 0.6); /* 半透明黑色遮罩，突出弹窗内容 */
+}
+
+/* 弹窗主体：左侧分类 + 右侧内容 */
+.settings-modal-body {
+    position: relative;      /* 相对定位，作为遮罩层的定位上下文 */
+    width: 800px;            /* 弹窗宽度 */
+    max-width: 90vw;         /* 小屏自适应，不超过视口宽度 90% */
+    height: 800px;      /*设置界面的高度*/
+    max-height: 90vh;        /* 小屏自适应，不超过视口高度 90% */
+    display: flex;           /* 弹性布局，横向排列左侧栏与右侧内容 */
+    border-radius: 12px;     /* 圆角 */
+    overflow: hidden;        /* 隐藏溢出，保证圆角效果 */
+    background: #0f0f12;     /* 深色背景 */
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); /* 阴影，增强层次感 */
+}
+
+/* ==================== 左侧分类栏 ==================== */
+.settings-sidebar {
+    width: 200px;            /* 侧边栏固定宽度 */
+    flex-shrink: 0;          /* 不允许收缩，保持宽度 */
+    background: #1b1c21;     /* 侧边栏背景色 */
+    display: flex;           /* 弹性布局 */
+    flex-direction: column;  /* 纵向排列头部与列表 */
+}
+
+.settings-sidebar-header {
+    padding: 16px 18px;      /* 内边距 */
+    font-size: 16px;         /* 标题字号 */
+    font-weight: 600;        /* 字重加粗 */
+    color: #ffffff;          /* 白色文字 */
+}
+
+.settings-category-list {
+    list-style: none;        /* 去除列表默认样式 */
+    margin: 0;               /* 去除外边距 */
+    padding: 8px;            /* 内边距 */
+    flex: 1;                 /* 占满剩余空间 */
+    overflow-y: auto;        /* 内容溢出时纵向滚动 */
+}
+
+.settings-category-item {
+    padding: 10px 12px;      /* 内边距，增大点击区域 */
+    border-radius: 6px;      /* 圆角 */
+    color: #9ca3af;          /* 默认文字颜色（灰色） */
+    font-size: 14px;         /* 字号 */
+    cursor: pointer;         /* 鼠标指针为手型 */
+    transition: background 0.15s ease, color 0.15s ease; /* 背景与文字颜色过渡 */
+    user-select: none;        /* 禁止文字选中 */
+}
+
+.settings-category-item:hover {
+    background: rgba(255, 255, 255, 0.05); /* 悬停时浅色背景 */
+    color: #ffffff;                     /* 悬停时文字变亮 */
+}
+
+.settings-category-item.active {
+    background: rgba(59, 130, 246, 0.2); /* 选中项蓝色半透明背景 */
+    color: #60a5fa;                     /* 选中项文字蓝色 */
+}
+
+/* ==================== 右侧内容区 ==================== */
+.settings-content {
+    flex: 1;                 /* 占满侧边栏右侧剩余空间 */
+    display: flex;           /* 弹性布局 */
+    flex-direction: column;  /* 纵向排列头部与内容 */
+    min-width: 0;            /* 允许内容收缩，防止溢出 */
+}
+
+.settings-content-header {
+    display: flex;                  /* 弹性布局 */
+    align-items: center;            /* 垂直居中 */
+    justify-content: space-between; /* 两端对齐，标题与关闭按钮分列两侧 */
+    padding: 14px 20px;             /* 内边距 */
+}
+
+.settings-content-header h2 {
+    margin: 0;              /* 去除默认外边距 */
+    font-size: 18px;        /* 标题字号 */
+    font-weight: 600;       /* 字重加粗 */
+    color: #ffffff;         /* 白色文字 */
+}
+
+.settings-close-btn {
+    width: 32px;            /* 按钮宽度 */
+    height: 32px;           /* 按钮高度 */
+    border: none;           /* 无边框 */
+    border-radius: 6px;     /* 圆角 */
+    background: transparent;/* 透明背景 */
+    color: #9ca3af;         /* 图标灰色 */
+    font-size: 18px;        /* 图标字号 */
+    cursor: pointer;        /* 手型指针 */
+    display: flex;          /* 弹性布局，居中图标 */
+    align-items: center;    /* 垂直居中 */
+    justify-content: center;/* 水平居中 */
+    transition: background 0.15s ease, color 0.15s ease; /* 悬停过渡 */
+}
+
+.settings-close-btn:hover {
+    background: rgba(255, 255, 255, 0.1); /* 悬停浅色背景 */
+    color: #ffffff;                     /* 悬停文字变白 */
+}
+
+.settings-content-body {
+    flex: 1;                /* 占满头部下方剩余空间 */
+    padding: 20px;          /* 内边距 */
+    overflow-y: auto;       /* 内容溢出纵向滚动 */
+}
+
+/* ==================== 表单样式 ==================== */
+.settings-form {
+    display: flex;          /* 弹性布局 */
+    flex-direction: column; /* 纵向排列表单项 */
+    gap: 18px;              /* 表单项之间的间距 */
+}
+
+.settings-form-item {
+    display: flex;          /* 弹性布局 */
+    flex-direction: column;/* 纵向排列标签与输入框 */
+    gap: 8px;               /* 标签与输入框间距 */
+}
+
+.settings-form-item label {
+    font-size: 13px;        /* 标签字号 */
+    font-weight: 500;       /* 字重 */
+    color: #ffffff;         /* 标签文字颜色 */
+}
+
+.settings-input {
+    padding: 10px 12px;     /* 内边距 */
+    border: 1px solid rgba(128, 128, 128, 0.3); /* 半透明边框 */
+    border-radius: 6px;     /* 圆角 */
+    background-color: #0f0f12; /* 输入框背景色 */
+    color: #ffffff;         /* 文字颜色 */
+    font-size: 14px;        /* 字号 */
+    outline: none;          /* 去除默认聚焦轮廓 */
+    transition: border-color 0.15s ease; /* 边框颜色过渡 */
+}
+
+.settings-input:focus {
+    border-color: #3b82f6;  /* 聚焦时边框变蓝 */
+}
+
+.settings-input option {
+    background-color: #0f0f12; /* 下拉选项背景色 */
+    color: #ffffff;         /* 下拉选项文字颜色 */
+}
+
+.settings-form-actions {
+    display: flex;          /* 弹性布局 */
+    justify-content: flex-start; /* 按钮左对齐 */
+    margin-top: 8px;        /* 与上方表单项间距 */
+}
+
+.settings-save-btn {
+    padding: 10px 20px;     /* 内边距 */
+    border: none;           /* 无边框 */
+    border-radius: 6px;     /* 圆角 */
+    background: #3b82f6;    /* 蓝色背景 */
+    color: #ffffff;         /* 白色文字 */
+    font-size: 14px;        /* 字号 */
+    font-weight: 500;       /* 字重 */
+    cursor: pointer;        /* 手型指针 */
+    transition: background 0.15s ease; /* 背景过渡 */
+}
+
+.settings-save-btn:hover {
+    background: #2563eb;    /* 悬停时加深蓝色 */
+}
+
+.settings-save-status {
+    min-height: 20px;      /* 最小高度，避免状态文字出现时布局抖动 */
+    font-size: 13px;        /* 状态文字字号 */
+    color: #9ca3af;         /* 默认状态文字颜色 */
+}
+
+.settings-save-status.success {
+    color: #34d399;         /* 成功状态绿色 */
+}
+
+.settings-save-status.error {
+    color: #f87171;         /* 错误状态红色 */
+}
+
+/* ==================== 模型配置 ==================== */
+.settings-models-section {
+    display: flex;          /* 弹性布局 */
+    flex-direction: column;/* 纵向排列 */
+    gap: 12px;              /* 内部元素间距 */
+    padding: 16px;          /* 内边距 */
+    border-radius: 8px;     /* 圆角 */
+    background: #25262b;     /* 模型配置区背景色 */
+}
+
+.settings-models-header {
+    display: flex;                  /* 弹性布局 */
+    align-items: center;            /* 垂直居中 */
+    justify-content: space-between; /* 标题与操作按钮分列两侧 */
+}
+
+.settings-models-title {
+    font-size: 15px;        /* 标题字号 */
+    font-weight: 600;       /* 字重加粗 */
+    color: #ffffff;         /* 白色文字 */
+}
+
+.settings-models-actions {
+    display: flex;          /* 弹性布局 */
+    align-items: center;    /* 垂直居中 */
+    gap: 8px;               /* 按钮间距 */
+}
+
+.settings-models-btn {
+    padding: 6px 12px;      /* 内边距 */
+    border: 1px solid rgba(128, 128, 128, 0.3); /* 半透明边框 */
+    border-radius: 6px;     /* 圆角 */
+    background: transparent; /* 透明背景 */
+    color: #ffffff;         /* 文字颜色 */
+    font-size: 13px;        /* 字号 */
+    cursor: pointer;        /* 手型指针 */
+    transition: background 0.15s ease, color 0.15s ease; /* 悬停过渡 */
+    display: flex;          /* 弹性布局 */
+    align-items: center;    /* 垂直居中 */
+    gap: 4px;               /* 图标与文字间距 */
+}
+
+.settings-models-btn:hover {
+    background: rgba(255, 255, 255, 0.05); /* 悬停浅色背景 */
+    color: #ffffff;                     /* 悬停文字变白 */
+}
+
+.settings-models-btn.primary {
+    background: #3b82f6;            /* 主按钮蓝色背景 */
+    border-color: #3b82f6;         /* 边框同背景色 */
+    color: #ffffff;                 /* 白色文字 */
+}
+
+.settings-models-btn.primary:hover {
+    background: #2563eb;    /* 悬停时加深蓝色 */
+}
+
+.settings-models-btn:disabled {
+    opacity: 0.5;           /* 禁用时半透明 */
+    cursor: not-allowed;    /* 禁用指针 */
+}
+
+/* ==================== 提供商行（选择 + 添加/删除自定义厂商） ==================== */
+/* 厂商下拉框与操作按钮同行排列，下拉框占满剩余宽度 */
+.settings-provider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-provider-row .settings-input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* 危险操作按钮（删除自定义厂商）：红色文字提示不可逆操作 */
+.settings-models-btn.danger {
+    color: #ff6b6b;
+}
+
+.settings-models-btn.danger:hover {
+    background: rgba(255, 107, 107, 0.12);
+    color: #ff6b6b;
+}
+
+/* 两段式确认的待确认态：实底红色，提示再次点击将执行 */
+.settings-models-btn.danger-confirm {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #ffffff;
+}
+
+.settings-models-btn.danger-confirm:hover {
+    background: #b91c1c;
+    color: #ffffff;
+}
+
+.settings-models-table {
+    display: flex;          /* 弹性布局 */
+    flex-direction: column; /* 纵向排列各行 */
+    gap: 8px;               /* 表头与数据行之间的间距 */
+}
+
+.settings-models-row.head {
+    display: grid;          /* 网格布局 */
+    grid-template-columns: 1fr 1fr 76px 32px; /* 四列：模型ID、名称、类型、删除按钮 */
+    gap: 10px;              /* 列间距 */
+    padding: 0 8px;         /* 左右内边距，与数据行对齐 */
+    font-size: 13px;        /* 表头字号 */
+    color: #9ca3af;         /* 表头文字颜色（灰色） */
+}
+
+.settings-models-row.head span:first-child {
+    margin-left: 8px;       /* 第一列表头左缩进，与下拉框文字对齐 */
+}
+
+.settings-models-row {
+    display: grid;          /* 网格布局 */
+    grid-template-columns: 1fr 1fr 76px 32px; /* 四列：模型ID下拉框、名称输入框、类型下拉框、删除按钮 */
+    gap: 10px;              /* 列与列之间的水平间距 */
+    align-items: center;    /* 垂直居中对齐 */
+}
+
+.settings-models-row:not(.head) {
+    margin-top: 8px;         /* 数据行之间的上下间距（不含表头行） */
+}
+
+.settings-model-id {
+    width: 100%;            /* 模型ID下拉框占满列宽 */
+}
+
+.settings-model-name {
+    width: 100%;            /* 模型名称输入框占满列宽 */
+}
+
+.settings-model-type {
+    width: 100%;            /* 模型类型下拉框占满列宽 */
+}
+
+.settings-model-delete {
+    width: 32px;            /* 删除按钮宽度 */
+    height: 32px;           /* 删除按钮高度 */
+    border: none;           /* 无边框 */
+    border-radius: 6px;     /* 圆角 */
+    background: transparent;/* 透明背景 */
+    color: #9ca3af;         /* 图标灰色 */
+    font-size: 16px;        /* 图标字号 */
+    cursor: pointer;        /* 手型指针 */
+    display: flex;          /* 弹性布局，居中图标 */
+    align-items: center;    /* 垂直居中 */
+    justify-content: center;/* 水平居中 */
+    transition: background 0.15s ease, color 0.15s ease; /* 悬停过渡 */
+}
+
+.settings-model-delete:hover {
+    background: rgba(239, 68, 68, 0.1); /* 悬停红色半透明背景 */
+    color: #ef4444;                     /* 悬停图标变红 */
+}
+
+.settings-models-hint {
+    font-size: 12px;        /* 提示文字字号 */
+    color: #6b7280;         /* 提示文字颜色（深灰） */
+}
+
+/* ==================== 抠图模型管理 ==================== */
+.settings-rembg-item {
+    display: flex;              /* 弹性布局 */
+    flex-direction: column;     /* 主信息行与进度行纵向排列 */
+    gap: 10px;                  /* 行间距 */
+    padding: 12px;              /* 内边距 */
+    border-radius: 6px;         /* 圆角 */
+    background: rgba(255, 255, 255, 0.03); /* 卡片浅色背景 */
+}
+
+.settings-rembg-item + .settings-rembg-item {
+    margin-top: 8px;            /* 多个模型卡片之间的间距 */
+}
+
+.settings-rembg-main {
+    display: flex;                  /* 弹性布局 */
+    align-items: center;            /* 垂直居中 */
+    justify-content: space-between; /* 信息与操作按钮分列两侧 */
+    gap: 12px;                      /* 两侧间距 */
+}
+
+.settings-rembg-info {
+    display: flex;          /* 弹性布局 */
+    flex-direction: column; /* 名称与描述纵向排列 */
+    gap: 4px;               /* 名称与描述间距 */
+    min-width: 0;           /* 允许描述文字收缩换行 */
+}
+
+.settings-rembg-name {
+    font-size: 14px;        /* 模型名称字号 */
+    color: #ffffff;         /* 白色文字 */
+}
+
+.settings-rembg-desc {
+    font-size: 12px;        /* 描述字号 */
+    color: #9ca3af;         /* 描述文字灰色 */
+}
+
+.settings-rembg-actions {
+    display: flex;          /* 弹性布局 */
+    align-items: center;    /* 垂直居中 */
+    gap: 8px;               /* 状态标签与按钮间距 */
+    flex-shrink: 0;         /* 操作区不被压缩 */
+}
+
+.settings-rembg-badge {
+    font-size: 12px;        /* 已下载标签字号 */
+    color: #4ade80;         /* 绿色表示可用 */
+    white-space: nowrap;    /* 不换行 */
+}
+
+.settings-rembg-progress {
+    display: flex;          /* 弹性布局 */
+    flex-direction: column; /* 进度条与文字纵向排列 */
+    gap: 6px;               /* 间距 */
+}
+
+.settings-rembg-progress-bar {
+    height: 4px;            /* 进度条高度 */
+    border-radius: 2px;     /* 圆角 */
+    background: rgba(255, 255, 255, 0.1); /* 进度条底色 */
+    overflow: hidden;       /* 裁剪超出的填充部分 */
+}
+
+.settings-rembg-progress-fill {
+    height: 100%;           /* 填充满进度条高度 */
+    background: #3b82f6;     /* 蓝色填充 */
+    transition: width 0.3s ease; /* 宽度变化过渡，让进度增长更平滑 */
+}
+
+.settings-rembg-progress-text {
+    font-size: 12px;        /* 进度文字字号 */
+    color: #9ca3af;         /* 灰色文字 */
+}
+
+/* ==================== 滑动开关 ==================== */
+.settings-switch-row {
+    display: flex;                  /* 弹性布局 */
+    align-items: center;            /* 垂直居中 */
+    justify-content: space-between; /* 文字与开关分列两侧 */
+    gap: 16px;                      /* 两侧间距 */
+}
+
+.settings-switch-info {
+    display: flex;          /* 弹性布局 */
+    flex-direction: column; /* 标题与描述纵向排列 */
+    gap: 4px;               /* 标题与描述间距 */
+    min-width: 0;           /* 允许描述文字收缩换行 */
+}
+
+.settings-switch-label {
+    font-size: 14px;        /* 开关标题字号 */
+    color: #ffffff;         /* 白色文字 */
+}
+
+.settings-switch-desc {
+    font-size: 12px;        /* 描述字号 */
+    color: #9ca3af;         /* 描述文字灰色 */
+}
+
+/* 开关外壳：包裹隐藏的原生 checkbox 与可视轨道 */
+.settings-switch {
+    position: relative;     /* 相对定位，作为滑块的定位上下文 */
+    display: inline-block;  /* 行内块，尺寸由宽高决定 */
+    width: 40px;            /* 轨道宽度 */
+    height: 22px;           /* 轨道高度 */
+    flex-shrink: 0;         /* 不被文字挤压 */
+}
+
+/* 隐藏原生 checkbox，仅保留其状态用于 :checked 选择器 */
+.settings-switch input {
+    position: absolute;     /* 绝对定位，脱离文档流 */
+    opacity: 0;             /* 完全透明 */
+    width: 0;               /* 不占宽度 */
+    height: 0;              /* 不占高度 */
+}
+
+/* 可视轨道 */
+.settings-switch-slider {
+    position: absolute;     /* 绝对定位，铺满开关外壳 */
+    inset: 0;               /* 等同 top/right/bottom/left:0 */
+    border-radius: 22px;    /* 胶囊形圆角，与高度一致 */
+    background: rgba(255, 255, 255, 0.15); /* 关闭态轨道底色 */
+    cursor: pointer;        /* 手型指针 */
+    transition: background 0.2s ease; /* 背景色过渡 */
+}
+
+/* 圆形滑块 */
+.settings-switch-slider::before {
+    content: '';            /* 伪元素必需属性 */
+    position: absolute;     /* 绝对定位于轨道内 */
+    left: 3px;              /* 关闭态贴左侧 */
+    top: 3px;               /* 垂直居中：(22-16)/2 */
+    width: 16px;            /* 滑块直径 */
+    height: 16px;           /* 滑块直径 */
+    border-radius: 50%;     /* 正圆 */
+    background: #ffffff;    /* 白色滑块 */
+    transition: transform 0.2s ease; /* 位移过渡，形成滑动效果 */
+}
+
+.settings-switch input:checked + .settings-switch-slider {
+    background: #3b82f6;    /* 开启态轨道变蓝，与主按钮同色 */
+}
+
+.settings-switch input:checked + .settings-switch-slider::before {
+    transform: translateX(18px); /* 开启态滑块右移：40-16-3*2 */
+}
+
+.settings-switch input:focus-visible + .settings-switch-slider {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* 键盘聚焦时的可访问性提示 */
+}
+
+/* ==================== 空状态 ==================== */
+.settings-empty {
+    display: flex;          /* 弹性布局 */
+    align-items: center;    /* 垂直居中 */
+    justify-content: center;/* 水平居中 */
+    height: 100%;           /* 占满父容器高度 */
+    color: #6b7280;         /* 空状态文字颜色 */
+    font-size: 14px;        /* 字号 */
+}

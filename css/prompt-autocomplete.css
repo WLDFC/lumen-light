@@ -1,0 +1,86 @@
+/*
+ * 提示词自动补全样式表
+ * 用于匹配下拉列表的显示样式，与项目深色主题保持一致
+ */
+
+/* 自动补全下拉列表容器 */
+.prompt-autocomplete-list {
+    position: absolute;
+    z-index: 10000;
+    background: var(--panel-bg, #1a1a1e);
+    border: 1px solid var(--border-color, #2a2a2e);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    max-height: 300px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 200px;
+    display: none;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text-color, #e0e0e0);
+}
+
+/* 下拉列表中每一项 */
+.prompt-autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--border-color, #2a2a2e);
+    transition: background-color 0.15s ease;
+}
+
+.prompt-autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+/* 鼠标悬停或键盘选中 */
+.prompt-autocomplete-item:hover,
+.prompt-autocomplete-item.active {
+    background: var(--accent-color, #3b82f6);
+    color: #ffffff;
+}
+
+/* 中文词汇显示 */
+.prompt-autocomplete-cn {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 英文提示词显示 */
+.prompt-autocomplete-en {
+    color: var(--text-muted, #a0a0a0);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+    text-align: right;
+}
+
+/* 选中或悬停时英文颜色变浅 */
+.prompt-autocomplete-item:hover .prompt-autocomplete-en,
+.prompt-autocomplete-item.active .prompt-autocomplete-en {
+    color: #ffffff;
+}
+
+/* 无匹配结果时的提示 */
+.prompt-autocomplete-empty {
+    padding: 10px 12px;
+    color: var(--text-muted, #a0a0a0);
+    font-size: 12px;
+    text-align: center;
+}
+
+/* 加载提示 */
+.prompt-autocomplete-loading {
+    padding: 10px 12px;
+    color: var(--text-muted, #a0a0a0);
+    font-size: 12px;
+    text-align: center;
+}

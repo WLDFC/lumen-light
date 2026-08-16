@@ -1,0 +1,87 @@
+/**
+ * ==========================================================================
+ * LumenLight 顶部工具栏样式
+ * 作用：定义画布顶部一条 60px 高、横向铺满的工具栏，采用三段式布局：
+ *       - 左段：文件菜单按钮 + 当前画布名称
+ *       - 中段：图像管理等全局工具按钮（后续在此扩展）
+ *       - 右段：提示词面板开关按钮
+ *       顶栏以不透明浮层形式盖在画布之上，画布本身尺寸不变。
+ * 层级说明：z-index 998，低于右侧面板(999)，
+ *           因此面板展开时会自然盖过顶栏右端。
+ * 对应结构：index.html 中的 .top-toolbar
+ * ==========================================================================
+ */
+
+/* ==================== 顶栏容器 ==================== */
+.top-toolbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 48px;
+    box-sizing: border-box;
+    background: #0f0f12;           /* 不透明面板背景，不使用毛玻璃 */
+    border-bottom: 1px solid rgba(128, 128, 128, 0.15);   /* 底部边框 */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    z-index: 998;                  /* 低于右侧面板(999)，高于画布 */
+}
+
+/* ==================== 三个分段 ==================== */
+/* 左段：文件菜单 + 画布名，内容宽度自适应但不挤压中段 */
+.top-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* 中段：新增工具按钮区，占据剩余空间并居中排列 */
+.top-toolbar-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;                  /* 允许在窄屏下被压缩，避免撑破顶栏 */
+}
+
+/* 右段：提示词面板开关 */
+.top-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* ==================== 顶栏工具按钮 ==================== */
+/* 图标 + 文字的横向按钮，供图像管理等功能使用 */
+.top-toolbar-btn {
+    height: 40px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #fff;
+    font-size: 14px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.top-toolbar-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.top-toolbar-btn:active {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.top-toolbar-btn svg {
+    flex-shrink: 0;
+}

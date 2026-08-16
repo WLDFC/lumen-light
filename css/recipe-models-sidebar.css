@@ -1,0 +1,172 @@
+/**
+ * 提示词收藏页左侧模型标签栏样式（recipe-models-sidebar.css）
+ *
+ * 作用：定义收藏弹窗内容区左侧 220px 标签栏的视觉样式——
+ *       标题行（"模型" + 新建按钮）、标签列表（独立滚动）、
+ *       标签条目（主体点击筛选 + 悬停显示删除 ×）、行内新建输入框。
+ *
+ * 配套文件：
+ *   js/components/RecipeManager.js   # 侧栏结构与交互逻辑
+ *   css/recipe-manager.css           # 弹窗骨架与分栏布局（.recipe-dialog-content）
+ *
+ * 布局关系：
+ *   .recipe-dialog-content 为 flex 行布局，本侧栏是第一个子项，
+ *   右侧 .recipe-cards-area 占据剩余宽度。侧栏自身 overflow-y:auto，
+ *   与卡片区各自独立滚动（用户要求：左侧栏可通过鼠标滚轮下滑）。
+ *
+ * 配色遵循项目深色主题色板：
+ *   侧栏背景 #15161a（比卡片区 #0f0f12 略浅，形成层次），
+ *   右侧分割线 rgba(128,128,128,0.2)，
+ *   选中态绿 #22c55e，删除红 #ef4444。
+ */
+
+/* ===== 侧栏骨架 ===== */
+
+/* 220px 固定宽度栏：不随窗口压缩（flex-shrink:0），纵向排列，列表区自身滚动 */
+.recipe-models-sidebar {
+    flex-shrink: 0;
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;              /* 允许子列表压缩滚动 */
+    border-right: 1px solid rgba(128, 128, 128, 0.2);
+    background: #15161a;
+}
+
+/* ===== 标题行 ===== */
+
+/* "模型" 标题 + 右侧 ＋ 新建按钮 */
+.recipe-models-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 12px 8px;
+}
+
+/* 标题文字 */
+.recipe-models-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* 新建按钮：小圆形 + 号，悬停变亮 */
+.recipe-models-add-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.recipe-models-add-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* ===== 标签列表 ===== */
+
+/* 纵向列表：鼠标滚轮在此区域内独立下滑 */
+.recipe-models-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 8px 12px;
+}
+
+/* 单个标签条目：行式布局，左侧标签名 + 右侧删除按钮（悬停显示） */
+.recipe-models-item {
+    display: flex;
+    align-items: center;
+    border-radius: 8px;
+}
+
+/* 标签名主体按钮：占满整行，点击切换筛选 */
+.recipe-models-label {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    height: 44px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 18px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;    /* 超长标签名省略号截断 */
+    transition: background 0.12s, color 0.12s;
+}
+
+.recipe-models-label:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+/* 当前筛选中的标签：绿色高亮（与保存弹窗选中态一致） */
+.recipe-models-item.is-active .recipe-models-label {
+    background: rgba(34, 197, 94, 0.16);
+    color: #22c55e;
+    font-weight: 600;
+}
+
+/* 删除按钮：默认隐藏，悬停条目时淡入显示 */
+.recipe-models-remove-btn {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    margin-left: 4px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+/* 悬停条目才显示删除按钮（避免误点，与卡片删除按钮交互一致） */
+.recipe-models-item:hover .recipe-models-remove-btn {
+    display: flex;
+}
+
+.recipe-models-remove-btn:hover {
+    background: #ef4444;
+    color: #fff;
+}
+
+/* ===== 行内新建输入框 ===== */
+
+/* 出现在列表底部的输入框：回车提交 / Esc 取消 */
+.recipe-models-input {
+    width: 100%;
+    height: 44px;
+    margin: 4px 0;
+    padding: 0 12px;
+    border: 1px solid rgba(34, 197, 94, 0.6);
+    border-radius: 8px;
+    box-sizing: border-box;
+    background: #0f0f12;
+    color: #fff;
+    font-size: 18px;
+    outline: none;
+}
+
+.recipe-models-input:focus {
+    border-color: #22c55e;
+}

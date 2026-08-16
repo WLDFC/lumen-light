@@ -1,0 +1,64 @@
+{
+  "14": {
+    "inputs": {
+      "image_path_or_URL": "",
+      "image": "810f0607-4921-453b-90b8-291f7947a966.png",
+      "mask_channel": "alpha",
+      "upscale_method": "lanczos",
+      "megapixels": 0,
+      "scale_by": 1,
+      "resize_mode": "longest_side",
+      "size": 0
+    },
+    "class_type": "AILab_LoadImageAdvanced",
+    "_meta": {
+      "title": "加载图像 高级(RMBG) 🖼️"
+    }
+  },
+  "15": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": true,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "去除背景 (RMBG)"
+    }
+  },
+  "18": {
+    "inputs": {
+      "slot": "1",
+      "wait_for_image": true,
+      "force_reload": true,
+      "seed": 35677756377177
+    },
+    "class_type": "LumenReceiveImageFromCanvas",
+    "_meta": {
+      "title": "💡 From Canvas (Edit Image)"
+    }
+  },
+  "19": {
+    "inputs": {
+      "auto_send": true,
+      "images": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "LumenSendImageRealtime",
+    "_meta": {
+      "title": "💡 To Canvas (Image)"
+    }
+  }
+}
