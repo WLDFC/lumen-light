@@ -14,5 +14,11 @@ data/autosave/
 # 视频生成缓存（临时下载的视频文件，不属于代码）
 data/videos/
 
+# pi 运行时数据（会话文件、agent.log、控制台日志、pi 临时工作区）
+data/pi/
+
+# 根目录临时调试脚本（tmp_*.js 约定为一次性调试用，不进版本库）
+/tmp_*.js
+
 # pi 编码智能体完整包（421MB，开源发行时随 release 包分发，不进 git）
 pi/

@@ -96,6 +96,19 @@ const LumenLight = {
     },
 
     /**
+     * 按名称纯识别图像生成模型（type=auto/未标记时的共享口径）。
+     * LlmChat.isImageModel、pi 模型下拉、后端 pi 注册过滤联动使用：
+     * 防止生图模型因 type 标记缺失混进 pi / 聊天路径
+     * @param {string} modelId - 纯模型 ID（不含厂商复合键）
+     * @returns {boolean}
+     */
+    looksLikeImageModel(modelId) {
+        const keywords = ['seedream', 'dall-e', 'dalle', 'midjourney', 'sdxl', 'flux', 'image'];
+        const lower = String(modelId || '').toLowerCase();
+        return keywords.some((k) => lower.includes(k));
+    },
+
+    /**
      * 聚合所有「已配置」（有端点和 Key）厂商的模型列表。
      * 多厂商并存的前端基础：对话/生图/技能的模型下拉框都从这里取数据，
      * 请求时显式携带厂商名，后端直接路由到对应厂商（见 routes/llm.js）。

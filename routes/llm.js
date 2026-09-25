@@ -27,6 +27,9 @@ const { createVideoTask, queryVideoTask, downloadVideo } = require('../utils/vid
 // 模型协议适配器注册表：generate-image 按模型家族挑选适配器执行
 const { pickImageAdapter } = require('../utils/modelAdapters');
 
+// 文档文本提取（用户上传的 txt/pdf/docx/xlsx 等在后端解析成纯文本）
+const fileTextExtractor = require('../utils/fileTextExtractor');
+
 /**
  * 创建 LLM 聊天路由
  * @param {Object} options - 依赖项
@@ -112,7 +115,7 @@ function createLlmRouter({ dataDir }) {
      */
     router.post('/chat', async (req, res) => {
         try {
-            const { model, messages, images, provider } = req.body || {};
+            const { model, messages, images, files, provider } = req.body || {};
 
             if (!model) {
                 return res.status(400).json({ status: 'error', message: '请先在聊天窗口选择模型' });
@@ -135,15 +138,30 @@ function createLlmRouter({ dataDir }) {
             }
 
             // 构造 OpenAI 兼容的消息列表：
-            // 如果本次消息带图片，将最后一条用户消息转为多模态内容数组
+            // 本次消息若带图片，将最后一条用户消息转为多模态内容数组；
+            // 若带文档附件，把提取出的文本拼在用户正文之后（大多数 OpenAI
+            // 兼容接口不收原文件，只收文本，故统一以文本形式提交）
             const imageList = Array.isArray(images) ? images : [];
+            const fileList = Array.isArray(files)
+                ? files.filter((f) => f && typeof f.text === 'string' && f.text.length > 0)
+                : [];
+            // 附件文本块：每个文件一段，标注文件名与是否被截断
+            const fileBlock = fileList
+                .map((f) => `【附件 ${f.name || '文件'}${f.truncated ? '（内容过长已截断）' : ''}】\n${f.text}`)
+                .join('\n\n');
+
             const payloadMessages = messages.map((msg, index) => {
                 const isLastUser = index === messages.length - 1 && msg.role === 'user';
-                if (isLastUser && imageList.length > 0) {
+                if (isLastUser && (imageList.length > 0 || fileList.length > 0)) {
+                    const text = (msg.content || '') + (fileBlock ? `\n\n${fileBlock}` : '');
+                    // 无图片时保持纯字符串 content（兼容性最好）；有图片才转多模态数组
+                    if (imageList.length === 0) {
+                        return { role: 'user', content: text };
+                    }
                     return {
                         role: 'user',
                         content: [
-                            { type: 'text', text: msg.content || '' },
+                            { type: 'text', text },
                             ...imageList.map((dataUrl) => ({
                                 type: 'image_url',
                                 image_url: { url: dataUrl }
@@ -168,6 +186,50 @@ function createLlmRouter({ dataDir }) {
             res.status(500).json({
                 status: 'error',
                 message: error.message || '聊天请求失败'
+            });
+        }
+    });
+
+    /**
+     * POST /api/llm/extract-file
+     * 解析用户上传的文档，返回纯文本（前端在添加附件时调用，提前拿到文本并缓存）。
+     * 请求体：{ filename: string, dataUrl: string }
+     *   - dataUrl：文件的 base64 data URL（与图片附件一致的传输方式，无需 multipart）
+     * 返回：{ status:'ok', text, truncated, charCount, ext, empty }
+     *   或 { status:'error', message }
+     */
+    router.post('/extract-file', async (req, res) => {
+        try {
+            const { filename, dataUrl } = req.body || {};
+
+            if (!dataUrl || typeof dataUrl !== 'string') {
+                return res.status(400).json({ status: 'error', message: '缺少文件数据' });
+            }
+            if (!fileTextExtractor.isSupported(filename)) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: '暂不支持该文件格式（支持 txt/md/csv/json/pdf/docx/xls/xlsx 等）'
+                });
+            }
+
+            // 解析 data URL：data:[<mime>][;base64],<内容>；兼容直接传 base64 字符串
+            const match = /^data:([^;,]*)?(;base64)?,([\s\S]*)$/.exec(dataUrl);
+            let buffer;
+            if (match && match[2]) {
+                buffer = Buffer.from(match[3], 'base64');
+            } else if (match) {
+                buffer = Buffer.from(decodeURIComponent(match[3]), 'utf8');
+            } else {
+                buffer = Buffer.from(dataUrl, 'base64');
+            }
+
+            const result = await fileTextExtractor.extractText({ buffer, filename });
+            res.json({ status: 'ok', ...result });
+        } catch (error) {
+            console.error('文档解析失败:', error);
+            res.status(500).json({
+                status: 'error',
+                message: error.message || '文档解析失败'
             });
         }
     });

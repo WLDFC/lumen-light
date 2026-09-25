@@ -85,7 +85,7 @@
   },
   "806": {
     "inputs": {
-      "unet_name": "anima\\miaomiaoHarem_anima14.safetensors",
+      "unet_name": "anima\\miaomiaoHarem_anima16.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",

@@ -122,10 +122,30 @@
                 <option value="llm">LLM</option>
             </select>
 
+            <!-- pi 智能体健康状态灯：紧贴模式选择器右侧（margin-right:auto 吸附）。
+                 灰=未运行 / 绿=健康 / 黄=疑似卡死 / 红=已崩溃；
+                 黄/红可点击重启（kill 后自动拉起接续会话），仅 LLM 模式显示。
+                 组件：js/components/PiStatusLight.js -->
+            <div class="pi-status-indicator" id="piStatus" title="智能体状态">
+                <span class="status-dot"></span>
+                <span class="status-text"></span>
+            </div>
+
+            <!-- pi 调用统计灰字（上下文 token · 缓存命中率），仅 LLM 模式显示；
+                 数据来自 pi message_end 的 message.usage，样式对齐顶栏自动保存灰字 -->
+            <span class="pi-usage-status" id="piUsageStatus" style="display:none"></span>
+
             <!-- ComfyUI 连接状态指示灯，显示 ComfyUI 服务是否可连接 -->
             <div class="comfy-status-indicator" id="comfyStatus" title="ComfyUI 连接状态">
                 <span class="status-dot"></span>
                 <span class="status-text">检测中...</span>
+            </div>
+
+            <!-- 头部图标按钮组：系统提示词按钮由 JS 插入到清空按钮前，
+                 形成「系统提示词 - 清空对话 - 收起」图标组（组内间距见 .prompt-header-actions） -->
+            <div class="prompt-header-actions">
+                <!-- 清空对话按钮（图标：垃圾桶；仅 LLM 模式显示，显隐由 LlmChat 控制） -->
+                <button class="llm-header-icon-btn" id="llmClearBtn" type="button" title="清空对话"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
             </div>
 
             <!-- 收起右侧面板按钮（图标：双箭头向内收拢） -->
@@ -261,8 +281,7 @@
                 <div class="llm-chat-inputbar">
                     <textarea id="llmInput" rows="8" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
                     <div class="llm-chat-toolbar">
-                        <button class="llm-tool-btn" id="llmUploadBtn" type="button" title="上传图片"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
-                        <button class="llm-tool-btn" id="llmClearBtn" type="button" title="清空对话"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+                        <button class="llm-tool-btn" id="llmUploadBtn" type="button" title="上传文件（图片/视频/文档）"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
                         <button type="button" class="llm-quality-select" id="llmQualitySelect" aria-label="选择图片生成质量" title="图片生成质量" aria-haspopup="listbox"></button>
                         <button type="button" class="llm-model-select" id="llmModelSelect" aria-label="选择模型" aria-haspopup="listbox"></button>
                         <div class="llm-size-select-wrap">
@@ -280,7 +299,7 @@
                         <div class="llm-toolbar-spacer"></div>
                         <button class="llm-send-btn" id="llmSendBtn" type="button">发送</button>
                     </div>
-                    <input type="file" id="llmFileInput" accept="image/*,video/*" multiple style="display: none;">
+                    <input type="file" id="llmFileInput" accept="image/*,video/*,.txt,.md,.markdown,.csv,.tsv,.log,.json,.xml,.yaml,.yml,.ini,.conf,.srt,.vtt,.pdf,.docx,.xls,.xlsx,.xlsm" multiple style="display: none;">
                 </div>
             </div>
         </section>
@@ -337,6 +356,7 @@
            js/components/LlmSizePicker.js       LLM 比例与分辨率选择面板
            js/components/LlmImageDrag.js        LLM 图片拖到画布
            js/components/LlmChat.js             LLM 聊天窗口
+           js/components/PiStatusLight.js       pi 智能体健康状态灯（面板头部）
            js/components/LlmSystemPrompt.js     系统提示词管理（弹窗与启用状态）
            js/components/PromptPanel.js         右侧面板主组件
 
@@ -414,6 +434,7 @@
     <script defer src="js/components/LlmImageDrag.js"></script>
     <script defer src="js/components/LlmVideoGen.js"></script>
     <script defer src="js/components/LlmPiAgent.js"></script>
+    <script defer src="js/components/PiStatusLight.js"></script>
     <script defer src="js/components/LumenDropdown.js"></script>
     <script defer src="js/components/LlmChat.js"></script>
     <script defer src="js/components/LlmSystemPrompt.js"></script>

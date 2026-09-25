@@ -166,7 +166,12 @@ class SettingsGeneralPanel {
                 .then((result) => {
                     const api = result.settings?.api || {};
                     const models = LumenLight.collectConfiguredModels(api)
-                        .models.filter((m) => m.type !== 'image' && m.type !== 'video');
+                        .models.filter((m) => {
+                            if (m.type === 'image' || m.type === 'video') return false;
+                            // auto/未标记按名称口径排除（与 isImageModel 一致），
+                            // 防止 gpt-image-* 等生图模型被选为 pi 底层模型
+                            return m.type === 'chat' || !LumenLight.looksLikeImageModel(m.id);
+                        });
                     for (const m of models) {
                         const opt = document.createElement('option');
                         opt.value = m.key;

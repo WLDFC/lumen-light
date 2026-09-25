@@ -96,7 +96,23 @@ function createCanvasBridgeRouter({ clients }) {
         }, BRIDGE_TIMEOUT_MS);
         pending.set(id, { res, timer });
 
+        // 目标客户端断线即释放：挂起的请求会占住发起方（pi）的连接，
+        // 等满 30s 超时纯属浪费，断线时立即明确报错
+        let alive = targets.length;
+        const onTargetClose = () => {
+            if (--alive > 0) return;   // 广播读命令：还有其他候选客户端
+            const waiter = pending.get(id);
+            if (!waiter) return;       // 已正常应答，忽略迟到的 close
+            clearTimeout(waiter.timer);
+            pending.delete(id);
+            waiter.res.status(503).json({
+                status: 'error',
+                message: '画布客户端已断开，命令未执行'
+            });
+        };
+
         for (const client of targets) {
+            client.ws.once('close', onTargetClose);
             client.ws.send(JSON.stringify({
                 type: 'bridge-command',
                 id,
@@ -128,6 +144,10 @@ function createCanvasBridgeRouter({ clients }) {
         } else {
             waiter.res.json({ status: 'error', id, message: error || '画布执行失败' });
         }
+        // 必须应答浏览器本次 /response 请求本身：上面两句回复的是 pi 侧挂起的
+        // /command 请求（waiter.res），而浏览器这个 fetch 若收不到响应会永远挂起，
+        // 占住同源 6 连接池之一——约 6 条桥接命令后整页 HTTP 请求互锁（历史卡死根因）
+        return res.json({ status: 'ok' });
     });
 
     /**

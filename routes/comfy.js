@@ -283,6 +283,12 @@ function createComfyRouter(options) {
      * GET /api/comfy-status
      * 检测 ComfyUI 连接状态
      */
+    // 记录上一次检测结果，仅状态翻转时打日志。
+    // ComfyUI 没开是常态而非错误，前端 10s 轮询一次，若每次失败都记录，
+    // 后端日志会被刷成瀑布（还会随控制台落盘持续写盘），故只在
+    // 离线→在线 / 在线→离线 两个跳变点各记录一次。
+    let lastConnected = null;
+
     router.get('/comfy-status', async (req, res) => {
         try {
             // 使用 AbortController 设置 3 秒超时
@@ -298,6 +304,10 @@ function createComfyRouter(options) {
 
             if (response.ok) {
                 const data = await response.json();
+                if (lastConnected !== true) {
+                    console.log('ComfyUI 已连接');
+                    lastConnected = true;
+                }
                 res.json({
                     status: 'connected',
                     message: 'ComfyUI 已连接',
@@ -307,7 +317,10 @@ function createComfyRouter(options) {
                 throw new Error('ComfyUI 响应异常');
             }
         } catch (error) {
-            console.log('ComfyUI 连接检测失败:', error.message);
+            if (lastConnected !== false) {
+                console.log('ComfyUI 未连接（离线期间不再重复提示，重新连上时会记录）');
+                lastConnected = false;
+            }
             res.json({
                 status: 'disconnected',
                 message: 'ComfyUI 未连接',

@@ -19,16 +19,22 @@
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "mammoth": "^1.12.3",
     "onnxruntime-node": "^1.27.0",
+    "pdf-parse": "^2.4.5",
     "sharp": "^0.35.3",
     "uuid": "^13.0.0",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "xlsx": "^0.18.5"
   },
   "_comment_dependencies": {
     "cors": "跨域资源共享支持（允许前端跨域访问后端接口）",
     "express": "Web 服务器框架（server.js 用它搭建后端路由）",
+    "mammoth": "解析 Word .docx 为纯文本（utils/fileTextExtractor.js，上传文档提交给 AI）",
+    "pdf-parse": "解析 PDF 为纯文本（utils/fileTextExtractor.js，v2 API）",
     "uuid": "生成全局唯一 ID（图片、存档等对象的标识）",
-    "ws": "WebSocket 库（js/api/LumenSocket.js 与 ComfyUI 实时通信）"
+    "ws": "WebSocket 库（js/api/LumenSocket.js 与 ComfyUI 实时通信）",
+    "xlsx": "解析 Excel .xls/.xlsx 为文本（utils/fileTextExtractor.js，逐工作表转 CSV）"
   },
   "_comment_devDependencies_用途": "仅开发阶段使用的工具库，不会参与生产部署",
   "devDependencies": {

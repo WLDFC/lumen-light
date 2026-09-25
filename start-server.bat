@@ -2,7 +2,10 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-:: 服务端口，需与 server.js 中 listen 的端口保持一致
+rem 切换到脚本所在目录, 保证相对路径 (runtime\node.exe, server.js) 正确解析
+cd /d "%~dp0"
+
+rem 服务端口, 需与 server.js 的监听端口一致
 set PORT=8080
 
 echo ==========================================
@@ -10,66 +13,59 @@ echo    LumenLight 后端启动脚本
 echo ==========================================
 echo.
 
-:: ------------------------------------------------------------------
-:: [1/2] 释放端口
-:: 只结束占用本项目端口的进程，避免影响机器上其他 Node 服务。
-:: netstat 输出中 LISTENING 行的第 5 列为 PID。
-:: 注意：同一服务会同时监听 IPv4 与 IPv6，netstat 因此输出两行相同 PID，
-::       故用 KILLED 变量记录已处理的 PID，避免重复 taskkill 产生误导性报错。
-:: ------------------------------------------------------------------
-echo [1/2] 正在检查端口 %PORT% 占用情况...
+rem 启动前清理残留的旧 watcher 进程, 防止其再次拉起 server 抢占端口
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'watch-path' -and $_.CommandLine -match 'server\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>nul
 
+echo [1/2] 检查端口 %PORT% 占用...
 set KILLED=
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%PORT% .*LISTENING"') do (
     if not "%%P" == "0" if "!KILLED!" == "" (
-        echo      检测到端口被进程 PID=%%P 占用，正在结束...
+        echo      端口被进程 PID=%%P 占用, 正在结束...
         taskkill /F /PID %%P >nul 2>nul
         if errorlevel 1 (
-            echo      [X] 无法结束进程 PID=%%P，请尝试以管理员身份运行
+            echo      [X] 无法结束进程 PID=%%P, 请以管理员身份运行后重试
         ) else (
             echo      [OK] 已结束进程 PID=%%P
         )
         set KILLED=%%P
     )
 )
-
 if "!KILLED!" == "" (
-    echo      [i] 端口 %PORT% 当前空闲
+    echo      端口 %PORT% 空闲
 ) else (
-    rem 端口释放存在 TIME_WAIT 延迟，等待约 2 秒避免 EADDRINUSE。
-    rem 用 ping 而非 timeout：timeout 在无交互输入的环境下会报错退出。
-    rem 此处必须用 rem 而非 :: —— 括号块内的 :: 会被当作卷标解析而报错。
+    rem 端口释放存在 TIME_WAIT 延迟, 等待约 2 秒; 括号块内必须用 rem 不能用双冒号
     ping -n 3 127.0.0.1 >nul
 )
-
-:: 清除上面命令遗留的错误码，避免影响末尾对 node 退出码的判断
 (call )
 
-:: ------------------------------------------------------------------
-:: 选择 Node：优先使用项目自带的绿色版 Node（runtime/node.exe），
-:: 整合包用户解压即用、无需安装；未捆绑时回退到系统 PATH 中的 node。
-:: ------------------------------------------------------------------
+rem 选择 Node: 优先项目内置绿色版 runtime\node.exe, 未捆绑时回退系统 node
 set "NODE_EXE=%~dp0runtime\node.exe"
 if exist "%NODE_EXE%" (
     set "NODE_CMD=%NODE_EXE%"
-    echo      使用内置 Node（绿色版，无需安装）
+    echo      使用内置 Node
 ) else (
     set "NODE_CMD=node"
     echo      使用系统 Node
 )
 
-echo.
-echo [2/2] 正在启动 LumenLight 后端...
-echo（--watch 热重载：修改 routes/ server.js 等后端代码后自动重启，无需手动操作）
-echo.
+echo [2/2] 启动 LumenLight 后端...
+echo      稳定模式: 未启用热重载, 修改后端代码后需重启本脚本生效
 echo ==========================================
-"%NODE_CMD%" --watch server.js
 
-:: 若 Node 异常退出，保留窗口以便查看错误信息
+rem 稳定模式说明: node --watch 热重载会强制结束 server 进程树, 而 pi 是
+rem server 的子进程, 会随之退出, 长任务被中断。因此日常运行不启用热重载,
+rem 后端代码改动后手动重启本脚本即可。控制台输出同时写入
+rem data\pi\server-console.log, 用于事后排查问题。
+if not exist "%~dp0data\pi" mkdir "%~dp0data\pi"
+rem 日志超过 5MB 时重建, 避免无限膨胀
+if exist "%~dp0data\pi\server-console.log" for %%A in ("%~dp0data\pi\server-console.log") do if %%~zA gtr 5000000 del "%%~A" >nul 2>nul
+powershell -NoProfile -Command "& '%NODE_CMD%' server.js 2>&1 | Tee-Object -FilePath '%~dp0data\pi\server-console.log' -Append; exit $LASTEXITCODE"
+
+rem Node 异常退出时暂停窗口, 便于查看错误信息
 if errorlevel 1 (
     echo.
     echo ==========================================
-    echo 后端异常退出，错误码: %errorlevel%
+    echo 后端异常退出, 错误码: %errorlevel%
     pause
 )
 

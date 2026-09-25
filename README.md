@@ -47,7 +47,8 @@ lumen-light/
 │  ├─ autosave/                        # 实时保存恢复槽位（后端自动生成，内容寻址图片资产
 │  │                                   #   assets/ + 恢复元数据 project.json，.gitignore 已排除）
 │  ├─ pi/                              # pi 智能体运行数据（自动生成）：sessions/ 会话、
-│  │                                   #   session-map.json 存档↔会话映射、settings.json 权限分级
+│  │                                   #   session-map.json 存档↔会话映射、settings.json 权限分级、
+│  │                                   #   agent.log 进程生命周期日志（spawn/stderr/exit/kill/上报）
 │  ├─ videos/                          # 视频工作区（LLM 生成 / Comfy 回传 / 本地上传的
 │  │                                   #   临时落点；保存画布时归档进存档 videos/ 并自动清理）
 │  ├─ skills/                          # 用户自定义技能（一个技能一个 .md，放入即生效）
@@ -134,7 +135,7 @@ lumen-light/
 │  │  ├─ LlmVideoGen.js                # LLM 视频生成控制器（文/图生视频任务提交、
 │  │  │                                #   轮询进度、播放器渲染、视频拖到画布）
 │  │  ├─ LlmPiAgent.js                 # pi 智能体控制器（消息发往 pi RPC 子进程，
-│  │  │                                #   流式气泡/工具调用标记/中止/排队提示）
+│  │  │                                #   流式分阶段块/执行中指示器/失败重试/卡死上报按钮）
 │  │  ├─ LlmImageDrag.js               # AI 对话图片拖拽到画布功能
 │  │  ├─ LlmLightbox.js                # 灯箱全屏预览（图片大图/视频播放器，
 │  │  │                                #   聊天与本地资产库共用）
@@ -210,7 +211,7 @@ lumen-light/
 │  │                                   #   支持显式指定厂商，未指定时按模型 ID 自动回退；
 │  │                                   #   含本地视频上传接口）
 │  ├─ piAgent.js                       # pi RPC 子进程管理入口（prompt/中止/状态/
-│  │                                   #   权限分级/provider 配置）
+│  │                                   #   权限分级/provider 配置/会话重置/人工重启）
 │  ├─ prompts.js                       # 系统提示词库增删改查（data/prompts.json）
 │  ├─ rembg.js                         # AI 抠图接口（onnxruntime-node 本地推理）
 │  ├─ saves.js                         # 存档接口（save/ 目录；三段式协议+视频归档）
@@ -272,7 +273,7 @@ lumen-light/
 │  ├─ llmModelRules.js                 # LLM 模型识别与参数映射规则（比例指令等）
 │  ├─ llmProviders.js                  # LLM 提供商 HTTP 请求封装（多级响应解析：
 │  │                                   #   标准JSON/BOM/gzip解压/SSE事件流聚合）
-│  ├─ piAgent.js                       # pi RPC 进程管理器（spawn/存档↔会话映射、
+│  ├─ piAgentManager.js                # pi RPC 进程管理器（spawn/存档↔会话映射、
 │  │                                   #   模型接线、权限分级）
 │  ├─ videoProviders.js                # 视频生成任务 HTTP 封装（火山方舟 ARK v3：
 │  │                                   #   建任务/查状态/下载视频，零新增依赖）
@@ -323,4 +324,9 @@ npm test          # 运行 Jest 单元测试
   资产检索等（经 `/api/canvas-bridge` 桥接，读命令广播、写命令路由活跃客户端）；
 - 模型：直接使用 LLM 面板配置的厂商与模型（扩展自动注册，key 经环境变量注入）；
 - 会话：每个画布存档绑定一个独立会话（`data/pi/session-map.json`）；
-- 权限分级：设置 → 通用 → pi 权限分级（只读 / 标准 / 完整）。
+- 权限分级：设置 → 通用 → pi 权限分级（只读 / 标准 / 完整）；
+- 执行反馈：流式期间最新消息框下方有转圈执行指示器；回合失败附说明与
+  「↻ 重新继续」按钮；疑似卡死**只上报不自动杀**——前端弹
+  [重启 pi 进程]/[继续等待] 由人工决策（程序不干扰健康 agent）；
+- 可观测性：`data/pi/agent.log` 记录进程生命周期（spawn/stderr/exit/kill/卡死上报）；
+- 清空联动：LLM 窗口垃圾桶清屏的同时重置当前存档的 pi 会话。

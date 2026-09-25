@@ -48,6 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化 LLM 聊天窗口（右侧面板 LLM 模式）
     window.llmChat = new LlmChat();
 
+    // 初始化 pi 健康状态灯（面板头部模式选择器左侧，黄/红可点击重启 pi 进程）
+    window.piStatusLight = new PiStatusLight();
+
     // 初始化系统提示词管理器（面板头部按钮 + 弹窗，LlmChat 发送时消费）
     window.llmSystemPrompt = new LlmSystemPrompt();
 

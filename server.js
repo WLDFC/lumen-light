@@ -39,7 +39,7 @@ const createSavesRouter = require('./routes/saves');
 const createVideosRouter = require('./routes/videos');
 const createCanvasBridgeRouter = require('./routes/canvasBridge');
 const createPiAgentRouter = require('./routes/piAgent');
-const PiAgentManager = require('./utils/piAgent');
+const PiAgentManager = require('./utils/piAgentManager');
 const upscaleRouter = require('./routes/upscale');
 const rembgRouter = require('./routes/rembg');
 const createSettingsRouter = require('./routes/settings');
@@ -104,6 +104,15 @@ async function ensureDataDir() {
 // 创建 Express 应用和 HTTP 服务器
 const app = express();
 const server = http.createServer(app);
+
+// ==================== HTTP 超时防护 ====================
+// 防线说明：requestTimeout 只覆盖“接收请求体”阶段，管不到“handler 不应答”
+// 的挂起响应（那种靠各路由自己的超时兜底，如 piAgent 20s RPC 超时、
+// 桥接 30s 超时）。这里收紧到 2 分钟是防半截请求体占住 socket
+// （浏览器同域仅 6 条连接，历史上曾因此整页互锁）
+server.requestTimeout = 120 * 1000;   // 单请求接收超时（含请求体）
+server.headersTimeout = 60 * 1000;    // 请求头超时（保持 Node 默认值，显式声明）
+
 // 创建 WebSocket 服务器，复用 HTTP 服务器
 const wss = new WebSocket.Server({ server });
 
@@ -163,6 +172,13 @@ function broadcastToCanvas(data) {
  * WebSocket 连接建立时的处理
  */
 wss.on('connection', (ws) => {
+    // 观察窗内有连接 = 旧页面（浏览器标签/IDE 内嵌预览）重连：
+    // 取消自动开窗，复用旧页面，避免双窗口
+    if (pendingOpenTimer) {
+        clearTimeout(pendingOpenTimer);
+        pendingOpenTimer = null;
+        console.log('（跳过自动开窗：检测到旧页面重连，复用该页面）');
+    }
     const clientId = uuidv4();
     console.log('新连接:', clientId);
 
@@ -268,6 +284,49 @@ app.use('/api/canvas-bridge', createCanvasBridgeRouter({ clients }));
 const piAgentManager = new PiAgentManager({ projectRoot: __dirname, dataDir: DATA_DIR, clients });
 app.use('/api/pi', createPiAgentRouter({ manager: piAgentManager }));
 
+// ==================== 后端进程级兜底与 pi 子进程清理 ====================
+// 历史教训：pi 执行中崩溃时 agent.log 只剩 spawn 记录、没有任何 [exit]——
+// 说明后端进程先于 pi 死亡（unhandledRejection 崩溃或 start-server.bat 的
+// taskkill /F 强杀），pi 的 exit 处理器在后端进程里、日志自然没写，且 pi
+// 子进程被孤儿化后仍持有会话文件。此前的表现即"pi 崩溃必须重启后端"。
+//   1) 未捕获异常/拒绝：写入 agent.log 留证后保持存活（桌面工具保可用优先，
+//      后端一死画布全部功能随之下线）；排查时搜 [backend] 前缀；
+//   2) 正常退出（Ctrl+C / SIGTERM / --watch 重启）：顺手终止 pi 子进程，
+//      防止孤儿 pi 与新后端拉起的 pi 并发读写同一会话文件；
+//      taskkill /F 强杀场景钩子不执行，属尽力而为
+process.on('uncaughtException', (err) => {
+    const msg = '[backend] uncaughtException: ' + (err && err.stack || err);
+    console.error(msg);
+    piAgentManager._logLine(msg);
+});
+process.on('unhandledRejection', (reason) => {
+    const msg = '[backend] unhandledRejection: ' + (reason && (reason.stack || reason.message) || reason);
+    console.error(msg);
+    piAgentManager._logLine(msg);
+});
+process.on('exit', () => {
+    try {
+        if (piAgentManager.proc && piAgentManager.proc.exitCode === null) {
+            piAgentManager._logLine('[backend] 后端退出，终止 pi 子进程防孤儿');
+            piAgentManager.stop();
+        }
+    } catch { /* 退出清理尽力而为 */ }
+});
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
+
+// ---- 进程心跳自监控（下次"无痕死亡"的定罪证据） ----
+// 历史教训：pi 跑长任务时后端曾被无痕强杀（agent.log 无 [exit]/[backend]，
+// 只能靠 --watch 父进程 fork 新 server 的间接证据定罪）。每 30s 写一行
+// 心跳到 agent.log：若后端再次无痕死亡，日志会停在最后一条心跳——
+// 与新 server spawn 时间对比即可精确断定死亡时刻；正常 --watch 重启
+// 则心跳前必有 [backend] 后端退出记录
+setInterval(() => {
+    try {
+        piAgentManager._logLine(`[heartbeat] alive pid=${process.pid} uptime=${Math.round(process.uptime())}s mem=${Math.round(process.memoryUsage().rss / 1048576)}MB`);
+    } catch { /* 心跳失败不影响服务 */ }
+}, 30 * 1000);
+
 // 设置管理 API（/api/settings）
 app.use('/api/settings', createSettingsRouter({ dataDir: DATA_DIR }));
 
@@ -311,6 +370,14 @@ app.use((err, req, res, next) => {
 
 // ==================== 自动打开浏览器 ====================
 
+/** 自动开窗观察窗：前端 WS 断线后每 5 秒重连一次，启动后 6 秒内
+ *  （5 秒间隔 + 1 秒余量）观察到任何连接，即证明存在可复用的旧页面
+ *  （浏览器旧标签 / IDE 内嵌预览），跳过开窗避免双窗口；
+ *  窗口内无连接 = 首次启动，开窗 */
+const OPEN_OBSERVE_MS = 6000;
+/** 待执行的自动开窗定时器（旧页面重连时取消并改打跳过提示） */
+let pendingOpenTimer = null;
+
 /**
  * 根据当前操作系统，调用默认浏览器打开指定 URL
  * @param {string} url - 要打开的 URL
@@ -344,14 +411,18 @@ async function startServer() {
     await ensureSavesDir();
     await ensureDataDir();
 
-    server.listen(8080, () => {
+    server.listen(8080, async () => {
         console.log('LumenLight 后端: http://localhost:8080');
         console.log('WebSocket: ws://localhost:8080');
         console.log('工作流目录:', WORKFLOWS_DIR);
         console.log('存档目录:', SAVES_DIR);
 
-        // 启动成功后自动打开浏览器访问前端页面
-        openBrowser('http://localhost:8080');
+        // 启动成功后自动打开浏览器：观察窗内旧页面重连则跳过，
+        // 窗口到期无连接才开（判定见 OPEN_OBSERVE_MS）
+        pendingOpenTimer = setTimeout(() => {
+            pendingOpenTimer = null;
+            openBrowser('http://localhost:8080');
+        }, OPEN_OBSERVE_MS);
     });
 }
 

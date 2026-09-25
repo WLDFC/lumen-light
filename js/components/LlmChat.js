@@ -32,6 +32,8 @@ class LlmChat {
         this.uploadBtn = document.getElementById('llmUploadBtn');
         this.clearBtn = document.getElementById('llmClearBtn');
         this.fileInput = document.getElementById('llmFileInput');
+        // 面板头部 pi 调用统计灰字（上下文 token · 缓存命中率）
+        this.piUsageEl = document.getElementById('piUsageStatus');
 
         // 图片灯箱组件（已从本类拆分出去）
         this.lightbox = new LlmLightbox();
@@ -90,14 +92,16 @@ class LlmChat {
             }
         });
 
-        // 图片上传（视频文件路由到 LlmVideoGen，以视频消息形式导入）
+        // 上传分流：视频→视频生成；图片→图片附件；其余文档→解析成文本附件
         this.uploadBtn?.addEventListener('click', () => this.fileInput?.click());
         this.fileInput?.addEventListener('change', (e) => {
             Array.from(e.target.files || []).forEach((file) => {
                 if (CanvasVideoManager.isVideoFile(file)) {
                     this.videoGen.importLocalVideo(file);
-                } else {
+                } else if (file.type.startsWith('image/')) {
                     this.attachments.addFromFile(file);
+                } else {
+                    this.attachments.addDocFromFile(file);
                 }
             });
             e.target.value = '';
@@ -105,6 +109,10 @@ class LlmChat {
 
         // 清空对话
         this.clearBtn?.addEventListener('click', () => this.clearChat());
+        // 清空按钮移至面板头部后仅 LLM 模式显示（Comfy 模式无对话概念，
+        // 与系统提示词按钮同一显隐模式）
+        this.updateClearBtnVisibility();
+        document.getElementById('promptMode')?.addEventListener('change', () => this.updateClearBtnVisibility());
 
         // 模型切换的 toolbar 刷新由 modelDropdown 的 onChange 回调触发
         // （原生 select 的 change 监听已由 LumenDropdown 取代）
@@ -171,12 +179,9 @@ class LlmChat {
             if (marked.type === 'chat') return false;
         }
 
-        // 2. 自动识别：按模型名称关键词判断。
-        //    image 可覆盖 gpt-image-*、gemini-*-flash-image、nano-banana 等中转站常见绘图模型命名。
+        // 2. 自动识别：关键词口径统一在 LumenLight.looksLikeImageModel。
         //    用复合键中解析出的纯模型 ID 判断，避免厂商名碰巧含关键词造成误判
-        const keywords = ['seedream', 'dall-e', 'dalle', 'midjourney', 'sdxl', 'flux', 'image'];
-        const lower = LumenLight.parseModelKey(modelId).id.toLowerCase();
-        return keywords.some((k) => lower.includes(k));
+        return LumenLight.looksLikeImageModel(LumenLight.parseModelKey(modelId).id);
     }
 
     /**
@@ -319,6 +324,7 @@ class LlmChat {
      * @param {Object} [opts] - 额外选项
      * @param {string} [opts.rawPrompt] - 用户消息的原始提示词（气泡文本可能是"（图片）"占位符，
      *                                    重新编辑时必须回填原始内容）
+     * @param {{name: string, truncated?: boolean}[]} [opts.files] - 用户消息附带的文档（气泡内显示文件名块）
      * @returns {HTMLElement} 消息文本元素（便于后续更新内容）
      */
     appendMessage(role, text, images = [], opts = {}) {
@@ -342,6 +348,28 @@ class LlmChat {
                 container.appendChild(this.wrapRemovableImage(imgEl));
             });
             bubbleWrap.appendChild(container);
+        }
+
+        // 附带文档（用户上传的 txt/pdf/docx 等，气泡里显示文件名块）
+        const msgFiles = Array.isArray(opts.files) ? opts.files : [];
+        if (msgFiles.length > 0) {
+            const fileContainer = document.createElement('div');
+            fileContainer.className = 'llm-msg-files';
+            msgFiles.forEach((f) => {
+                const chip = document.createElement('div');
+                chip.className = 'llm-msg-file';
+                chip.title = `${f.name}${f.truncated ? '（内容过长已截断）' : ''}`;
+                const extEl = document.createElement('span');
+                extEl.className = 'llm-msg-file-ext';
+                extEl.textContent = (String(f.name).split('.').pop() || 'file').toUpperCase().slice(0, 5);
+                const nameEl = document.createElement('span');
+                nameEl.className = 'llm-msg-file-name';
+                nameEl.textContent = f.name;
+                chip.appendChild(extEl);
+                chip.appendChild(nameEl);
+                fileContainer.appendChild(chip);
+            });
+            bubbleWrap.appendChild(fileContainer);
         }
 
         const textEl = document.createElement('div');
@@ -428,7 +456,12 @@ class LlmChat {
         if (this.isSending) return;
 
         const text = this.inputEl.value.trim();
-        if (!text && !this.attachments.hasImages()) return;
+        if (!text && !this.attachments.hasAttachments()) return;
+        // 文档仍在解析中时拦住，避免未解析完的附件被静默漏发
+        if (this.attachments.isParsing()) {
+            alert('文件正在解析中，请稍候再发送');
+            return;
+        }
 
         const model = this.modelDropdown?.value;
         if (!model) {
@@ -437,7 +470,8 @@ class LlmChat {
         }
 
         if (this.isAgentModel(model)) {
-            await this.piAgent.send(text, this.attachments.getAll());
+            // pi 编码智能体路径：文档文本直接拼进提示词（不走 /chat 后端拼接）
+            await this.piAgent.send(this.buildAgentText(text), this.attachments.getAll());
         } else if (this.isVideoModel(model)) {
             await this.videoGen.generate(text, model, this.attachments.getAll());
         } else if (this.isImageModel(model)) {
@@ -448,6 +482,21 @@ class LlmChat {
     }
 
     /**
+     * 为 pi 智能体拼接提示词：将已解析的文档文本附在用户正文之后
+     * （生图/视频模型不读文档，故仅智能体路径做此拼接）
+     * @param {string} text - 用户输入文本
+     * @returns {string} 拼接文档后的文本
+     */
+    buildAgentText(text) {
+        const files = this.attachments.getFiles();
+        if (!files.length) return text;
+        const block = files
+            .map((f) => `【附件 ${f.name}${f.truncated ? '（内容过长已截断）' : ''}】\n${f.text}`)
+            .join('\n\n');
+        return text ? `${text}\n\n${block}` : block;
+    }
+
+    /**
      * 发送聊天请求
      * @param {string} text - 用户输入文本
      * @param {string} model - 选中的模型 ID
@@ -455,11 +504,12 @@ class LlmChat {
     async sendChat(text, model) {
         // 记录本次发送的内容，清空输入区
         const images = this.attachments.getAll();
+        const files = this.attachments.getFiles();
         this.inputEl.value = '';
         this.attachments.clear();
 
-        // 渲染用户消息并加入历史（纯图片时气泡显示占位符，但重新编辑要拿到原始文本）
-        this.appendMessage('user', text || '（图片）', images, { rawPrompt: text });
+        // 渲染用户消息并加入历史（纯附件时气泡显示占位符，但重新编辑要拿到原始文本）
+        this.appendMessage('user', text || (images.length ? '（图片）' : '（文件）'), images, { rawPrompt: text, files });
         this.history.push({ role: 'user', content: text });
 
         // 渲染“思考中”占位气泡
@@ -486,7 +536,7 @@ class LlmChat {
             const response = await fetch('/api/llm/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: selection.id, provider: selection.provider, messages, images })
+                body: JSON.stringify({ model: selection.id, provider: selection.provider, messages, images, files })
             });
 
             const result = await response.json();
@@ -708,12 +758,59 @@ class LlmChat {
     }
 
     /**
+     * 按面板当前模式刷新清空按钮显隐：LLM 对话框模式显示，Comfy 模式隐藏
+     */
+    updateClearBtnVisibility() {
+        const mode = document.getElementById('promptMode')?.value;
+        if (this.clearBtn) this.clearBtn.style.display = mode === 'llm' ? '' : 'none';
+        // 统计灰字与清空按钮同规则：仅 LLM 模式且已有数据时显示
+        if (this.piUsageEl) {
+            this.piUsageEl.style.display = (mode === 'llm' && this.piUsageEl.textContent) ? '' : 'none';
+        }
+    }
+
+    /**
+     * 刷新面板头部的 pi 调用统计灰字（数据来自 pi message_end 的 message.usage）。
+     * 不猜上下文窗口分母：上下文只显示绝对 token，另附缓存命中率。
+     * @param {Object} usage - {input, output, cacheRead, cacheWrite, totalTokens}
+     * @param {string} [modelId] - 本次调用实际使用的模型 ID（消息上的字段，
+     *   是 API 调用铁证；模型"自我认知"可能被历史陈旧信息误导，不可信）
+     */
+    updatePiUsage(usage, modelId) {
+        if (!this.piUsageEl || !usage) return;
+        const ctx = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+        const parts = [];
+        if (modelId) parts.push(String(modelId));
+        parts.push(`ctx ${LlmChat.formatTokens(ctx)}`);
+        if (ctx > 0) parts.push(`CH ${(((usage.cacheRead || 0) / ctx) * 100).toFixed(1)}%`);
+        this.piUsageEl.textContent = parts.join(' · ');
+        this.piUsageEl.title = `本轮调用统计：上下文 ${ctx} token（输入 ${usage.input || 0} + 缓存读 ${usage.cacheRead || 0} + 缓存写 ${usage.cacheWrite || 0}），输出 ${usage.output || 0} token`;
+        this.updateClearBtnVisibility();   // 顺带按当前模式刷新显隐
+    }
+
+    /** token 数 → 紧凑显示（1.2M / 34.5k / 875） */
+    static formatTokens(n) {
+        if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+        if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+        return String(n);
+    }
+
+    /**
      * 清空对话历史与界面
      */
     clearChat() {
         this.history = [];
         // 终止所有进行中的视频生成轮询
         this.videoGen?.cancelAll();
+        // 同步重置 pi 会话：pi 的对话按存档持久化在会话文件里，只清界面
+        // 会让旧上下文在下一句原样背进去（上下文持续膨胀，历史里的
+        // 过期信息甚至会误导模型自我认知）
+        fetch('/api/pi/reset-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ archive: window.saveManager?.currentSave || null })
+        }).catch(() => { /* pi 未运行或重置失败：不阻塞界面清空 */ });
+        if (this.piUsageEl) this.piUsageEl.textContent = '';
         // 移除消息区内除空状态提示外的所有节点。
         // 这里刻意不按 class 白名单（如 .llm-msg）删除：生成图片块 .llm-gen-block 是
         // 用 replaceWith 整体替换占位气泡产生的，并不带 .llm-msg，白名单会漏掉它。

@@ -98,12 +98,29 @@
     box-shadow: 2px 0 8px rgba(59, 130, 246, 0.3);
 }
 
+/* 头部图标按钮组（系统提示词 - 清空对话；收起按钮绝对定位在组外）。
+   组内图标统一 8px 间距：32px 悬停圆彼此可辨又不显散，是一组功能按钮的
+   常规密度（Material 图标按钮间隔同量级）；
+   margin-right 32px = 收起按钮（right:12px 起 32px 宽）伸入内容区 24px
+   再补 8px 视觉间隙，使「垃圾桶→收起」与组内间距一致 */
+.prompt-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;    /* 吸收头部剩余空隙：按钮组贴最右（收起按钮绝对定位在外） */
+    margin-right: 32px;
+}
+
 /* ==================== 面板头部 ==================== */
 
-/* 面板头部区域 */
+/* 面板头部区域。
+   布局约定：flex-start 左对齐排列「模式选择框 → 状态灯 → ctx/CH 统计灰字」，
+   右侧图标按钮组用 margin-left:auto 吸收剩余空隙贴最右。
+   不用 space-between：它会把中间的灯/灰字摊开分布，且 auto margin 放在
+   中间元素上会把后面的统计灰字推到头部最右侧 */
 .prompt-panel-header {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     padding: 8px 20px;
     border-bottom: 1px solid rgba(128, 128, 128, 0.2);
@@ -122,7 +139,7 @@
 .prompt-mode-selector {
     flex: none;
     width: auto;
-    margin-right: 10px;
+    margin-right: 5px;           /* 留出图标按钮的宽度 */
     padding: 7px 26px 7px 12px;      /* 右侧 26px 为箭头区 */
     border: none;
     border-radius: 6px;
@@ -170,7 +187,7 @@
     border-radius: 12px;
     background: rgba(0, 0, 0, 0.2);
     font-size: 11px;
-    margin-right: 40px;
+    margin-left: 5px;     /* 与 pi 状态灯同距：选择器 margin-right 10px + 5px = 15px */
     transition: all 0.3s ease;
 }
 
@@ -222,6 +239,87 @@
         opacity: 0.7;
         transform: scale(1.1);
     }
+}
+
+/* ==================== pi 智能体健康状态灯 ==================== */
+
+/* 与 comfy-status-indicator 同构（圆点 + 短文字胶囊），紧贴模式选择器右侧。
+   注意：auto margin 不能放在这里——flex 中 auto margin 会吸收全部剩余空间，
+   把后面的 ctx/CH 统计灰字推到头部最右侧；吸附空隙的职责在
+   .pi-usage-status 的 margin-right:auto 上。
+   四态：灰 idle=未运行 / 绿 ok=健康 / 黄 stalled=疑似卡死 / 红 dead=已崩溃；
+   黄/红可点击重启（cursor:pointer），仅 LLM 模式显示（显隐由 PiStatusLight 控制）。
+   状态色取自配色美学规范：绿 #22c55e、红 #ef4444、警示黄 #f59e0b（help.css 同源） */
+.pi-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    font-size: 11px;
+    margin-left: 5px;    /* 留出图标按钮的宽度 */
+    transition: all 0.3s ease;
+    user-select: none;
+}
+
+.pi-status-indicator .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;          /* 灰：未运行 */
+    transition: all 0.3s ease;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.pi-status-indicator .status-text {
+    color: #9ca3af;
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+/* 绿：健康（进程存活，执行中也属正常态；呼吸动画与 comfy 灯一致） */
+.pi-status-indicator.ok .status-dot {
+    background: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+    animation: pulse-green 2s infinite;
+}
+
+.pi-status-indicator.ok .status-text {
+    color: #22c55e;
+}
+
+/* 黄：疑似卡死（进程在但连续无应答；闪烁提示需要关注，可点击重启） */
+.pi-status-indicator.stalled .status-dot {
+    background: #f59e0b;
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+    animation: pi-amber-blink 1.2s infinite;
+}
+
+.pi-status-indicator.stalled .status-text {
+    color: #f59e0b;
+}
+
+/* 红：进程已退出（可点击重启） */
+.pi-status-indicator.dead .status-dot {
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+.pi-status-indicator.dead .status-text {
+    color: #ef4444;
+}
+
+/* 黄/红可点击重启；绿/灰无动作 */
+.pi-status-indicator.stalled,
+.pi-status-indicator.dead {
+    cursor: pointer;
+}
+
+/* 黄色闪烁动画（区别于绿色呼吸：需要用户注意） */
+@keyframes pi-amber-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
 }
 
 /* ==================== 关闭按钮 ==================== */

@@ -317,13 +317,15 @@ class PromptPanel {
 
     /**
      * 初始化 ComfyUI 连接状态检测
-     * 立即检测一次，然后每 3 秒检测一次
+     * 立即检测一次，然后每 10 秒检测一次。
+     * 连接状态是分钟级变化，10s 粒度对状态灯足够；
+     * 3s 的旧值会让后端每天空发近 3 万次探测请求。
      */
     initComfyStatusCheck() {
         this.checkComfyStatus();
         this.statusCheckInterval = setInterval(() => {
             this.checkComfyStatus();
-        }, 3000);
+        }, 10000);
     }
 
     /**

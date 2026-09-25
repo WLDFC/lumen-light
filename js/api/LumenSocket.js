@@ -38,6 +38,8 @@ class LumenSocket {
                     role: 'canvas',
                     name: 'LumenLight-Canvas'
                 }));
+                // 派发连接状态页面事件：pi 状态灯等组件重连后重新校正状态
+                window.dispatchEvent(new CustomEvent('lumenWsOpen'));
 
                 // 心跳（5s）：让后端持续刷新本客户端的 lastSeen，
                 // 桥接命令才能路由到"最近活跃"的标签页；
@@ -74,6 +76,9 @@ class LumenSocket {
                     clearInterval(this._pingTimer);
                     this._pingTimer = null;
                 }
+                // 派发断连事件：pi 状态灯等组件据此标记"状态未知"，
+                // 避免显示过期状态误导用户
+                window.dispatchEvent(new CustomEvent('lumenWsClosed'));
                 // 5秒后自动重连
                 setTimeout(() => this.connect(), 5000);
             };
@@ -226,6 +231,11 @@ class LumenSocket {
         this._bridgeReceived = (this._bridgeReceived || 0) + 1;
         let ok = true, data = null, error = null;
 
+        // 分阶段耗时诊断：页面"假死"（UI 可点但请求全挂）历来难以定位，
+        // 这里把执行耗时与应答回传耗时分开记录——
+        // 执行慢 = 主线程被占；回传慢 = 同源连接池拥塞
+        const tRecv = Date.now();
+
         // 执行看门狗：执行器卡死时 25s 内必回超时应答（不让 pi 干等 30s+），
         // 并把卡死暴露到控制台
         let timedOut = false;
@@ -247,8 +257,13 @@ class LumenSocket {
             console.error(`桥接命令 ${command} 执行失败:`, err);
         }
         clearTimeout(watchdog);
+        const execMs = Date.now() - tRecv;
+        if (execMs > 3000) {
+            console.warn(`桥接命令 ${command} 执行耗时 ${execMs}ms（主线程被长任务占用？）`);
+        }
         if (timedOut) return;   // 看门狗已应答过，不再重复
 
+        const tSend = Date.now();
         try {
             await fetch('/api/canvas-bridge/response', {
                 method: 'POST',
@@ -257,6 +272,10 @@ class LumenSocket {
             });
         } catch (err) {
             console.error('回传桥接结果失败:', err);
+        }
+        const sendMs = Date.now() - tSend;
+        if (sendMs > 3000) {
+            console.warn(`桥接命令 ${command} 应答回传耗时 ${sendMs}ms（同源连接池拥塞？检查是否有挂起的 HTTP 请求）`);
         }
     }
 

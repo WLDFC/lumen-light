@@ -300,6 +300,113 @@
     justify-content: center;  /* 让 × 字符在圆内居中 */
 }
 
+/* ---------- 待发送文档缩略块（与图片缩略图并列于附件栏） ----------
+   比图片方块宽一些，内部纵向排：扩展名徽章 + 文件名 + 状态行 */
+.llm-attachment-file {
+    width: 120px;
+    height: 56px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* 扩展名徽章（PDF / DOCX / XLSX …） */
+.llm-file-ext {
+    align-self: flex-start;
+    max-width: 100%;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #3b82f6;
+    color: #ffffff;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 文件名（单行省略） */
+.llm-file-name {
+    width: 100%;
+    font-size: 11px;
+    color: #e5e7eb;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 状态行（解析中 / 解析失败 / 已截断 / 空文件） */
+.llm-file-state {
+    font-size: 10px;
+    color: #9ca3af;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 解析中：呼吸闪烁（复用思考动画） */
+.llm-attachment-file.is-parsing {
+    animation: llm-thinking-pulse 1.2s ease-in-out infinite;
+}
+.llm-attachment-file.is-parsing .llm-file-state {
+    color: #60a5fa;
+}
+
+/* 解析失败：红框 + 红色徽章/状态 */
+.llm-attachment-file.is-error {
+    border-color: rgba(239, 68, 68, 0.6);
+    background: rgba(239, 68, 68, 0.1);
+}
+.llm-attachment-file.is-error .llm-file-ext {
+    background: #ef4444;
+}
+.llm-attachment-file.is-error .llm-file-state {
+    color: #f87171;
+}
+
+/* ---------- 已发送消息气泡内的文档块 ---------- */
+.llm-msg-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+.llm-msg-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 200px;
+    padding: 4px 8px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 6px;
+    background: #2a2b31;
+}
+.llm-msg-file-ext {
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #3b82f6;
+    color: #ffffff;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+.llm-msg-file-name {
+    font-size: 11px;
+    color: #e5e7eb;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ==================== 输入栏 ==================== */
 .llm-chat-inputbar {
     display: flex;
@@ -328,14 +435,15 @@
 }
 
 /* ==================== 输入框下方工具栏 ==================== */
-/* 从左到右：上传图片、清空对话、尺寸选择、模型选择、发送按钮 */
+/* 从左到右：上传图片、尺寸选择、模型选择、发送按钮
+   （清空对话已移至面板头部图标组，见 .llm-header-icon-btn） */
 .llm-chat-toolbar {
     display: flex;            /* 横向一行排列 */
     align-items: center;      /* 所有控件垂直居中对齐 */
     gap: 4px;                 /* 相邻控件之间的间距 */
 }
 
-/* 工具栏小方块按钮（上传图片、清空对话），内含 16px SVG 线条图标 */
+/* 工具栏小方块按钮（上传图片），内含 16px SVG 线条图标 */
 .llm-tool-btn {
     width: 32px;
     height: 32px;
@@ -356,6 +464,34 @@
 .llm-tool-btn:hover {
     background: rgba(255, 255, 255, 0.08);
     color: #ffffff;
+}
+
+/* ---------- 面板头部的清空对话按钮（垃圾桶） ----------
+   与系统提示词按钮同规格：32px 无边框正圆纯线稿，悬停半透明白叠加；
+   位于 .prompt-header-actions 图标组内，间距由组 gap 统一为 8px */
+.llm-header-icon-btn {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: #fff;                     /* 图标纯白（与系统提示词按钮一致） */
+    cursor: pointer;
+    outline: none;
+    transition: color 0.15s, background 0.15s;
+}
+
+.llm-header-icon-btn:hover {
+    color: #60a5fa;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.llm-header-icon-btn:active {
+    background: rgba(255, 255, 255, 0.18);
 }
 
 :root {
@@ -647,4 +783,231 @@
 
 .llm-video-to-canvas-btn:hover {
     background: rgba(59, 130, 246, 0.8);
+}
+
+/* ==================== 面板头部 pi 调用统计灰字 ====================
+   位于模式选框右侧：ctx 145.9k · CH 97.1%（上下文 token · 缓存命中率）。
+   观感对齐顶栏自动保存灰字（.autosave-status）：11px 半透明白 */
+.pi-usage-status {
+    display: flex;
+    align-items: center;
+    max-width: 42%;             /* 避免挤占头部图标按钮空间 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.45);
+    user-select: none;
+    white-space: nowrap;
+    /* 左右 auto margin 与图标按钮组的 margin-left:auto 三者均分剩余空隙，
+       使灰字正好居中于「pi 状态灯 → 图标按钮组」之间；
+       灰字隐藏（无数据）时仅剩图标组的 auto，按钮组仍贴最右 */
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* ==================== pi 智能体分阶段可折叠块 ====================
+   一轮 pi 回复拆成 思考 / 工具 / 文本 三种块纵向排列：
+   思考与工具默认折叠（点头部展开），文本（最终回答）始终展开。
+   pi 回合加 .pi-turn 占满整列，所有块统一宽度（参考主流 agent 观感） */
+.llm-msg.pi-turn {
+    max-width: 100%;
+    align-items: stretch;
+}
+
+.pi-block {
+    margin-bottom: 6px;
+    align-self: stretch;      /* 在 .llm-msg 纵向 flex 中拉满宽，统一块宽 */
+    width: 100%;
+}
+
+/* 最终回答文本块：沿用助手气泡观感 */
+.pi-block-text {
+    align-self: stretch;
+    width: 100%;
+}
+.pi-block-text .pi-block-content {
+    background: #2a2b31;
+    color: #ffffff;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border-bottom-left-radius: 3px;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 可折叠块头部（思考/工具共用的按钮行） */
+.pi-block-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #9ca3af;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+.pi-block-header:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #e5e7eb;
+}
+
+/* 折叠箭头：展开时旋转 90° */
+.pi-caret {
+    font-size: 10px;
+    transition: transform 0.15s;
+}
+.pi-block.open > .pi-block-header .pi-caret {
+    transform: rotate(90deg);
+}
+
+/* 头部左侧小图标（按调用对象类型：文件夹/终端/画布/搜索…） */
+.pi-block-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: #9ca3af;
+}
+.pi-block-thinking .pi-block-icon { color: #a78bfa; }
+.pi-block-tool .pi-block-icon { color: #60a5fa; }
+
+.pi-block-title {
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+/* 头部内联工具参数（等宽、单行省略，把宽度让给右侧状态） */
+.pi-block-args {
+    flex: 1;
+    min-width: 0;
+    margin-left: 6px;
+    color: #6b7280;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+/* 头部右侧状态（运行中/完成/失败） */
+.pi-block-meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: #6b7280;
+}
+
+/* 折叠正文：默认隐藏，.open 时显示 */
+.pi-block-body {
+    display: none;
+    margin-top: 6px;          /* 头部与正文之间留出呼吸感 */
+}
+.pi-block.open > .pi-block-body {
+    display: block;
+}
+
+/* 工具块默认张开（JS 建块时加 .open），仍可点击头部折叠；
+   正文为空（既无参数也无结果）时不占空白 */
+.pi-block-tool .pi-block-body:empty {
+    display: none;
+}
+
+/* 工具块展开后的分段（调用参数 / 执行结果）：上下边距放宽，避免挤在一起 */
+.pi-section {
+    margin-top: 10px;
+}
+.pi-section:first-child {
+    margin-top: 0;            /* 首段不加额外上边距（body 已有） */
+}
+.pi-section-label {
+    margin-bottom: 6px;
+    color: #6b7280;
+    font-size: 11px;
+}
+
+/* 思考/工具正文：等宽、限高可滚，避免超长输出撑爆界面 */
+.pi-block-thinking .pi-block-content,
+.pi-block-tool .pi-block-content {
+    max-height: 220px;
+    overflow: auto;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.35);
+    color: #cbd5e1;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 思考块标题偏紫，工具块标题偏蓝，便于区分阶段 */
+.pi-block-thinking .pi-block-title { color: #a78bfa; }
+.pi-block-tool .pi-block-title { color: #60a5fa; }
+
+/* 工具运行中：状态字变蓝 + 呼吸闪烁 */
+.pi-block-tool.running .pi-block-meta {
+    color: #60a5fa;
+    animation: llm-thinking-pulse 1.2s ease-in-out infinite;
+}
+/* 工具收尾状态：已完成绿 / 失败红 */
+.pi-block-tool.done .pi-block-meta { color: #34d399; }
+.pi-block-tool.failed .pi-block-meta { color: #f87171; }
+
+/* ========== pi 执行中指示器与失败重试 ========== */
+/* 执行中指示器：流式期间挂在最新消息框下方，收尾时移除 */
+.pi-running {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 2px 10px;
+    font-size: 12px;
+    color: #6b7280;
+}
+/* 分段环：repeating-conic 生成 8 段，steps(8) 逐帧循环播放出转圈动画 */
+.pi-running-spinner {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    border-radius: 50%;
+    background: repeating-conic-gradient(#60a5fa 0deg 30deg, transparent 30deg 45deg);
+    -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+    mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+    animation: pi-spin 0.72s steps(8) infinite;
+}
+@keyframes pi-spin {
+    to { transform: rotate(360deg); }
+}
+/* 失败说明下方的"重新继续"按钮 */
+.pi-retry-btn {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    color: #e5e7eb;
+    background: #262a31;
+    border: 1px solid #3a3f47;
+    border-radius: 6px;
+    cursor: pointer;
+}
+/* 双按钮横排（疑似卡死说明块）：行内间距代替按钮自身上边距 */
+.pi-retry-bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+.pi-retry-bar .pi-retry-btn { margin-top: 0; }
+.pi-retry-btn:hover:not(:disabled) {
+    color: #60a5fa;
+    border-color: #60a5fa;
+}
+.pi-retry-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
 }

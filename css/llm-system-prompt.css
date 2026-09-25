@@ -6,14 +6,14 @@
 
 /* ---------- 面板头部的入口按钮 ----------
    仅 LLM 对话框模式显示（Comfy 模式下由 JS 隐藏）；
-   收起按钮是绝对定位（right: 12px，宽 32px），这里右移 44px 让出位置避免重叠。
+   位于头部 .prompt-header-actions 图标组内（与清空对话按钮并列，
+   间距由组 gap 统一为 8px，无需自带 margin）。
    无边框无底色的纯线稿按钮（与收起按钮的轻量风格一致），
    悬停按配色规范用半透明白叠加，不换底色 */
 .llm-system-prompt-btn {
     flex-shrink: 0;
     width: 32px;                     /* 与旁边收起按钮同级（32px 正圆） */
     height: 32px;
-    margin-right: 48px;              /* 收起按钮占 right:12px 起 32px 宽，留 4px 间隙 */
     display: inline-flex;
     align-items: center;
     justify-content: center;

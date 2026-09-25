@@ -44,7 +44,10 @@ class LlmSystemPrompt {
         // 图标：对话气泡 + 文字行（"预设指令"语义），项目统一的无外框白色线稿
         this.btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/></svg>';
         this.btn.addEventListener('click', () => this.togglePopup());
-        header.insertBefore(this.btn, closeBtn);
+        // 插到清空对话按钮前，形成「系统提示词 - 清空对话 - 收起」头部图标组；
+        // 清空按钮不在时（旧 DOM）回退到收起按钮前
+        const anchor = document.getElementById('llmClearBtn') || closeBtn;
+        anchor.parentElement.insertBefore(this.btn, anchor);
 
         // 仅 LLM 对话框模式显示按钮（Comfy 模式无系统提示词概念），
         // 初始状态与切换模式时各刷新一次
