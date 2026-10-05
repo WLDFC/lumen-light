@@ -18,6 +18,10 @@ class Canvas {
         this.viewport = new Viewport();                  // 视口管理器
         this.images = new ImageManager();                // 图片管理器
 
+        // 节点编号计数器（#001 起递增，随存档持久化，删除不复用）。
+        // 存档恢复/新建画布时分别做下限同步与归零（ProjectSerializer/NewCanvasManager）
+        this.nodeSeq = 0;
+
         // 拖动/平移状态（由 CanvasInteraction 读写）
         this.isDraggingImage = false;    // 是否正在拖动图片
         this.isPanning = false;          // 是否正在平移画布
@@ -58,6 +62,23 @@ class Canvas {
     }
 
     /**
+     * 分配下一个节点编号（BaseCanvasNode 构造时调用；只增不减防顶替）
+     * @returns {number}
+     */
+    allocNodeSeq() {
+        return ++this.nodeSeq;
+    }
+
+    /**
+     * 编号计数器下限同步（存档恢复时调用）：取当前值与存档记录值的较大者——
+     * 存档里删过节点时记录值大于现有节点最大编号，保证新节点不复用旧编号
+     * @param {number} saved - 存档里的 nodeSeq
+     */
+    syncNodeSeq(saved) {
+        if (Number.isFinite(saved) && saved > this.nodeSeq) this.nodeSeq = saved;
+    }
+
+    /**
      * 初始化画布：设置尺寸、创建子模块并首次绘制
      */
     init() {
@@ -65,7 +86,11 @@ class Canvas {
         this.applyDprSize();
         window.addEventListener('resize', () => this.resize()); // 窗口大小变化时重设尺寸
 
-        // 创建并协调各子模块（groups 先于 renderer 创建：渲染器绘制组体时读取）
+        // 创建并协调各子模块（history 最先：各管理器的记录点回查
+        // canvas.history；groups 先于 renderer 创建：渲染器绘制组体时读取）
+        this.history = new CanvasHistory(this);         // 撤销/重做命令栈
+        // 命令淘汰时的视频文件清理接线（引用计数与后端 DELETE 在 ImageManager）
+        this.history.onFlushVideoFile = (url) => this.images.cleanupVideoFileByUrl(url);
         this.groups = new GroupManager(this);           // 编组管理器
         this.renderer = new CanvasRenderer(this);       // 渲染器
         this.interaction = new CanvasInteraction(this); // 交互管理器

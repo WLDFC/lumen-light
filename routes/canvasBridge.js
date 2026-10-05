@@ -35,7 +35,7 @@ function createCanvasBridgeRouter({ clients }) {
     let bridgeSeq = 0;
 
     /** 需要路由到单一客户端的写命令（广播会重复执行） */
-    const MUTATING_COMMANDS = new Set(['drop_image', 'delete_media', 'clear_media', 'build_graph']);
+    const MUTATING_COMMANDS = new Set(['drop_image', 'drop_video', 'delete_media', 'clear_media', 'build_graph']);
     /** 心跳新鲜度阈值：超过视为页面失去响应 */
     const FRESH_MS = 10 * 1000;
 

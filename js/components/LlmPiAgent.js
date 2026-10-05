@@ -7,8 +7,10 @@
  *     （后端自动完成模型切换与"存档 → 会话"绑定）；
  *   - pi 的流式事件由后端经 WebSocket 广播（piEvent 页面事件），
  *     本类消费后把一轮回复渲染成「分阶段、可折叠」的块序列：
- *       · 思考块（thinking）：流式累积，结束/进入下一阶段自动折叠；
- *       · 工具块（tool）：显示工具名与运行状态，结果折叠存放；
+ *       · 思考块（thinking）：流式累积，结束/进入下一阶段自动折叠，头部计时长；
+ *       · 工具块（tool）：默认折叠，头部显示中文标题/参数预览/运行状态与耗时
+ *         （常见工具映射中文名——bash→终端、read→查阅、edit/write→写入，
+ *         canvas_·/web_·/comfy_mcp_· 等扩展工具族各有专名，未知工具保留原名）；
  *       · 文本块（text）：最终回答，始终展开。
  *     工具结果（role=tool）只填入对应工具块的折叠区，绝不铺进主气泡
  *     （否则 bash 打印的 base64 等大段二进制会糊满界面）；
@@ -95,12 +97,11 @@ class LlmPiAgent {
         body.className = 'pi-block-body';
 
         el.append(header, body);
-        // 所有块都可点击头部折叠/展开；工具块默认张开（_addToolBlock 加 open），
-        // 思考块默认折叠
+        // 所有块都可点击头部折叠/展开；思考块与工具块均默认折叠
         header.addEventListener('click', () => el.classList.toggle('open'));
 
         this._wrap.appendChild(el);
-        const block = { type, el, body, meta, titleEl, argsEl };
+        const block = { type, el, body, meta, titleEl, argsEl, startedAt: Date.now() };
         // 思考块正文直接一个 pre；工具块正文按"调用参数/执行结果"分段懒加载
         if (type === 'thinking') block.content = this._addSectionContent(body);
         this._blocks.push(block);
@@ -130,20 +131,87 @@ class LlmPiAgent {
     }
 
     /**
-     * 按工具名挑选小图标（文件夹/终端/画布/搜索/编辑/生成/默认扳手）
+     * 按工具名给出展示元数据（中文标题 + 图标），对齐 zcode 的块观感：
+     * 常见内置工具与三个扩展工具族显示中文标题，未知工具与用户自挂
+     * MCP 工具（mcp__ 前缀）保留原名，避免看不出是哪个服务器
      * @param {string} name - 工具名
-     * @returns {string} svg 标记
+     * @returns {{title: string, icon: string}} 头部标题与 svg 标记
      */
-    _toolIcon(name) {
-        const n = String(name || '').toLowerCase();
+    _toolMeta(name) {
         const svg = (paths) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-        if (/bash|shell|exec|run|command|terminal/.test(n)) return svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>');
-        if (/read|skill|doc|book|load|open/.test(n)) return svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>');
-        if (/canvas|image|img|picture|photo|drop|screen|shot/.test(n)) return svg('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>');
-        if (/search|grep|find|glob|list|ls|query/.test(n)) return svg('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
-        if (/write|edit|patch|create|save|append/.test(n)) return svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>');
-        if (/artist|generate|paint|draw|pick|model/.test(n)) return svg('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>');
-        return svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>');
+        const ICON = {
+            terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+            read: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+            canvas: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+            search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+            edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+            star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+            globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+            film: '<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/>',
+            gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+            save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+            check: '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+            wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'
+        };
+        const pick = (title, key) => ({ title, icon: svg(ICON[key]) });
+        const n = String(name || '').toLowerCase();
+        // ---- 画布工具族（lumen-canvas 扩展 14 个，按实际名单给专名）----
+        if (/^canvas_get_state$/.test(n)) return pick('获取画布状态', 'canvas');
+        if (/^canvas_get_image/.test(n)) return pick('取画布图片', 'canvas');
+        if (/^canvas_get_prompts/.test(n)) return pick('获取提示词链', 'canvas');
+        if (/^canvas_drop_image$/.test(n)) return pick('落图到画布', 'canvas');
+        if (/^canvas_drop_video$/.test(n)) return pick('落视频到画布', 'film');
+        if (/^canvas_run_comfy/.test(n)) return pick('执行 Comfy 工作流', 'gear');
+        if (/^canvas_run_llm_image/.test(n)) return pick('AI 生图', 'star');
+        if (/^canvas_run_video/.test(n)) return pick('AI 生视频', 'film');
+        if (/^canvas_poll_task/.test(n)) return pick('查询生成任务', 'check');
+        if (/^canvas_build/.test(n)) return pick('搭建节点工作流', 'gear');
+        if (/^canvas_list_workflows/.test(n)) return pick('列出工作流', 'gear');
+        if (/^canvas_search_assets/.test(n)) return pick('检索资产', 'search');
+        if (/^canvas_clear_media/.test(n)) return pick('清空画布', 'canvas');
+        if (/^canvas_delete_media/.test(n)) return pick('删除画布媒体', 'canvas');
+        if (/^canvas_/.test(n)) return pick('画布工具', 'canvas');
+        // ---- 联网工具族（lumen-web 扩展）----
+        if (/^web_search/.test(n)) return pick('联网搜索', 'globe');
+        if (/^web_image_search/.test(n)) return pick('网络搜图', 'globe');
+        if (/^web_fetch/.test(n)) return pick('读取网页', 'globe');
+        if (/^web_/.test(n)) return pick('联网工具', 'globe');
+        // ---- Comfy 原生工具族（lumen-comfy 扩展 18 个 comfy_mcp_*，
+        //      按实际名单给中文，未收录的显示 "Comfy · 后缀" 保住区分度）----
+        if (/^comfy_mcp_/.test(n)) {
+            const t = {
+                comfy_mcp_system_stats: 'Comfy 状态',
+                comfy_mcp_job: '查询 Comfy 任务',
+                comfy_mcp_fetch_outputs: '取 Comfy 输出',
+                comfy_mcp_run_workflow: '执行 Comfy 工作流',
+                comfy_mcp_run_template: '运行 Comfy 模板',
+                comfy_mcp_list_workflow_slots: '查看工作流槽位',
+                comfy_mcp_set_workflow_slot: '写入工作流槽位',
+                comfy_mcp_search_models: '检索模型',
+                comfy_mcp_search_templates: '检索模板',
+                comfy_mcp_fetch_template: '拉取模板',
+                comfy_mcp_download_model: '下载模型',
+                comfy_mcp_install_node: '安装节点',
+                comfy_mcp_nodes: '查看节点清单',
+                comfy_mcp_workflow_deps: '依赖分析',
+                comfy_mcp_get_logs: 'Comfy 日志',
+                comfy_mcp_free_memory: '释放显存',
+                comfy_mcp_upload_file: '上传文件',
+                comfy_mcp_download: '下载'
+            }[n];
+            return t ? pick(t, 'gear') : pick('Comfy · ' + n.replace(/^comfy_mcp_/, ''), 'gear');
+        }
+        // ---- 技能库（lumen-skills 扩展）----
+        if (/^skill_list/.test(n)) return pick('查看技能列表', 'read');
+        if (/^skill_load/.test(n)) return pick('加载技能', 'read');
+        // ---- pi 内置工具 ----
+        if (/^bash$|shell|terminal/.test(n)) return pick('终端', 'terminal');
+        if (/^read$|^open/.test(n)) return pick('查阅', 'read');
+        if (/^edit$|^write$|^apply_patch|^create/.test(n)) return pick('写入', 'edit');
+        if (/grep|glob|find|search|query|list|^ls$/.test(n)) return pick('搜索', 'search');
+        // ---- 用户自挂 MCP 工具：保留全名（含服务器名）不翻译 ----
+        if (/^mcp__/.test(n)) return { title: name || 'MCP 工具', icon: svg(ICON.wrench) };
+        return { title: name || '工具', icon: svg(ICON.wrench) };
     }
 
     /** 工具参数的头部单行内联展示（紧凑 JSON；空参数返回空串不显示） */
@@ -153,16 +221,17 @@ class LlmPiAgent {
         return typeof args === 'string' ? args : JSON.stringify(args);
     }
 
-    /** 新建工具块（带图标 + 内联参数），默认展开，并预填调用参数分段 */
+    /** 新建工具块（带图标 + 内联参数），默认折叠，并预填调用参数分段 */
     _addToolBlock(name, args) {
         this._dropEmptyCursor();   // 真实块开始：清掉开头的光标占位块
         this._finalizeText();      // 进入工具阶段：上一个文本块清光标定稿
-        const b = this._addCollapsibleBlock('tool', name || '工具', {
-            icon: this._toolIcon(name),
+        const meta = this._toolMeta(name);
+        const b = this._addCollapsibleBlock('tool', meta.title, {
+            icon: meta.icon,
             args: this._argsInline(args)
         });
-        b.name = name || '工具';    // 记录工具名供次级匹配
-        b.el.classList.add('open'); // 工具块默认展开（思考块保持折叠）
+        b.name = name || '工具';    // 记录原始工具名供次级匹配（标题已是中文）
+        // 默认折叠：头部已带中文标题/参数预览/运行状态，需要细节再点开
         this._setToolArgs(b, args);
         return b;
     }
@@ -183,12 +252,41 @@ class LlmPiAgent {
         b.resultPre.textContent = this._summarizeToolOutput(text);
     }
 
-    /** 标记工具块收尾状态（已完成/失败） */
+    /** 标记工具块收尾状态（已完成/失败，附耗时） */
     _markToolDone(b, failed) {
         b.done = true;
         b.el.classList.remove('running');
         b.el.classList.add(failed ? 'failed' : 'done');
-        b.meta.textContent = failed ? '失败' : '已完成';
+        const dur = this._fmtDuration(Date.now() - (b.startedAt || Date.now()));
+        b.meta.textContent = (failed ? '失败 · ' : '已完成 · ') + dur;
+    }
+
+    /** 结束思考计时：冻结头部时长并折叠（重复调用无害） */
+    _endThinking(b) {
+        if (!b || b.thinkingActive === false) return;
+        b.thinkingActive = false;
+        b.meta.textContent = '持续了 ' + this._fmtDuration(Date.now() - (b.startedAt || Date.now()));
+        b.el.classList.remove('open');
+    }
+
+    /** 毫秒 → 人话时长（60 秒内 "N 秒"，以上 "M 分 S 秒"） */
+    _fmtDuration(ms) {
+        const s = Math.max(0, Math.round(ms / 1000));
+        if (s < 60) return s + ' 秒';
+        return Math.floor(s / 60) + ' 分 ' + (s % 60) + ' 秒';
+    }
+
+    /** 秒级 tick：刷新进行中块的头部计时（思考块与运行中工具块） */
+    _tickBlocks() {
+        if (!this._streaming || !this._wrap) return;
+        const now = Date.now();
+        for (const b of this._blocks) {
+            if (b.type === 'thinking' && b.thinkingActive) {
+                b.meta.textContent = '持续了 ' + this._fmtDuration(now - b.startedAt);
+            } else if (b.type === 'tool' && b.started && !b.done) {
+                b.meta.textContent = '运行中 · ' + this._fmtDuration(now - b.startedAt);
+            }
+        }
     }
 
     /** 新建一个始终展开的文本块（最终回答） */
@@ -224,8 +322,12 @@ class LlmPiAgent {
         if (last && last.type === 'thinking') return last;
         this._dropEmptyCursor();
         this._finalizeText();   // 进入思考阶段：上一个文本块清光标定稿
-        // 思考块只要存在就会渲染出来（看得见这一行），但内容默认折叠
-        return this._addCollapsibleBlock('thinking', '思考', { icon: PI_THINK_ICON });
+        // 思考块只要存在就会渲染出来（看得见这一行），但内容默认折叠；
+        // 头部由秒级 tick 实时刷新"持续了 X 秒"
+        const b = this._addCollapsibleBlock('thinking', '思考', { icon: PI_THINK_ICON });
+        b.thinkingActive = true;
+        b.meta.textContent = '思考中…';
+        return b;
     }
 
     /** 思考块去重：pi 个别场景下会把同一段思考流式输出两次（调试日志
@@ -369,7 +471,7 @@ class LlmPiAgent {
         const chat = this.chat;
         const model = this.getUnderlyingModel();
         if (!model) {
-            chat.appendMessage('assistant', '请先在 设置 → 通用 → 「pi 使用的模型」中选择模型');
+            chat.appendMessage('assistant', '请先在面板模型下拉的「Agent」分类中选择一个对话模型（即 pi 底层模型）');
             return;
         }
 
@@ -392,6 +494,10 @@ class LlmPiAgent {
         this._lastEventAt = Date.now();
         if (!this._watchTimer) {
             this._watchTimer = setInterval(() => this._watchdog(), 10000);
+        }
+        // 块计时器：思考块"持续了 X 秒"与运行中工具块的耗时每秒刷新
+        if (!this._tickTimer) {
+            this._tickTimer = setInterval(() => this._tickBlocks(), 1000);
         }
         // 先放一个带光标的空文本块，表示"已开始、等待输出"
         this._ensureTextBlock().content.textContent = '▍';
@@ -442,10 +548,26 @@ class LlmPiAgent {
         }
     }
 
-    /** 中止当前推理 */
+    /** 中止当前推理（用户点停止按钮）：界面立即收尾（乐观停止），
+     *  后台把「清队列 + 掐 bash + 中止」发给后端。
+     *  为什么不等后端应答：pi 的 abort 应答要等会话空闲才回来，工具挂住时
+     *  可能永不回来——等它就是"点了停止没反应"的观感来源。收尾后到达的
+     *  事件因 _streaming=false 被忽略；指令若因 pi 僵死未送达，
+     *  pi_unresponsive 上报与状态灯仍会给出重启入口 */
     abort() {
         if (!this._streaming) return;
-        fetch('/api/pi/abort', { method: 'POST' }).catch(() => {});
+        // 先写说明再 _finish（_finish 置空 _wrap，顺序反了说明会丢）
+        this._noteBlock('⛔ 已停止：清队列与中止指令已发出，后台生成任务一并取消', false);
+        this._finish();
+        fetch('/api/pi/abort', { method: 'POST', signal: AbortSignal.timeout(15000) })
+            .then((r) => r.json().catch(() => null))
+            .then((j) => {
+                if (j && j.status === 'ok' && j.data && j.data.abortSent === false) {
+                    // pi 进程未运行：本地收尾已生效，补一条明示
+                    this._standaloneNote('⚠️ 停止指令未能送达（pi 进程未运行）');
+                }
+            })
+            .catch(() => { /* 后端不可达：保持乐观收尾，状态灯会反映后端状态 */ });
     }
 
     /** pi 事件消费：按阶段写入思考/工具/文本块 */
@@ -466,13 +588,14 @@ class LlmPiAgent {
                 this._textBuf = '';   // 消息边界：重置缓冲，下条消息重新累积
             } else if (ev.type === 'thinking_delta') {
                 const b = this._ensureThinkingBlock();
+                b.thinkingActive = true;   // thinking→text→thinking 回归时重新计时
                 b.el.classList.add('open');   // 流式期间临时展开便于观察，结束再折回
                 b.content.textContent += ev.delta || '';
                 this.chat.followBottom();
             } else if (ev.type === 'thinking_end' && ev.content !== undefined) {
                 const b = this._ensureThinkingBlock();
                 b.content.textContent = ev.content;
-                b.el.classList.remove('open'); // 思考结束恢复默认折叠
+                this._endThinking(b);   // 冻结时长并恢复默认折叠
             }
         } else if (event.type === 'tool_execution_start') {
             this._dropEmptyCursor();
@@ -536,7 +659,7 @@ class LlmPiAgent {
                             b = this._ensureThinkingBlock();
                             if (!b.content.textContent) b.content.textContent = p.thinking;
                         }
-                        b.el.classList.remove('open'); // 收尾后保持默认折叠
+                        this._endThinking(b); // 收尾：冻结时长并保持默认折叠
                     } else if (p.type === 'text' && p.text) {
                         // 以 pi 的 assistant 消息为权威单位：完整文本覆盖当前文本块；
                         // 若与已有文本块完全相同（模型复读），丢弃本轮新建的重复块
@@ -706,6 +829,10 @@ class LlmPiAgent {
         if (this._watchTimer) {
             clearInterval(this._watchTimer);
             this._watchTimer = null;
+        }
+        if (this._tickTimer) {
+            clearInterval(this._tickTimer);
+            this._tickTimer = null;
         }
         this._runningEl?.remove();
         this._runningEl = null;

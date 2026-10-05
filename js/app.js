@@ -39,6 +39,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 资产可拖拽/单击添加到画布；见 js/components/AssetLibrary.js）
     window.assetLibrary = new AssetLibrary();
 
+    // 初始化 LoRA 管理窗口（顶栏右侧按钮：左文件夹/右封面网格，置顶星标；
+    // 数据源 /api/lora，见 js/components/LoraManager.js 与 routes/lora.js）
+    window.loraManager = new LoraManager();
+
     // 初始化存档管理器（左上角文件菜单）
     // 挂到 window 上供 RealtimeSaveManager 等后续组件复用其 serializer 与 currentSave
     window.saveManager = new SaveManager(window.canvas);
@@ -175,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ==================== 监听扩图完成事件 ====================
-    // ImageOutpaint 灯箱保存后触发：按画幅导出的新图（白色填充扩展区）
+    // 图像编辑器（ImageStudio）裁剪/扩图保存后触发：按画幅导出的新图（白色填充扩展区）
     // 作为新图片落到原图右侧，原图不动（与放大/抠图同流程）
     window.addEventListener('outpaintComplete', (e) => {
         const { originalImage, imageDataUrl } = e.detail;

@@ -9,6 +9,8 @@
  *      槽位（供 LumenReceiveImageFromCanvas 拉取）→ 注入参数/提示词/种子 →
  *      提交 ComfyUI；生成结果经 LumenSendImageRealtime 带着透传的 target
  *      回流（见 routes/comfy.js /receive-image），由前端路由到节点占位图
+ *   3. POST /stop —— 按本轮 promptId 中断正在执行的任务（/interrupt）并
+ *      把还在队列里的按 id 移除（/queue delete），停止 X 的后端支撑
  * ==========================================================================
  */
 
@@ -423,6 +425,62 @@ function createComfyNodeRouter(options) {
                 status: 'error',
                 message: error.message || '运行失败'
             });
+        }
+    });
+
+    /**
+     * POST /api/comfy-node/stop
+     * 中断 ComfyUI 生成（Comfy 生图节点停止 X 的后端支撑）。
+     * body: { promptIds: [...] } —— 本轮提交返回的全部任务 id，按 id 精确取消：
+     *   - 正在执行的：POST /interrupt 中断（ComfyUI 只能中断"当前正在跑"的
+     *     任务、无法指定 id——仅当正在执行的确属本轮任务时才中断，避免误杀
+     *     其他节点/面板同时进行的生成）；
+     *   - 还在队列里的：POST /queue {"delete": [...]} 按 id 移除。
+     */
+    router.post('/stop', async (req, res) => {
+        const ids = Array.isArray(req.body && req.body.promptIds)
+            ? req.body.promptIds.filter((v) => typeof v === 'string' && v)
+            : [];
+        if (!ids.length) {
+            return res.json({ status: 'ok', interrupted: false, deleted: 0 });
+        }
+
+        const result = { status: 'ok', interrupted: false, deleted: 0 };
+        try {
+            // 查队列：正在执行的任务里是否有本轮的。queue_running 条目格式
+            // 为 [执行序号, prompt_id, ...]，取 index 1（兼容对象形态兜底）
+            let runningOurs = false;
+            try {
+                const queueRes = await fetchWithTimeout(`${comfyApiUrl}/queue`);
+                const queue = await queueRes.json();
+                const runningIds = [].concat(queue.queue_running || [])
+                    .map((e) => (Array.isArray(e) ? e[1] : (e && e.promptId)))
+                    .filter(Boolean);
+                runningOurs = runningIds.some((id) => ids.includes(id));
+            } catch (_) {
+                // 队列查询失败不阻断：仍然尝试按 id 删队列
+            }
+
+            if (runningOurs) {
+                await fetchWithTimeout(`${comfyApiUrl}/interrupt`, { method: 'POST' });
+                result.interrupted = true;
+            }
+
+            const deleteRes = await fetchWithTimeout(`${comfyApiUrl}/queue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ delete: ids })
+            });
+            if (!deleteRes.ok) {
+                throw new Error(`ComfyUI /queue 响应 ${deleteRes.status}`);
+            }
+            result.deleted = ids.length;
+
+            console.log(`⏹️ Comfy 任务已停止: interrupt=${result.interrupted}, delete=${result.deleted}`);
+            res.json(result);
+        } catch (error) {
+            console.error('❌ Comfy 任务停止失败:', error.message);
+            res.status(500).json({ status: 'error', message: error.message || '停止失败' });
         }
     });
 

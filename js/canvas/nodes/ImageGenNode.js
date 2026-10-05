@@ -13,7 +13,9 @@
  *   - 标题栏：Generate + 「生图节点」徽标
  *   - 状态栏：仅左端口（in），无右端口（生图节点不对外输出）
  *   - 工具栏：模型下拉 + 比例/分辨率双段下拉（复用 LlmSizePicker）
- *             + 质量下拉（gpt-image 系模型时显示）+ 生成按钮
+ *             + 质量下拉（gpt-image 系模型时显示）
+ *   - 生成行：数量步进器（CountStepper，1-8 张并发）+ 生成按钮
+ *             + 停止控件 X（GenStopControl，常驻两态）
  *   - 内容区：提示文本
  *
  * 交互职责划分（与 PromptNode 一致）：
@@ -101,20 +103,26 @@ class ImageGenNode extends BaseCanvasNode {
                         <option value="" selected>自动</option>
                     </select>
                 </div>
-                <div class="image-gen-row">
-                    <div class="image-gen-label">数量</div>
-                    <select class="llm-count-select" title="同时生成的图片数量（1-8 张并发请求）">
-                        <option value="1">1 张</option>
-                        <option value="2">2 张</option>
-                        <option value="3">3 张</option>
-                        <option value="4">4 张</option>
-                        <option value="5">5 张</option>
-                        <option value="6">6 张</option>
-                        <option value="7">7 张</option>
-                        <option value="8">8 张</option>
-                    </select>
+                <div class="image-gen-actions">
+                    <!-- 数量步进器（与 Comfy 生图节点同款交互，CountStepper
+                         行为层共用）：1-8 张并发请求，上下箭头步进或直接键入 -->
+                    <div class="gen-count-stepper"
+                         title="同时生成的图片数量（1-8 张并发请求），上下箭头步进或直接键入">
+                        <input type="text" class="gen-count-stepper-input"
+                               inputmode="numeric" maxlength="2" value="1" aria-label="生成数量">
+                        <div class="gen-count-stepper-arrows">
+                            <button type="button" class="gen-count-stepper-arrow" data-step="up" aria-label="增加数量">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+                            </button>
+                            <button type="button" class="gen-count-stepper-arrow" data-step="down" aria-label="减少数量">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <button class="image-gen-generate-btn" type="button" title="收集连入的提示词并生成图片">生成</button>
+                    <!-- 生成任务停止控件（GenStopControl）的 X 按钮插在本行末尾：
+                         常驻两态（暗置/点亮），点击中止本节点本轮全部并发请求 -->
                 </div>
-                <button class="image-gen-generate-btn" type="button" title="收集连入的提示词并生成图片">生成</button>
             </div>
             <div class="text-node-resize" title="拖拽调整大小"></div>
         `;
@@ -122,12 +130,31 @@ class ImageGenNode extends BaseCanvasNode {
         this.modelSelect = this.el.querySelector('.llm-model-select');
         this.sizeSelect = this.el.querySelector('.llm-size-select');
         this.qualitySelect = this.el.querySelector('.llm-quality-select');
-        this.countSelect = this.el.querySelector('.llm-count-select');
-        this.countSelect.value = String(this.count);
         this.qualityRow = this.el.querySelector('[data-role="quality-row"]');
         this.generateBtn = this.el.querySelector('.image-gen-generate-btn');
         this.formEl = this.el.querySelector('.image-gen-form');
         this.portInEl = this.el.querySelector('.text-node-port-in');
+
+        // 数量步进器（迁移自数量下拉行，与 Comfy 生图节点同款交互）：
+        // 行为层共用 CountStepper，状态仍是 this.count（1-8 钳制，存档兼容）
+        this.countStepper = new CountStepper(
+            { input: this.el.querySelector('.gen-count-stepper-input'),
+              up: this.el.querySelector('.gen-count-stepper-arrow[data-step="up"]'),
+              down: this.el.querySelector('.gen-count-stepper-arrow[data-step="down"]') },
+            { get: () => this.count,
+              set: (v) => {
+                  this.count = Math.min(ImageGenNode.MAX_COUNT, Math.max(1, parseInt(v, 10) || 1));
+                  return this.count;
+              } }
+        );
+        this.countStepper.sync();
+
+        // 生成任务停止控件：X 在生成按钮右侧，常驻两态（暗置/点亮）；状态归
+        // 本节点实例持有（无全局注册表），多节点并发不同厂商时各自独立中止
+        this.stopControl = new GenStopControl({
+            host: this.el.querySelector('.image-gen-actions'),
+            title: '停止本轮生成'
+        });
 
         // 比例/分辨率双段下拉：复用 LLM 对话框的 LlmSizePicker 组件，
         // 恢复存档时把之前的选择写回组件状态
@@ -152,7 +179,8 @@ class ImageGenNode extends BaseCanvasNode {
         // 下拉框/按钮等交互控件拦截透传，走原生行为（选择、点击）。
         this.el.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;   // 只转发左键
-            if (e.target.closest('select, button, textarea, .llm-size-options-wrap')) {
+            // 步进器数值框是 input：拦截透传，否则点进去会拖动节点
+            if (e.target.closest('select, button, input, textarea, .llm-size-options-wrap')) {
                 e.stopPropagation();
                 return;
             }
@@ -181,10 +209,7 @@ class ImageGenNode extends BaseCanvasNode {
             this.quality = this.qualitySelect.value;
         });
 
-        // 数量切换：记录同时生成的图片数量（1-8 张）
-        this.countSelect.addEventListener('change', () => {
-            this.count = Math.min(ImageGenNode.MAX_COUNT, Math.max(1, parseInt(this.countSelect.value, 10) || 1));
-        });
+        // 数量输入由 CountStepper 行为层接管（构造函数里已挂接）
 
         // 生成按钮
         this.generateBtn.addEventListener('click', (e) => {
@@ -193,9 +218,10 @@ class ImageGenNode extends BaseCanvasNode {
         });
 
         // 滚轮转发：节点浮在 canvas 上方，wheel 到不了画布层。
-        // 悬停在交互控件上时放行原生行为（下拉选项滚动等），其余转发缩放画布
+        // 悬停在交互控件上时放行原生行为（下拉选项/步进器滚动等），
+        // 其余转发缩放画布
         this.el.addEventListener('wheel', (e) => {
-            if (e.target.closest('select, button, textarea, .llm-size-options-wrap')) return;
+            if (e.target.closest('select, button, input, textarea, .llm-size-options-wrap')) return;
             e.preventDefault();
             this.canvas.interaction.handleWheel(e);
         }, { passive: false });
@@ -360,10 +386,12 @@ class ImageGenNode extends BaseCanvasNode {
         // 同时生成数量（1-8 张，各请求独立并发、独立落图）
         const count = Math.min(ImageGenNode.MAX_COUNT, Math.max(1, this.count || 1));
 
-        // 锁定按钮，进入生成态（多张时按钮实时显示完成进度）
+        // 锁定按钮，进入生成态（多张时按钮实时显示完成进度）；
+        // 停止控件同步显示 X（一轮一个 controller，N 张并发共享，点 X 全停）
         this.isGenerating = true;
         this.generateBtn.disabled = true;
         this.generateBtn.textContent = `生成中 0/${count}`;
+        const signal = this.stopControl.begin();
 
         // 共享请求体：N 个并发请求使用同一份提示词/参考图/尺寸。
         // 下拉 value 为"厂商||模型ID"复合键：拆开后显式指定厂商，
@@ -389,7 +417,8 @@ class ImageGenNode extends BaseCanvasNode {
                     const response = await fetch('/api/llm/generate-image', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestBody)
+                        body: JSON.stringify(requestBody),
+                        signal
                     });
                     const result = await response.json();
                     if (response.ok && result.status === 'ok' && result.imageUrl) {
@@ -400,6 +429,10 @@ class ImageGenNode extends BaseCanvasNode {
                     return { ok: false, message: result.message || '未知错误' };
                 } catch (error) {
                     this.removePlaceholder(placeholder);
+                    // 用户点 X 主动中止：不算失败，单独标记供汇总提示分流
+                    if (GenStopControl.isAbortError(error)) {
+                        return { ok: false, aborted: true, message: '已停止' };
+                    }
                     console.error('生图节点生成请求失败:', error);
                     return { ok: false, message: error.message };
                 }
@@ -415,9 +448,14 @@ class ImageGenNode extends BaseCanvasNode {
             const results = await Promise.all(tasks);
             const okCount = results.filter((r) => r.ok).length;
             const failCount = count - okCount;
+            const abortedCount = results.filter((r) => r.aborted).length;
 
-            // 结果提示显示 8 秒：默认 2 秒在并发落图时容易错过
-            if (failCount === 0) {
+            // 结果提示显示 8 秒：默认 2 秒在并发落图时容易错过。
+            // 有中止时走中性提示（用户主动停止不是失败），完成数照报
+            if (abortedCount > 0) {
+                window.socket?.showNotification?.(
+                    okCount > 0 ? `已停止生成（完成 ${okCount}/${count}）` : '⛔ 已停止生成', 8000);
+            } else if (failCount === 0) {
                 window.socket?.showNotification?.(count > 1 ? `生成完成，共 ${count} 张` : '生成完成', 8000);
             } else if (okCount === 0) {
                 window.socket?.showNotification?.('生成失败: ' + (results[0].message || '未知错误'), 8000);
@@ -427,6 +465,7 @@ class ImageGenNode extends BaseCanvasNode {
             }
         } finally {
             this.isGenerating = false;
+            this.stopControl.end();
             this.generateBtn.disabled = false;
             this.generateBtn.textContent = '生成';
         }
@@ -485,10 +524,12 @@ class ImageGenNode extends BaseCanvasNode {
     // 选中同步由基类 BaseCanvasNode 提供（LAYOUT_MODE='design' 布局模式）
 
     /**
-     * 从 DOM 移除节点（删除时调用），先清理生成占位图再由基类移除元素
+     * 从 DOM 移除节点（删除时调用），先清理生成占位图与停止控件
+     * 再由基类移除元素
      */
     destroy() {
         this.removePlaceholder();
+        this.stopControl.destroy();
         super.destroy();
     }
 

@@ -25,7 +25,8 @@
  * 结构（复用 .text-node 与 .image-gen-node 全套样式，扩展 .comfy-gen-node）：
  *   - 标题栏：Comfy Generate + 「Comfy 生图」徽标
  *   - 状态栏：仅左端口（in），无右端口
- *   - 工具栏：工作流下拉 + 动态参数行 + 生成按钮
+ *   - 工具栏：工作流下拉 + 动态参数行 + 生成按钮 + 停止 X（GenStopControl，
+ *     常驻两态；点 X 调 /api/comfy-node/stop 按 promptId 中断/删队列）
  *   - 内容区：动态参数容器（按检测结果逐行渲染）
  *
  * 交互职责划分（与 ImageGenNode 一致）：
@@ -74,6 +75,8 @@ class ComfyGenNode extends BaseCanvasNode {
         // 生成流程状态
         this.isGenerating = false;       // 生成进行中标记（防重复提交）
         this._pending = null;            // { expected, received } 本轮待收图片计数
+        this._submitting = false;        // 提交循环进行中（停止 X 的 onAbort 分流用）
+        this._submittedPromptIds = [];   // 本轮已入队的 ComfyUI 任务 id（停止时按 id 取消）
         this._watchdog = null;           // 生成看门狗（ComfyUI 长时间无响应时兜底复位）
 
         this.buildDom();
@@ -136,6 +139,9 @@ class ComfyGenNode extends BaseCanvasNode {
                     </div>
                     <button class="image-gen-generate-btn" type="button"
                             title="收集连入的提示词并按当前工作流生成">生成</button>
+                    <!-- 生成任务停止控件（GenStopControl）的 X 按钮插在本行末尾：
+                         常驻两态（暗置/点亮），点击中断已入队的 ComfyUI 任务
+                         （按 promptId 精确取消）并立即收尾 -->
                 </div>
             </div>
             <div class="text-node-resize" title="拖拽调整大小"></div>
@@ -144,6 +150,18 @@ class ComfyGenNode extends BaseCanvasNode {
         this.workflowSelect = this.el.querySelector('.comfy-workflow-select');
         this.dynamicRowsEl = this.el.querySelector('.comfy-dynamic-rows');
         this.generateBtn = this.el.querySelector('.image-gen-generate-btn');
+
+        // 生成任务停止控件：X 在生成按钮右侧，常驻两态（暗置/点亮）；状态归
+        // 本节点实例持有，与 API 生图节点（ImageGenNode）同一套组件。
+        // Comfy 链路的停止与 API 节点不同：提交是异步入队、结果走 WS 回流，
+        // 光 abort fetch 够不着已入队的 ComfyUI 任务——点 X 须调
+        // /api/comfy-node/stop 按 promptId 中断/删队列（见 _onStopClicked）
+        this.stopControl = new GenStopControl({
+            host: this.el.querySelector('.comfy-generate-row'),
+            title: '停止本轮生成',
+            onAbort: () => this._onStopClicked()
+        });
+
         this.countStepperEl = this.el.querySelector('.comfy-count-stepper');
         this.countInputEl = this.el.querySelector('.comfy-count-stepper-input');
         this.portInEl = this.el.querySelector('.text-node-port-in');
@@ -391,15 +409,19 @@ class ComfyGenNode extends BaseCanvasNode {
             return;
         }
 
-        // 锁定按钮，进入生成态；占位图按数量沿对角线级联创建。
+        // 锁定按钮，进入生成态；停止控件点亮 X（一轮一个 controller，
+        // 与 ImageGenNode 同一机制）。占位图按数量沿对角线级联创建。
         // 尺寸跟随本次生图尺寸（与 LLM 生图节点行为一致）：用户设置过用
         // 设置值，未设置但工作流有尺寸节点时用工作流当前值——两者就是
         // 实际会注入工作流的尺寸；编辑类工作流尺寸跟随输入图无法预知，
         // 回退 1024（真实图落图按占位图中心对齐，尺寸偏差不影响位置）
         this.isGenerating = true;
         this._pending = { expected: count, received: 0 };
+        this._submittedPromptIds = [];
+        this._submitting = true;
         this.generateBtn.disabled = true;
         this.generateBtn.textContent = count > 1 ? `生成中 0/${count}` : '生成中';
+        this.stopControl.begin();
 
         let res = null;
         if (this.params.state.sizeW !== null && this.params.state.sizeH !== null) {
@@ -421,10 +443,14 @@ class ComfyGenNode extends BaseCanvasNode {
         this._armWatchdog();
 
         // 循环入队：每次提交 batch_size=1，ComfyUI 队列按序执行，
-        // 跑完一张回传一张；某张提交失败即中止剩余，已入队的不受影响
+        // 跑完一张回传一张；某张提交失败即中止剩余，已入队的不受影响。
+        // X 停止不在 fetch 上挂 signal——提交请求本身几十毫秒就返回，
+        // 真正耗时的是队列执行；改为每张提交前检查 aborted，点 X 后停在
+        // 下一张提交前，已入队的由 _stopComfyTasks 统一取消
         let submitted = 0;
         try {
             for (let i = 0; i < count; i++) {
+                if (this.stopControl.aborted) break;
                 this.generateBtn.textContent =
                     count > 1 ? `生成中 ${this._pending.received}/${count}` : '生成中';
                 const response = await fetch('/api/comfy-node/run', {
@@ -446,8 +472,12 @@ class ComfyGenNode extends BaseCanvasNode {
                     throw new Error(result.message || '未知错误');
                 }
                 submitted++;
+                if (result.promptId) {
+                    this._submittedPromptIds.push(result.promptId);
+                }
             }
         } catch (error) {
+            this._submitting = false;
             console.error('Comfy 生图节点提交失败:', error);
             const remaining = count - submitted;
             window.socket?.showNotification?.(
@@ -467,6 +497,44 @@ class ComfyGenNode extends BaseCanvasNode {
                 return;
             }
         }
+        this._submitting = false;
+
+        // 提交循环中点了 X（含最后一张提交期间）：取消已入队任务并立即收尾，
+        // 不再等待 WS 回图（失败收尾路径已在 catch 里 return，不会走到这里）
+        if (this.stopControl.aborted && this.isGenerating && this._pending) {
+            this._stopComfyTasks();
+        }
+    }
+
+    /**
+     * X 停止按钮回调（GenStopControl onAbort）：提交循环进行中时，循环内
+     * 的 aborted 检查会在下一张提交前拦停并统一走到 _stopComfyTasks；
+     * 这里只处理「提交已全部完成、正在等 WebSocket 回图」的窗口——
+     * 该窗口内没有任何 fetch 可中断，必须主动取消 ComfyUI 侧任务
+     */
+    _onStopClicked() {
+        if (this.isGenerating && !this._submitting && this._pending) {
+            this._stopComfyTasks();
+        }
+    }
+
+    /**
+     * 停止本轮生成：通知后端按 promptId 中断/删除已入队的 ComfyUI 任务
+     * （fire-and-forget，失败不阻断收尾），不再等待 WS 回图，清掉未落图
+     * 的占位图并立即复位。刚完成落图的照常保留
+     */
+    _stopComfyTasks() {
+        fetch('/api/comfy-node/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ promptIds: this._submittedPromptIds })
+        }).catch(() => {});
+
+        const received = this._pending ? this._pending.received : 0;
+        window.socket?.showNotification?.(
+            received > 0 ? `已停止生成（已完成 ${received} 张）` : '⛔ 已停止生成', 8000);
+        this.removePlaceholder();
+        this._finishGeneration();
     }
 
     /**
@@ -496,6 +564,7 @@ class ComfyGenNode extends BaseCanvasNode {
         }
         this.isGenerating = false;
         this._pending = null;
+        this.stopControl.end();
         this.generateBtn.disabled = false;
         this.generateBtn.textContent = '生成';
     }
@@ -634,6 +703,7 @@ class ComfyGenNode extends BaseCanvasNode {
             clearTimeout(this._watchdog);
             this._watchdog = null;
         }
+        this.stopControl.destroy();
         super.destroy();
     }
 

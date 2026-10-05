@@ -6,15 +6,19 @@
  *       与本地 Comfy 生图节点（ComfyGenNode）、LLM 生图节点（ImageGenNode）
  *       平行的第三条生成链路。
  *
- * 与本地 ComfyUI 的本质差异：工作流本体在平台云端（本地没有工作流 JSON），
- * 平台只暴露若干可变参数字段。因此本节点不扫描工作流模板，而是按
- * "登记卡"渲染参数行——登记卡在设置 → API 里登记（「从平台拉取」自动
- * 解析参数映射），存于 settings.json 的 runninghub.workflows。
+ * 与本地 ComfyUI 的本质差异：工作流/应用本体在平台云端（本地没有工作流
+ * JSON），平台只暴露若干可变参数字段。因此本节点不扫描工作流模板，而是
+ * 节点直连——在工作流/应用 ID 输入框填平台 URL 末段数字，点「拉取」经
+ * 后端代理取回参数模板（工作流走 getJsonApiFormat + RhWorkflowImporter，
+ * 应用走 apiCallDemo + RhAppImporter），解析结果即参数行并缓存进节点
+ * 状态（随存档持久化，恢复免二次拉取）；最近使用的资源存 localStorage
+ * 供下拉直达。旧「登记卡」（设置 → API 登记的 workflows）仍从后端下发，
+ * 在「最近」下拉的「已登记」分组出现，选中按登记卡提交（旧存档兼容）。
  *
  * 生成链路：
- *   生成按钮 → N × POST /api/runninghub/run 并发提交（参数值 + 连线图片
- *     + target，N 为数量步进器值）→ 后端上传图片/组装 nodeInfoList/提交
- *     平台 → 拿 taskId 轮询 → 成功后下载转存（平台 URL 仅 24h 有效）→
+ *   生成按钮 → N × POST /api/runninghub/run 并发提交（资源标识 + 参数
+ *     值 + 连线图片 + target，N 为数量步进器值）→ 后端组装 nodeInfoList/
+ *     提交平台 → 拿 taskId 轮询 → 成功后下载转存（平台 URL 仅 24h 有效）→
  *     WebSocket 推 new-image / new-video（带 target），每个任务全部结果
  *     推完后推 generation-complete，失败推 generation-failed
  *     → 本节点 receiveGeneratedImage / receiveGeneratedVideo 逐个消费，
@@ -22,9 +26,11 @@
  *        占位图先进先出替换——回流机制与本地 ComfyUI 链路同构。
  *
  * 结构与交互（与 ComfyGenNode 一致，复用全套样式）：
- *   - 标题栏：RunningHub + 「云端工作流」徽标
+ *   - 标题栏：RunningHub + 「云端工作流/云端应用」徽标（随类型切换）
  *   - 状态栏：仅左端口（in），接收提示词节点链
- *   - 工具栏：工作流下拉（登记列表）+ 动态参数行 + 数量步进器 + 生成按钮
+ *   - 工具栏：类型下拉（工作流/应用）+ ID 输入行（含拉取按钮）+
+ *     最近下拉（已登记 + 最近使用）+ 档位下拉（应用专属，显存档位）+
+ *     动态参数行 + 数量步进器 + 生成按钮
  *   - 数量 N = N 个并发云端任务（平台 API 支持并发，按平台计费）；占位图
  *     按 N 张级联预建，单任务多产出时超出部分兜底落到节点右侧
  * ==========================================================================
@@ -39,7 +45,12 @@ class RunningHubGenNode extends BaseCanvasNode {
      * @param {Object} [options] - 恢复存档/粘贴时的初始状态
      * @param {number} [options.width] - 节点宽度
      * @param {number} [options.height] - 节点高度
-     * @param {string} [options.workflowId] - 选中的工作流 id（'rh:登记id'）
+     * @param {string} [options.workflowId] - 旧存档兼容：登记卡 id（'rh:登记id'）
+     * @param {string} [options.resourceKind] - 资源类型 'workflow'|'app'（节点直连）
+     * @param {string} [options.resourceId] - 平台资源 id（纯数字）
+     * @param {string} [options.resourceName] - 平台资源名（提示用）
+     * @param {Array} [options.template] - 参数定义快照（随存档持久化，恢复免拉取）
+     * @param {string} [options.instanceType] - 应用实例档位 default/plus/ultra
      * @param {Object} [options.values] - 参数值快照 { [key]: string }（存档恢复/粘贴）
      * @param {number} [options.count] - 生成数量（存档恢复/粘贴）
      */
@@ -50,10 +61,18 @@ class RunningHubGenNode extends BaseCanvasNode {
         this.width = options.width || RunningHubGenNode.DEFAULT_WIDTH;
         this.height = options.height || RunningHubGenNode.DEFAULT_HEIGHT;
 
-        this.workflowId = options.workflowId || '';
+        // 资源状态（节点直连）：类型 + 平台 id + 模板。template 随存档
+        // 持久化，恢复存档不依赖网络与登记卡；cardId 指向旧登记卡
+        // （'rh:x'，登记卡模式提交时下发，路由端按卡解析参数与覆盖）
+        this.resourceKind = options.resourceKind === 'app' ? 'app' : 'workflow';
+        this.resourceId = String(options.resourceId || '');
+        this.resourceName = String(options.resourceName || '');
+        this.template = Array.isArray(options.template) ? options.template : null;
+        this.instanceType = String(options.instanceType || '');
+        this.workflowId = options.workflowId || '';   // 旧存档的登记卡引用
+        this.cardId = '';                             // 解析到的登记卡 id
 
-        this.workflows = [];       // 登记卡列表缓存（/api/runninghub/workflows）
-        this.currentWf = null;     // 当前选中的登记卡（含 params 定义）
+        this.workflows = [];       // 旧登记卡列表缓存（/api/runninghub/workflows）
 
         // 生成流程状态：云端任务产出数量不可知，按"任务"计数收尾——每个
         // 任务以 generation-complete / generation-failed 结束（WS 同连接
@@ -71,6 +90,7 @@ class RunningHubGenNode extends BaseCanvasNode {
         this.params.setState(options.values);
         this.bindEvents();
         this.updateTransform();
+        this.syncInputsFromState();   // 存档恢复的类型/ID/档位回填输入框
         this.loadWorkflows();
     }
 
@@ -93,9 +113,38 @@ class RunningHubGenNode extends BaseCanvasNode {
             </div>
             <div class="image-gen-form">
                 <div class="image-gen-row">
-                    <div class="image-gen-label">工作流</div>
-                    <select class="llm-model-select comfy-workflow-select" title="选择 RunningHub 已登记的云端工作流">
-                        <option value="">加载中…</option>
+                    <div class="image-gen-label">类型</div>
+                    <select class="llm-model-select comfy-workflow-select rh-kind-select"
+                            title="资源类型：工作流（ComfyUI 工作流 API）/ 应用（AI 应用 API）">
+                        <option value="workflow">工作流</option>
+                        <option value="app">应用</option>
+                    </select>
+                </div>
+                <div class="image-gen-row">
+                    <div class="image-gen-label">ID</div>
+                    <div class="rh-id-row">
+                        <input type="text" class="comfy-num-input rh-id-input" inputmode="numeric"
+                               placeholder="平台 URL 末段数字"
+                               title="平台工作流/应用页 URL 末段的纯数字 ID，填好点「拉取」">
+                        <button class="image-gen-generate-btn rh-fetch-btn" type="button"
+                                title="从平台拉取参数模板并重建参数行（缓存进节点，随存档保存）">拉取</button>
+                    </div>
+                </div>
+                <div class="image-gen-row">
+                    <div class="image-gen-label">最近</div>
+                    <select class="llm-model-select comfy-workflow-select rh-recent-select"
+                            title="已登记（旧登记卡）与最近拉取过的资源，选中即恢复参数行">
+                        <option value="">-- 选择 --</option>
+                    </select>
+                </div>
+                <div class="image-gen-row rh-instance-row" style="display:none">
+                    <div class="image-gen-label">档位</div>
+                    <select class="llm-model-select comfy-workflow-select rh-instance-select"
+                            title="应用实例显存档位（影响计费与排队，留空走平台默认）">
+                        <option value="">默认</option>
+                        <option value="default">default · 24G</option>
+                        <option value="plus">plus · 48G</option>
+                        <option value="ultra">ultra · 84G</option>
                     </select>
                 </div>
                 <div class="comfy-dynamic-rows"></div>
@@ -121,9 +170,18 @@ class RunningHubGenNode extends BaseCanvasNode {
             <div class="text-node-resize" title="拖拽调整大小"></div>
         `;
 
-        this.workflowSelect = this.el.querySelector('.comfy-workflow-select');
+        this.kindSelect = this.el.querySelector('.rh-kind-select');
+        this.idInput = this.el.querySelector('.rh-id-input');
+        this.fetchBtn = this.el.querySelector('.rh-fetch-btn');
+        this.recentSelect = this.el.querySelector('.rh-recent-select');
+        this.instanceRow = this.el.querySelector('.rh-instance-row');
+        this.instanceSelect = this.el.querySelector('.rh-instance-select');
+        this.badgeEl = this.el.querySelector('.text-node-badge');
         this.dynamicRowsEl = this.el.querySelector('.comfy-dynamic-rows');
-        this.generateBtn = this.el.querySelector('.image-gen-generate-btn');
+        // 注意作用域：拉取按钮复用了 image-gen-generate-btn 的视觉样式，
+        // 生成按钮必须锁定在 comfy-generate-row 内，否则按文档顺序会选到
+        // 拉取按钮——生成逻辑被绑到拉取上、真生成按钮反而无事件
+        this.generateBtn = this.el.querySelector('.comfy-generate-row .image-gen-generate-btn');
         this.countStepperEl = this.el.querySelector('.comfy-count-stepper');
         this.countInputEl = this.el.querySelector('.comfy-count-stepper-input');
         this.portInEl = this.el.querySelector('.text-node-port-in');
@@ -158,10 +216,37 @@ class RunningHubGenNode extends BaseCanvasNode {
             this.canvas.interaction.onMouseDown(e);
         });
 
-        // 工作流切换：按登记卡重建参数行
-        this.workflowSelect.addEventListener('change', () => {
-            this.workflowId = this.workflowSelect.value;
-            this.onWorkflowChange();
+        // 类型切换：应用显示实例档位行；模板不通用，清掉提示重新拉取
+        this.kindSelect.addEventListener('change', () => {
+            this.resourceKind = this.kindSelect.value === 'app' ? 'app' : 'workflow';
+            this.template = null;
+            this.cardId = '';
+            this.updateBadge();
+            this.params.showStatus(this.resourceKind === 'app'
+                ? '已切换到应用：填入应用 ID 后点「拉取」'
+                : '已切换到工作流：填入工作流 ID 后点「拉取」');
+        });
+
+        // 拉取参数模板（ID 输入框回车等效按钮）
+        this.fetchBtn.addEventListener('click', () => this.fetchTemplate());
+        this.idInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.stopPropagation();
+                this.fetchTemplate();
+            }
+        });
+
+        // 最近下拉：已登记卡 / 最近拉取的缓存条目，选中即恢复参数行
+        this.recentSelect.addEventListener('change', () => {
+            const value = this.recentSelect.value;
+            if (!value) return;
+            this.applyRecentValue(value);
+            this.recentSelect.value = '';
+        });
+
+        // 应用实例档位（随节点入存档，仅提交应用时下发）
+        this.instanceSelect.addEventListener('change', () => {
+            this.instanceType = this.instanceSelect.value;
         });
 
         this.generateBtn.addEventListener('click', (e) => {
@@ -194,62 +279,267 @@ class RunningHubGenNode extends BaseCanvasNode {
             e.stopPropagation();
         });
 
-        // 设置保存后自动刷新工作流列表：节点只在构造时拉一次列表，
-        // 用户后登记/删除工作流时，画布上已有节点需要同步跟进
-        // （SettingsApiPanel.save() 成功后会派发 settingsSaved 事件）
+        // 设置保存后自动刷新「已登记」分组（旧登记卡只读保留，节点下拉
+        // 同步跟进；SettingsApiPanel.save() 成功后会派发 settingsSaved 事件）
         window.addEventListener('settingsSaved', () => this.loadWorkflows());
     }
 
-    // ==================== 工作流与参数行 ====================
+    // ==================== 资源缓存（localStorage，跨节点共享） ====================
 
     /**
-     * 从后端加载登记的工作流列表并填充下拉框，
-     * 恢复存档时按 workflowId 回选中项
+     * 读最近使用资源缓存：[{ kind, id, name, params, fetchedAt }]
+     * （拉取成功即写入；容量封顶，超出淘汰最旧条目）
+     * @returns {Array<Object>}
+     */
+    static loadResourceCache() {
+        try {
+            const list = JSON.parse(localStorage.getItem(RunningHubGenNode.CACHE_KEY));
+            return Array.isArray(list) ? list : [];
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * 把拉取成功的资源 upsert 进缓存（同 kind+id 覆盖并置顶）
+     * @param {Object} entry - { kind, id, name, params }
+     */
+    static saveResourceToCache(entry) {
+        if (!entry || !entry.id || !Array.isArray(entry.params)) return;
+        const list = RunningHubGenNode.loadResourceCache()
+            .filter((e) => !(e.kind === entry.kind && String(e.id) === String(entry.id)));
+        list.unshift({ ...entry, fetchedAt: Date.now() });
+        try {
+            localStorage.setItem(
+                RunningHubGenNode.CACHE_KEY,
+                JSON.stringify(list.slice(0, RunningHubGenNode.CACHE_LIMIT)));
+        } catch { /* 隐私模式等存不进：缓存是增强不是依赖，静默降级 */ }
+    }
+
+    // ==================== 资源选择与参数行 ====================
+
+    /**
+     * 启动/设置保存后的资源装载：拉旧登记卡列表 → 重建「最近」下拉 →
+     * 按节点状态恢复选中项（直接模式模板已在存档里，离线可恢复）
      */
     async loadWorkflows() {
         try {
             const response = await fetch('/api/runninghub/workflows');
             const data = await response.json();
             this.workflows = data.status === 'ok' ? data.workflows : [];
+        } catch (error) {
+            console.error('RunningHub 节点加载登记卡列表失败:', error);
+            this.workflows = [];
+        }
+        this.renderRecentSelect();
+        this.restoreSelection();
+    }
 
-            if (this.workflows.length === 0) {
-                this.workflowSelect.innerHTML =
-                    '<option value="">未登记工作流（设置 → API）</option>';
-                this.params.showStatus('请先在 设置 → API → RunningHub 里登记工作流');
+    /**
+     * 重建「最近」下拉：已登记分组（旧登记卡，value=card:<id>）+
+     * 最近使用分组（localStorage 缓存，value=res:<kind>:<id>）
+     */
+    renderRecentSelect() {
+        const esc = LumenLight.escapeHtml;
+        const cardOptions = this.workflows.map((wf) =>
+            `<option value="card:${esc(wf.id)}">${esc(wf.name || wf.id)}</option>`).join('');
+        const cached = RunningHubGenNode.loadResourceCache();
+        const kindLabel = (k) => k === 'app' ? '应用' : '工作流';
+        const cachedOptions = cached.map((e) =>
+            `<option value="res:${esc(e.kind)}:${esc(String(e.id))}">` +
+            `${esc(e.name || String(e.id))}（${kindLabel(e.kind)} ${esc(String(e.id))}）</option>`).join('');
+        this.recentSelect.innerHTML = '<option value="">-- 选择 --</option>' +
+            (cardOptions ? `<optgroup label="已登记">${cardOptions}</optgroup>` : '') +
+            (cachedOptions ? `<optgroup label="最近使用">${cachedOptions}</optgroup>` : '');
+    }
+
+    /**
+     * 按节点状态恢复选中项与参数行。三种来源：
+     *   1. 直接模式（resourceId+template 在存档里）：直接渲染，零网络；
+     *   2. 旧存档的 workflowId：在登记卡列表里找到后按卡恢复；
+     *   3. 全新节点/登记卡已删：显示引导提示
+     */
+    restoreSelection() {
+        if (this.template && (this.resourceId || this.cardId)) {
+            this.syncInputsFromState();
+            this.params.setWorkflow({ params: this.template });
+            this.updateBadge();
+            return;
+        }
+        if (this.workflowId) {
+            const card = this.workflows.find((wf) => wf.id === this.workflowId);
+            if (card) {
+                this.applyCard(card);
+                this.syncInputsFromState();
                 return;
             }
+            this.workflowId = '';   // 登记卡已删：清引用，走引导提示
+        }
+        this.updateBadge();
+        this.params.showStatus('填入平台 ID 后点「拉取」，或在「最近」里选择资源');
+    }
 
-            this.workflowSelect.innerHTML =
-                '<option value="">-- 选择工作流 --</option>' +
-                this.workflows.map((wf) =>
-                    `<option value="${LumenLight.escapeHtml(wf.id)}">${LumenLight.escapeHtml(wf.name)}</option>`
-                ).join('');
+    /**
+     * 状态 → 输入框回填（存档恢复/最近选择后调用）
+     */
+    syncInputsFromState() {
+        this.kindSelect.value = this.resourceKind;
+        this.idInput.value = this.resourceId || '';
+        this.instanceSelect.value = this.instanceType || '';
+        this.updateBadge();
+    }
 
-            // 恢复之前/存档中的选择（登记可能已被删除，找不到则停留默认项）
-            if (this.workflowId && this.workflows.some((wf) => wf.id === this.workflowId)) {
-                this.workflowSelect.value = this.workflowId;
-                this.onWorkflowChange();
-            } else if (this.workflowId) {
-                this.workflowId = '';
-                this.params.clear();
+    /**
+     * 「最近」下拉选中值分发：card: 前缀走登记卡，res: 前缀走缓存条目
+     * @param {string} value - card:<登记id> | res:<kind>:<平台id>
+     */
+    applyRecentValue(value) {
+        if (value.startsWith('card:')) {
+            const card = this.workflows.find((wf) => wf.id === value.slice(5));
+            if (card) {
+                this.applyCard(card);
+                this.syncInputsFromState();
             }
-        } catch (error) {
-            console.error('RunningHub 节点加载工作流列表失败:', error);
-            this.workflowSelect.innerHTML = '<option value="">加载失败</option>';
+            return;
+        }
+        const parts = value.split(':');
+        if (parts[0] !== 'res' || parts.length < 3) return;
+        const kind = parts[1];
+        const id = parts.slice(2).join(':');
+        const entry = RunningHubGenNode.loadResourceCache().find(
+            (e) => e.kind === kind && String(e.id) === id);
+        if (entry) {
+            this.applyCacheEntry(entry);
+            this.syncInputsFromState();
         }
     }
 
     /**
-     * 选中工作流发生变化：找登记卡并重建动态参数行
-     * （RH 无本地工作流 JSON 可拉，直接按登记卡渲染）
+     * 应用旧登记卡（登记卡模式：提交时下发 cardId，路由按卡解析参数
+     * 与编辑器覆盖——与历史版本行为一致）
+     * @param {Object} card - 登记卡 { id, name, params }
      */
-    onWorkflowChange() {
-        this.currentWf = this.workflows.find((wf) => wf.id === this.workflowId) || null;
-        if (!this.currentWf) {
-            this.params.clear();
+    applyCard(card) {
+        this.cardId = card.id;
+        this.workflowId = card.id;
+        this.resourceKind = 'workflow';
+        this.resourceId = '';
+        this.resourceName = card.name || card.id;
+        this.template = Array.isArray(card.params) ? card.params : [];
+        this.params.setWorkflow({ params: this.template });
+        this.updateBadge();
+    }
+
+    /**
+     * 应用缓存条目（直接模式：提交时下发 kind+resourceId+params）
+     * @param {Object} entry - { kind, id, name, params }
+     */
+    applyCacheEntry(entry) {
+        this.cardId = '';
+        this.workflowId = '';
+        this.resourceKind = entry.kind === 'app' ? 'app' : 'workflow';
+        this.resourceId = String(entry.id);
+        this.resourceName = String(entry.name || entry.id);
+        this.template = entry.params;
+        this.params.setWorkflow({ params: this.template });
+        this.updateBadge();
+    }
+
+    /**
+     * 从平台拉取参数模板（后端代理，apiKey 不进浏览器）：
+     *   工作流 → fetch-workflow（getJsonApiFormat）→ RhWorkflowImporter
+     *   应用   → fetch-app（apiCallDemo）→ RhAppImporter
+     * 成功后模板进节点状态 + localStorage 缓存，参数行即按模板重建
+     * （values 快照按 key 回填，同字段已填的值不丢）
+     */
+    async fetchTemplate() {
+        const id = this.idInput.value.trim();
+        if (!/^\d+$/.test(id)) {
+            this.params.showStatus('ID 应为纯数字（平台工作流/应用页 URL 末段）');
             return;
         }
-        this.params.setWorkflow(this.currentWf);
+        const kind = this.resourceKind;
+        this.fetchBtn.disabled = true;
+        this._snapshotNote = '';
+        this.params.showStatus('拉取中…');
+        try {
+            let name = '';
+            let result;
+            if (kind === 'app') {
+                const response = await fetch('/api/runninghub/fetch-app', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ aiAppId: id })
+                });
+                const data = await response.json();
+                if (!response.ok || data.status !== 'ok') {
+                    throw new Error(data.message || `HTTP ${response.status}`);
+                }
+                result = RhAppImporter.import(data);
+                name = String(data.webappName || '');
+            } else {
+                const response = await fetch('/api/runninghub/fetch-workflow', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workflowId: id })
+                });
+                const data = await response.json();
+                if (!response.ok || data.status !== 'ok') {
+                    throw new Error(data.message || `HTTP ${response.status}`);
+                }
+                result = RhWorkflowImporter.import(data.workflow);
+                if (!result.error) {
+                    // 顺手把快照存进工作流编辑器（upsert，重复拉取不产生副本）：
+                    // 编辑器里改快照参数保存后 diff 成编辑器覆盖，提交时经
+                    // 快照 sidecar 生效。失败只提示不阻断拉取
+                    try {
+                        const impRes = await fetch('/api/workflows/import-runninghub', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: '', rhWorkflowId: id, workflow: data.workflow })
+                        });
+                        const imp = await impRes.json();
+                        if (imp.status === 'ok') {
+                            this._snapshotNote = `；快照「${imp.id}」已${imp.created ? '存入' : '更新'}工作流编辑器`;
+                        }
+                    } catch { /* 快照是增强能力，失败不影响参数行 */ }
+                }
+            }
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            this.cardId = '';
+            this.workflowId = '';
+            this.resourceId = id;
+            if (name) this.resourceName = name;
+            this.template = result.params;
+            RunningHubGenNode.saveResourceToCache({
+                kind, id, name: this.resourceName, params: this.template
+            });
+            this.renderRecentSelect();
+            this.params.setWorkflow({ params: this.template });
+            this.updateBadge();
+            window.socket?.showNotification?.(
+                `已拉取 ${this.template.length} 个参数${this._snapshotNote || ''}`, 6000);
+        } catch (error) {
+            console.error('RunningHub 拉取参数模板失败:', error);
+            this.params.showStatus(`拉取失败：${error.message}`);
+        } finally {
+            this.fetchBtn.disabled = false;
+        }
+    }
+
+    /**
+     * 徽标与档位行随类型联动（云端工作流 / 云端应用）
+     */
+    updateBadge() {
+        if (this.badgeEl) {
+            this.badgeEl.textContent = this.resourceKind === 'app' ? '云端应用' : '云端工作流';
+        }
+        if (this.instanceRow) {
+            this.instanceRow.style.display = this.resourceKind === 'app' ? '' : 'none';
+        }
     }
 
     // ==================== 提示词/参考图收集（与 ComfyGenNode 同机制） ====================
@@ -296,17 +586,17 @@ class RunningHubGenNode extends BaseCanvasNode {
     async generate() {
         if (this.isGenerating) return;
 
-        const wf = this.currentWf;
-        if (!wf) {
-            window.socket?.showNotification?.('请先选择 RunningHub 工作流');
+        const wf = this.template;
+        if (!wf || (!this.cardId && !this.resourceId)) {
+            window.socket?.showNotification?.('请先拉取或选择 RunningHub 工作流/应用');
             return;
         }
 
         const positive = this.collectPrompt();
         const negative = window.promptPanel?.promptInputManager?.getPrompts()?.negative || '';
 
-        // 登记卡含 image 槽位时才收集连线图片（按登记顺序依次填入）
-        const paramDefs = Array.isArray(wf.params) ? wf.params : [];
+        // 模板含 image 槽位时才收集连线图片（按槽位顺序依次填入）
+        const paramDefs = Array.isArray(wf) ? wf : [];
         const needsImages = paramDefs.some((p) => p && p.type === 'image');
         const imageSlots = paramDefs.filter((p) => p && p.type === 'image').length;
         const images = needsImages ? await this.collectImages() : [];
@@ -355,7 +645,14 @@ class RunningHubGenNode extends BaseCanvasNode {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    workflowId: this.workflowId,
+                    // 登记卡模式（旧存档兼容）下发 cardId，路由按卡解析；
+                    // 直接模式下发 kind+resourceId+params（模板随节点缓存）
+                    workflowId: this.cardId || undefined,
+                    kind: this.resourceKind,
+                    resourceId: (!this.cardId && this.resourceId) ? this.resourceId : undefined,
+                    params: (!this.cardId && this.resourceId) ? this.template : undefined,
+                    instanceType: this.resourceKind === 'app'
+                        ? (this.instanceType || undefined) : undefined,
                     values,
                     images,
                     target: this.id,
@@ -631,7 +928,9 @@ class RunningHubGenNode extends BaseCanvasNode {
     }
 
     /**
-     * 序列化为存档数据（参数值快照与生成数量随节点入存档，恢复后回填）
+     * 序列化为存档数据：资源标识 + 参数模板快照随节点入存档（恢复免二次
+     * 拉取）；登记卡模式下保留 workflowId（旧路由/旧前端互认），直接模式
+     * 不写该字段
      */
     toJSON() {
         return {
@@ -641,7 +940,12 @@ class RunningHubGenNode extends BaseCanvasNode {
             y: this.y,
             width: this.width,
             height: this.height,
-            workflowId: this.workflowId,
+            workflowId: this.cardId || undefined,
+            resourceKind: this.resourceKind,
+            resourceId: this.resourceId || undefined,
+            resourceName: this.resourceName || undefined,
+            template: this.template || undefined,
+            instanceType: this.instanceType || undefined,
             values: this.params.getState(),
             count: this.count,
             ...(this.title ? { title: this.title } : {})
@@ -652,13 +956,18 @@ class RunningHubGenNode extends BaseCanvasNode {
 // ==================== 类常量 ====================
 RunningHubGenNode.LAYOUT_MODE = 'design';  // 固定设计基准布局 + 整体缩放（同生图节点族）
 RunningHubGenNode.DEFAULT_WIDTH = 2048;    // 默认宽度（与 Comfy 生图节点同量级）
-RunningHubGenNode.DEFAULT_HEIGHT = 1800;   // 行数少（无 LoRA），高度略小
+RunningHubGenNode.DEFAULT_HEIGHT = 2800;   // 默认高度：比 Comfy 生图节点（2600）多三个
+                                           // 固定行（类型/ID/最近），给多参数工作流留足
+                                           // 纵向空间；仍可拖右下角手柄调整
 RunningHubGenNode.DEFAULT_TITLE = 'RunningHub'; // 默认标题（双击标题可自定义）
 RunningHubGenNode.PLACEHOLDER_GAP = 300;   // 占位图与节点右缘的间距（px）
 RunningHubGenNode.PLACEHOLDER_CASCADE = 160; // 多任务占位图的对角线级联间距（px）
 // 无进展看门狗超时（毫秒）：与后端轮询上限（30 分钟）对齐并留出结果
 // 下载转存余量——前端比后端先放弃会导致长任务结果回流时被丢弃
 RunningHubGenNode.WATCHDOG_TIMEOUT = 35 * 60 * 1000;
+// 最近使用资源缓存（localStorage）：键名与容量上限
+RunningHubGenNode.CACHE_KEY = 'lumenLight_rh_resources';
+RunningHubGenNode.CACHE_LIMIT = 30;
 
 // 将 RunningHubGenNode 类暴露到全局作用域
 window.RunningHubGenNode = RunningHubGenNode;

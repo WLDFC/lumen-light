@@ -146,3 +146,27 @@ canvas.panning { cursor: grabbing !important; }
 .canvas-video-player-close:hover {
     background: rgba(255, 80, 80, 0.8);
 }
+
+/* ==================== 画布撤销/重做轻提示（CanvasHistory） ====================
+   左下角浮出：撤销/重做了什么（"已撤销：移动图片"），单元素复用、
+   1.8s 自动淡出；pointer-events:none 不挡任何交互 */
+.canvas-history-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 56px;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    background: rgba(20, 21, 26, 0.92);
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 16px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 2600;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.canvas-history-toast.show {
+    opacity: 1;
+}

@@ -112,6 +112,74 @@ async function submitWorkflow({ apiKey, endpoint, rhWorkflowId, nodeInfoList }) 
 }
 
 /**
+ * 提交 AI 应用任务（POST /openapi/v2/run/ai-app/{aiAppId}）。
+ * 与 submitWorkflow 同构：body 都是 nodeInfoList 参数映射，仅 URL 与
+ * 可选的 instanceType（实例显存档位，影响计费）不同；轮询/上传/结果
+ * 转存完全复用同一套机制
+ * @param {Object} options
+ * @param {string} options.apiKey - RunningHub API Key（32 位）
+ * @param {string} [options.endpoint] - 平台端点（空用默认）
+ * @param {string} options.aiAppId - 平台应用 id（api-detail 页 URL 末段数字）
+ * @param {Array<{nodeId: string, fieldName: string, fieldValue: string}>} options.nodeInfoList - 参数映射
+ * @param {string} [options.instanceType] - 实例档位 default/plus/ultra（空走平台默认）
+ * @returns {Promise<{taskId: string}>} 任务 id
+ */
+async function submitAiApp({ apiKey, endpoint, aiAppId, nodeInfoList, instanceType }) {
+    const url = `${normalizeEndpoint(endpoint)}/openapi/v2/run/ai-app/${aiAppId}`;
+    const body = { nodeInfoList };
+    if (instanceType) body.instanceType = String(instanceType);
+    const res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(body)
+    }, 60000);
+
+    const json = await res.json().catch(() => null);
+    const data = unwrap(json);
+    const taskId = data.taskId || (json && json.taskId);
+
+    if (!res.ok || !taskId) {
+        const message = (json && (json.errorMessage || json.msg)) ||
+            `提交失败（HTTP ${res.status}）`;
+        throw new Error(message);
+    }
+    return { taskId };
+}
+
+/**
+ * 拉取 AI 应用参数模板（GET /api/webapp/apiCallDemo）。
+ * 返回应用作者在平台上开放的节点参数清单（nodeId/fieldName/fieldType/
+ * fieldData/description），是画布节点按应用动态布局参数行的数据源。
+ * 老版 v1 路径但实测可用；apiKey 经查询串传给平台（仅服务端流转）
+ * @param {Object} options
+ * @param {string} options.apiKey - API Key
+ * @param {string} [options.endpoint] - 平台端点
+ * @param {string} options.aiAppId - 平台应用 id（纯数字字符串）
+ * @returns {Promise<{webappName: string, nodeInfoList: Array}>}
+ */
+async function fetchAiAppTemplate({ apiKey, endpoint, aiAppId }) {
+    const base = normalizeEndpoint(endpoint);
+    const url = `${base}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(apiKey)}&webappId=${encodeURIComponent(aiAppId)}`;
+    const res = await fetchWithTimeout(url, {}, 30000);
+
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json || json.code !== 0 || !json.data) {
+        throw new Error((json && (json.msg || json.message)) || `平台拉取失败（HTTP ${res.status}）`);
+    }
+    const data = json.data;
+    if (!Array.isArray(data.nodeInfoList) || data.nodeInfoList.length === 0) {
+        throw new Error('该应用未开放任何 API 参数（nodeInfoList 为空），无法在画布调参');
+    }
+    return {
+        webappName: String(data.webappName || ''),
+        nodeInfoList: data.nodeInfoList
+    };
+}
+
+/**
  * 查询任务状态与结果
  * @param {Object} options
  * @param {string} options.apiKey - API Key
@@ -372,10 +440,12 @@ module.exports = {
     DEFAULT_ENDPOINT,
     normalizeEndpoint,
     submitWorkflow,
+    submitAiApp,
     queryTask,
     uploadMedia,
     downloadFile,
     fetchWorkflowJson,
+    fetchAiAppTemplate,
     startTaskPolling,
     getActiveTaskCount
 };

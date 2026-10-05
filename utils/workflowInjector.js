@@ -157,13 +157,14 @@ function injectPromptsToWorkflow(workflow, positive, negative) {
 }
 
 /**
- * 生成一个随机的 15 位种子
- * 范围：0 到 999999999999999（15 位），且小于 Number.MAX_SAFE_INTEGER，
- * 可安全通过 JSON 序列化并在 ComfyUI 端精确解析。
+ * 生成一个随机种子
+ * 范围：0 到 4294967295（2^32-1）。不少自定义节点（如 SeedVR2 系列）把
+ * seed 上限定为 2^32-1，种子必须落在所有节点的合法区间内才能过校验；
+ * 32 位随机对上限更大的节点（KSampler 系为 2^64-1）同样合法且空间足够。
  * @returns {number} 随机种子
  */
 function generateRandomSeed() {
-    return Math.floor(Math.random() * 1e15);
+    return Math.floor(Math.random() * 0x100000000);
 }
 
 /**

@@ -138,15 +138,11 @@ class SettingsApiPanel {
                     <div class="settings-models-hint">${modelHint}</div>
                 </div>
 
-                <!-- RunningHub 云端工作流：API Key 与工作流登记（登记卡模式） -->
+                <!-- RunningHub 云端配置：仅 Key 与端点（工作流/应用的 ID 输入
+                     与参数拉取在画布节点上完成，登记卡模式已退役但旧数据仍兼容） -->
                 <div class="settings-models-section">
                     <div class="settings-models-header">
-                        <span class="settings-models-title">RunningHub（云端工作流）</span>
-                        <div class="settings-models-actions">
-                            <button class="settings-models-btn primary" id="settingsRhAddWorkflowBtn" type="button">
-                                + 登记工作流
-                            </button>
-                        </div>
+                        <span class="settings-models-title">RunningHub（云端工作流/应用）</span>
                     </div>
                     <div class="settings-form-item">
                         <label for="settingsRhApiKey">API Key</label>
@@ -161,14 +157,9 @@ class SettingsApiPanel {
                                value="${LumenLight.escapeHtml(rh.endpoint || '')}">
                     </div>
                     <div class="settings-models-hint">
-                        工作流 ID 填纯数字（平台工作流页 URL 末段），点「从平台拉取」可自动解析参数映射
-                        （与云端运行版本一致，推荐）。type 支持 string（文本框）/ list（下拉，配 options
-                        数组）/ image（自动取节点连线图片）；role 填 prompt 或 negative 时，画布连线
-                        提示词在参数留空时自动填入。例：
-                        [{"nodeId":"45","fieldName":"prompt","label":"提示词","type":"string","role":"prompt"}]
-                    </div>
-                    <div id="settingsRhWorkflowsBody" class="settings-rh-workflows">
-                        ${rhWorkflows.map((wf) => this.renderRhWorkflowCard(wf)).join('')}
+                        工作流/应用不用在这里登记：画布上新建 RunningHub 节点，把平台页 URL 末段的
+                        纯数字 ID 填进节点后点「拉取」，参数模板自动解析成参数行并随存档保存。
+                        此前登记过的 ${rhWorkflows.length} 张工作流卡仍对旧存档节点生效（在节点「最近」下拉的「已登记」分组）。
                     </div>
                 </div>
 
@@ -217,51 +208,8 @@ class SettingsApiPanel {
             }
         });
 
-        // RunningHub 登记区：新增/删除工作流卡片（卡片编辑即时改 DOM，保存时统一收集）
-        document.getElementById('settingsRhAddWorkflowBtn')?.addEventListener('click', () => {
-            const body = document.getElementById('settingsRhWorkflowsBody');
-            if (!body) return;
-            body.insertAdjacentHTML('beforeend', this.renderRhWorkflowCard({}));
-        });
-        document.getElementById('settingsRhWorkflowsBody')?.addEventListener('click', (e) => {
-            const del = e.target.closest('.rh-wf-delete');
-            if (del) del.closest('.settings-rh-workflow')?.remove();
-            // 从平台拉取工作流 JSON：取卡片内工作流 ID → 后端代理调平台
-            // getJsonApiFormat（apiKey 只在服务端）→ 解析回填
-            const fetchBtn = e.target.closest('.rh-wf-fetch');
-            if (fetchBtn) this.fetchRhWorkflow(fetchBtn);
-            // 导入本地 JSON：中转到卡片内隐藏的文件选择框
-            const imp = e.target.closest('.rh-wf-import');
-            if (imp) imp.closest('.settings-rh-workflow')?.querySelector('.rh-wf-file')?.click();
-        });
-        // 导入文件选择完成：解析工作流 JSON → 参数映射回填到卡片文本域
-        document.getElementById('settingsRhWorkflowsBody')?.addEventListener('change', (e) => {
-            const fileInput = e.target.closest('.rh-wf-file');
-            if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
-            const card = fileInput.closest('.settings-rh-workflow');
-            const file = fileInput.files[0];
-            fileInput.value = '';   // 允许下次重选同一文件
-
-            const reader = new FileReader();
-            reader.onload = () => {
-                try {
-                    const workflow = JSON.parse(reader.result);
-                    const result = RhWorkflowImporter.import(workflow);
-                    if (result.error) {
-                        alert('导入失败：' + result.error);
-                        return;
-                    }
-                    // 本地文件与平台运行版可能不一致（空字段/版本漂移），
-                    // 导入成功即提示以云端为准
-                    this._applyRhParams(card, result.params,
-                        '本地文件仅作备用，以平台实际运行版本为准，建议优先「从平台拉取」校准');
-                } catch (err) {
-                    alert('导入失败：文件不是合法 JSON（' + err.message + '）');
-                }
-            };
-            reader.onerror = () => alert('导入失败：文件读取失败');
-            reader.readAsText(file);
-        });
+        // RunningHub 区只剩 Key/端点两个输入（ID 与拉取在画布节点上），
+        // 无额外事件绑定
     }
 
     /**
@@ -593,141 +541,24 @@ class SettingsApiPanel {
         this.render();
     }
 
-    // ==================== RunningHub 云端工作流登记 ====================
+    // ==================== RunningHub 云端配置 ====================
+    // 登记卡模式已退役：工作流/应用的 ID 输入与参数拉取在画布 RunningHub
+    // 节点上完成（节点直连）。历史登记卡数据（settings.json 的
+    // runninghub.workflows）只读保留——旧存档节点仍按卡提交，编辑器覆盖
+    // 依旧经后端写卡，本面板不再提供编辑 UI
 
     /**
-     * 渲染单张工作流登记卡：名称 + 工作流 ID + 参数映射 JSON
-     * @param {Object} wf - 登记卡 { id, name, rhWorkflowId, params }
-     * @returns {string} HTML 字符串
-     */
-    renderRhWorkflowCard(wf) {
-        // 参数定义序列化为缩进 JSON 供编辑；已有 id 存进 data 属性（保存时沿用，
-        // 画布节点的 workflowId 存档引用它，重新生成会断链）
-        const paramsText = Array.isArray(wf.params) && wf.params.length
-            ? JSON.stringify(wf.params, null, 1)
-            : '';
-        const wid = LumenLight.escapeHtml(wf.id || '');
-        return `
-            <div class="settings-rh-workflow" data-wf-id="${wid}">
-                <div class="settings-rh-workflow-main">
-                    <input type="text" class="settings-input rh-wf-name" placeholder="名称（画布下拉里显示）"
-                           value="${LumenLight.escapeHtml(wf.name || '')}">
-                    <input type="text" class="settings-input rh-wf-id" placeholder="工作流 ID（纯数字）"
-                           value="${LumenLight.escapeHtml(wf.rhWorkflowId || '')}">
-                    <button class="settings-model-delete rh-wf-delete" type="button" title="删除该工作流登记">🗑️</button>
-                </div>
-                <div class="settings-rh-workflow-actions">
-                    <button class="settings-models-btn primary rh-wf-fetch" type="button"
-                            title="用左边的工作流 ID 直接从平台拉取 JSON 并解析参数（无需手动导出文件）">从平台拉取</button>
-                    <button class="settings-models-btn rh-wf-import" type="button"
-                            title="选择本地工作流 JSON 文件解析参数（平台拉取失败时的备用方式）">导入本地 JSON</button>
-                    <input type="file" class="rh-wf-file" accept=".json,application/json" style="display:none">
-                </div>
-                <textarea class="settings-input settings-rh-params rh-wf-params" rows="3"
-                          placeholder='参数映射 JSON 数组。推荐点上方「从平台拉取」自动解析；也可手工填写，例：[{"nodeId":"45","fieldName":"prompt","label":"提示词","type":"string","role":"prompt"}]'>${LumenLight.escapeHtml(paramsText)}</textarea>
-            </div>
-        `;
-    }
-
-    /**
-     * 从平台拉取工作流 JSON 并解析参数（登记卡「从平台拉取」按钮）。
-     * 取本卡工作流 ID → POST /api/runninghub/fetch-workflow（后端代理，
-     * apiKey 不进浏览器）→ RhWorkflowImporter 解析 → 回填参数映射
-     * @param {HTMLElement} btn - 触发的按钮（用于加载态）
-     */
-    async fetchRhWorkflow(btn) {
-        const card = btn.closest('.settings-rh-workflow');
-        const id = card?.querySelector('.rh-wf-id')?.value.trim() || '';
-        if (!/^\d+$/.test(id)) {
-            alert('请先在卡片上填写纯数字的工作流 ID');
-            return;
-        }
-
-        const original = btn.textContent;
-        btn.textContent = '拉取中...';
-        btn.disabled = true;
-        try {
-            const response = await fetch('/api/runninghub/fetch-workflow', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ workflowId: id })
-            });
-            const result = await response.json();
-            if (result.status !== 'ok') {
-                throw new Error(result.message || '拉取失败');
-            }
-            const parsed = RhWorkflowImporter.import(result.workflow);
-            if (parsed.error) {
-                alert('平台返回的工作流解析失败：' + parsed.error);
-                return;
-            }
-            this._applyRhParams(card, parsed.params);
-        } catch (error) {
-            console.error('从平台拉取工作流失败:', error);
-            alert('从平台拉取失败：' + error.message);
-        } finally {
-            btn.textContent = original;
-            btn.disabled = false;
-        }
-    }
-
-    /**
-     * 把解析出的参数映射回填到登记卡文本域（已有映射先确认，不静默覆盖）
-     * @param {HTMLElement} card - 登记卡元素
-     * @param {Object[]} params - 解析出的参数数组
-     * @param {string} [sourceNote] - 来源附注（本地导入时提示以云端拉取为准）
-     */
-    _applyRhParams(card, params, sourceNote) {
-        const textarea = card?.querySelector('.rh-wf-params');
-        if (!textarea) return;
-        if (textarea.value.trim() &&
-            !confirm(`已解析出 ${params.length} 个参数，覆盖现有参数映射？`)) {
-            return;
-        }
-        textarea.value = JSON.stringify(params, null, 1);
-        this.flashStatus(`已解析出 ${params.length} 个参数，点击「保存设置」后生效${sourceNote ? '；' + sourceNote : ''}`);
-    }
-
-    /**
-     * 收集 RunningHub 表单（Key / 地址 / 工作流登记卡）
-     * 参数映射 JSON 解析失败时返回 null 并闪现提示（由调用方中止保存）
-     * @returns {Object|null} { apiKey, endpoint, workflows } 或 null（校验失败）
+     * 收集 RunningHub 表单：仅 Key 与端点两个输入。
+     * 登记卡数组（workflows）原样带回内存设置，不做任何增删改——
+     * 否则每次保存设置都会把历史登记卡静默抹掉
+     * @returns {Object} { apiKey, endpoint, workflows }
      */
     collectRunningHubFromForm() {
         const apiKey = document.getElementById('settingsRhApiKey')?.value.trim() || '';
         const endpoint = document.getElementById('settingsRhEndpoint')?.value.trim() || '';
-        const workflows = [];
-
-        const body = document.getElementById('settingsRhWorkflowsBody');
-        if (body) {
-            for (const card of body.querySelectorAll('.settings-rh-workflow')) {
-                const name = card.querySelector('.rh-wf-name')?.value.trim() || '';
-                const rhWorkflowId = card.querySelector('.rh-wf-id')?.value.trim() || '';
-                if (!name && !rhWorkflowId) continue;   // 整卡空白：跳过不入库
-
-                // 参数映射：必须解析为 JSON 数组；解析失败中止保存并指出哪张卡
-                let params = [];
-                const raw = card.querySelector('.rh-wf-params')?.value.trim() || '';
-                if (raw) {
-                    try {
-                        params = JSON.parse(raw);
-                        if (!Array.isArray(params)) throw new Error('not array');
-                    } catch {
-                        this.flashStatus(`工作流「${name || rhWorkflowId}」的参数映射不是合法 JSON 数组，请修正后再保存`);
-                        return null;
-                    }
-                }
-
-                workflows.push({
-                    // 已有 id 沿用（画布存档引用），新卡生成稳定唯一 id
-                    id: card.dataset.wfId || `wf_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
-                    name,
-                    rhWorkflowId,
-                    params
-                });
-            }
-        }
-
+        const workflows = (this.settings.runninghub &&
+            Array.isArray(this.settings.runninghub.workflows))
+            ? this.settings.runninghub.workflows : [];
         return { apiKey, endpoint, workflows };
     }
 
@@ -739,10 +570,8 @@ class SettingsApiPanel {
         // 统一从表单收集所有 API 设置，确保端点、Key 和模型都能正确保存
         this.settings.api = this.collectApiFromForm();
 
-        // RunningHub 区块：参数 JSON 校验失败时不落盘，等用户修正
-        const runninghub = this.collectRunningHubFromForm();
-        if (!runninghub) return;
-        this.settings.runninghub = runninghub;
+        // RunningHub 区块：collect 恒成功（仅 Key/端点，旧卡原样保留）
+        this.settings.runninghub = this.collectRunningHubFromForm();
 
         try {
             const statusEl = document.getElementById('settingsSaveStatus');

@@ -166,7 +166,8 @@ class GroupToolbar {
         ungroupBtn.addEventListener('click', (e) => {
             e.stopPropagation();   // 点击不传给画布（避免被当作空白点击）
             if (!this.group) return;
-            this.canvas.groups.delete(this.group.id);
+            // 撤销记账：解组（删组壳）可回退
+            this.canvas.history?.deleteGroups([this.group], '解组');
             this.canvas.groups.select(null);
             this.canvas.draw();
         });

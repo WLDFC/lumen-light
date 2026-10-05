@@ -31,9 +31,11 @@
     -->
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/prompt-panel.css">
+    <link rel="stylesheet" href="css/lora-manager.css">
     <link rel="stylesheet" href="css/workflow-manager.css">
     <link rel="stylesheet" href="css/image-toolbar.css">
     <link rel="stylesheet" href="css/image-editor.css">
+    <link rel="stylesheet" href="css/image-studio.css">
     <link rel="stylesheet" href="css/save-manager.css">
     <link rel="stylesheet" href="css/prompt-autocomplete.css">
     <link rel="stylesheet" href="css/llm-chat.css">
@@ -377,7 +379,8 @@
            js/components/UpscaleManager.js      高清放大管理
            js/components/ImageToolbar.js        图片选中工具栏
            js/components/GroupToolbar.js        编组选中工具栏（按钮预留）
-           js/components/ImageMaskEditor.js     遮罩灯箱（局部重绘遮罩涂抹）
+           （旧 ImageEditor/ImageMaskEditor/ImageOutpaint 三灯箱已由
+           ImageStudio 统一替代并移除）
            js/components/Controls.js            左下角视图控制
 
         6. 文件菜单与存档
@@ -421,11 +424,16 @@
     <script defer src="js/utils/ImagePipeline.js"></script>
     <!-- Comfy 工作流参数扫描与覆盖表编译（ComfyGenNode/面板参数区共用） -->
     <script defer src="js/utils/ComfyParamScanner.js"></script>
-    <!-- RunningHub 工作流 JSON 导入解析：设置登记卡「导入工作流 JSON」用 -->
+    <!-- RunningHub 工作流 JSON 导入解析：节点输入工作流 ID 拉取后解析参数用 -->
     <script defer src="js/utils/RhWorkflowImporter.js"></script>
+    <!-- RunningHub 应用参数模板解析：节点输入应用 ID 拉取（apiCallDemo）后解析用 -->
+    <script defer src="js/utils/RhAppImporter.js"></script>
     <!-- 提示词段合并（节点链/面板双正面框共用，拼接处自动补逗号区分中英文） -->
     <script defer src="js/utils/PromptMerge.js"></script>
     <script defer src="js/utils/ImageExport.js"></script>
+    <!-- 生成任务停止控件（任务级 X 按钮 + AbortController 内核）：
+         面板 ■停止与生图节点 X 共用，需先于使用方加载 -->
+    <script defer src="js/components/GenStopControl.js"></script>
     <script defer src="js/canvas/nodes/ImageGenNode.js"></script>
     <!-- Comfy 动态参数行控制器：画布 Comfy 生图节点与右侧面板共用 -->
     <script defer src="js/components/ComfyParamRows.js"></script>
@@ -445,6 +453,7 @@
     <script defer src="js/canvas/CanvasClipboard.js"></script>
     <script defer src="js/canvas/CanvasContextMenu.js"></script>
     <script defer src="js/canvas/CanvasVideoManager.js"></script>
+    <script defer src="js/canvas/CanvasHistory.js"></script>
     <script defer src="js/components/AssetLibrary.js"></script>
     <script defer src="js/canvas/Canvas.js"></script>
     <script defer src="js/api/LumenSocket.js"></script>
@@ -464,6 +473,7 @@
     <script defer src="js/components/LumenDropdown.js"></script>
     <script defer src="js/components/ChatHistoryStore.js"></script>
     <script defer src="js/components/LlmHistoryController.js"></script>
+    <script defer src="js/components/LlmApiSender.js"></script>
     <script defer src="js/components/LlmChat.js"></script>
     <script defer src="js/components/LlmMessageRail.js"></script>
     <script defer src="js/components/LlmSystemPrompt.js"></script>
@@ -475,9 +485,18 @@
     <script defer src="js/components/ImageToolbar.js"></script>
     <!-- 编组选中工具栏：样式复用 image-toolbar.css，显隐经 canvasGroupSelected 事件驱动 -->
     <script defer src="js/components/GroupToolbar.js"></script>
-    <script defer src="js/components/ImageEditor.js"></script>
-    <script defer src="js/components/ImageOutpaint.js"></script>
-    <script defer src="js/components/ImageMaskEditor.js"></script>
+    <script defer src="js/components/image-studio/StudioDomBuilder.js"></script>
+    <script defer src="js/components/image-studio/StudioLayerPanel.js"></script>
+    <script defer src="js/components/image-studio/StudioImport.js"></script>
+    <script defer src="js/components/image-studio/StudioMoveTool.js"></script>
+    <script defer src="js/components/image-studio/StudioTextTool.js"></script>
+    <script defer src="js/components/image-studio/StudioShapeTool.js"></script>
+    <script defer src="js/components/image-studio/StudioBlurTool.js"></script>
+    <script defer src="js/components/image-studio/StudioColorPicker.js"></script>
+    <script defer src="js/components/image-studio/StudioHistory.js"></script>
+    <script defer src="js/components/image-studio/StudioCropTool.js"></script>
+    <script defer src="js/components/image-studio/StudioSave.js"></script>
+    <script defer src="js/components/ImageStudio.js"></script>
     <script defer src="js/components/SaveTagDialog.js"></script>
     <script defer src="js/components/TagDetailDialog.js"></script>
     <script defer src="js/components/TagReferenceSlots.js"></script>
@@ -503,6 +522,7 @@
     <!-- 画布实时保存：依赖 SaveManager.serializer，变更捕获器需先于消费者加载 -->
     <script defer src="js/components/save/CanvasChangeWatcher.js"></script>
     <script defer src="js/components/save/RealtimeSaveManager.js"></script>
+    <script defer src="js/components/LoraManager.js"></script>
     <script defer src="js/app.js"></script>
 </body>
 </html>

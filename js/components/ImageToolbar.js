@@ -63,7 +63,7 @@ class ImageToolbar {
     /**
      * 创建工具栏 DOM 结构
      * 工具栏从左到右三个功能区：左=添加到内容；中=高清放大 / 去除背景 /
-     * 编辑（画笔·扩图·遮罩下拉）/ 保存提示词 / 添加到资产；右=下载（仅图标）。
+     * 编辑（打开图像编辑器）/ 保存提示词 / 添加到资产；右=下载（仅图标）。
      * 结构与行为分离：整体 innerHTML 模板一次成型（全貌一屏可见），
      * 事件绑定集中在 bindToolbarActions——加新按钮 = 模板加一段 HTML +
      * 绑定区加一段监听，不再写 createElement 样板
@@ -114,32 +114,14 @@ class ImageToolbar {
                         </svg>
                         <span class="btn-text">去除背景</span>
                     </button>
-                    <!-- 编辑下拉：按钮 + caret + 菜单层（复刻提示词技能栏的下拉模式） -->
-                    <div class="toolbar-edit-wrap">
-                        <button type="button" class="toolbar-btn edit-btn" title="编辑图片">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
-                            </svg>
-                            <span class="btn-text">编辑</span>
-                            <svg class="btn-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                        </button>
-                        <div class="edit-menu" hidden>
-                            <button type="button" class="edit-menu-item" title="用画笔在图片上涂画">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
-                                </svg>
-                                <span>画笔</span>
-                            </button>
-                            <button type="button" class="edit-menu-item" title="扩展或裁剪图像画幅（白色填充扩展区）">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
-                                <span>扩图</span>
-                            </button>
-                            <button type="button" class="edit-menu-item" title="涂抹局部重绘遮罩（重绘区域随图自动传给 Comfy 工作流）">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9c0-.55-.45-1-1-1h-4a2 2 0 0 1-2-2V5c0-.55-.45-1-1-1z"></path><path d="M6.5 6.5h.01"></path><path d="M5.5 10.5h.01"></path><path d="M8.5 9.5h.01"></path></svg>
-                                <span>遮罩</span>
-                            </button>
-                        </div>
-                    </div>
+                    <!-- 编辑：直接打开图像编辑器（ImageStudio，画笔 / 快速蒙版 /
+                         裁剪扩图在编辑器左栏工具切换，无需子菜单） -->
+                    <button type="button" class="toolbar-btn edit-btn" title="编辑图片（画笔 / 快速蒙版 / 裁剪扩图）">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                        </svg>
+                        <span class="btn-text">编辑</span>
+                    </button>
                     <button type="button" class="toolbar-btn save-tag-btn" title="保存提示词">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M6 3h12a2 2 0 0 1 2 2v16l-8-4-8 4V5a2 2 0 0 1 2-2z"></path>
@@ -194,8 +176,6 @@ class ImageToolbar {
         const upscaleBtn = this.toolbar.querySelector('.upscale-btn');
         upscaleBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            // 先收起"编辑"子菜单——两个下拉互斥，不允许同时展开
-            this.closeEditMenu();
             this.showUpscaleMenu(upscaleBtn);
         });
 
@@ -206,39 +186,12 @@ class ImageToolbar {
                 this.removeBackground();
             });
 
-        // ---- 中间：编辑（下拉：画笔 / 扩图 / 遮罩）----
-        // editWrap 引用被下方 document 级「点击外部收起」监听使用，不可丢；
-        // editMenu 挂实例属性：toggleEditMenu / closeEditMenu / show 系读写
-        const editWrap = this.toolbar.querySelector('.toolbar-edit-wrap');
-        this.editMenu = this.toolbar.querySelector('.edit-menu');
+        // ---- 中间：编辑（打开图像编辑器 ImageStudio）----
         this.toolbar.querySelector('.edit-btn').addEventListener('click', (e) => {
             e.stopPropagation();
-            // 先收起高清放大菜单——两个下拉互斥，不允许同时展开
+            // 先收起高清放大菜单——两个弹出菜单互斥，不允许同时展开
             this.upscaleManager?.removeMenu();
-            this.toggleEditMenu();
-        });
-        // 菜单项按模板顺序取用：画笔 / 扩图 / 遮罩（新增菜单项时模板与
-        // 此处的解构顺序必须同步）
-        const [brushItem, outpaintItem, maskItem] =
-            this.toolbar.querySelectorAll('.edit-menu-item');
-        brushItem.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.closeEditMenu();
             this.openImageEditor();
-        });
-        outpaintItem.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.closeEditMenu();
-            this.openOutpaint();
-        });
-        maskItem.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.closeEditMenu();
-            this.openMaskEditor();
-        });
-        // 点击工具栏与菜单以外区域时收起编辑子菜单
-        document.addEventListener('click', (e) => {
-            if (!editWrap.contains(e.target)) this.closeEditMenu();
         });
 
         // ---- 中间：保存提示词（SaveTagDialog 弹窗）----
@@ -298,11 +251,12 @@ class ImageToolbar {
                 this.hide();
                 return;
             }
-            // 提示词/文本节点不是图片，选中节点不显示图片工具栏；
-            // 但若同时多选了图片（节点+图片混合），仍按图片集合显示
+            // 只按真实画布图片显示（有图像数据的非节点、非占位图对象）。
+            // 早期只有提示词/文本两种节点时这里是手工排除清单，LoRA/Comfy/
+            // RunningHub 等后来加的节点类型被漏掉——选中节点会误弹图片工具栏；
+            // 现改用 NodeTypes.isRealCanvasImage 统一判定，新增节点类型自动覆盖
             const selectedImages = this.canvas.images.getSelected()
-                .filter(img => img.source !== NodeTypes.SOURCE.PROMPT_NODE &&
-                               img.source !== NodeTypes.SOURCE.TEXT_NODE);
+                .filter(img => NodeTypes.isRealCanvasImage(img));
             if (selectedImages.length > 0) {
                 this.show(selectedImages);
             } else {
@@ -460,9 +414,7 @@ class ImageToolbar {
         this.sizeLabel.style.display = 'none';
         this.selectedImages = [];
 
-        // 两个下拉子菜单一并收起（编辑菜单挂工具栏内随隐藏；
-        // 放大菜单挂在 body 上，必须显式移除）
-        this.closeEditMenu();
+        // 放大菜单挂在 body 上，工具栏隐藏时必须显式移除
         this.upscaleManager?.removeMenu();
 
         // 清理 requestAnimationFrame 定时器，避免内存泄漏
@@ -627,19 +579,9 @@ class ImageToolbar {
         window.socket?.showNotification(result.duplicated ? '该图片已保存，已更新名字和模型' : '图片和提示词已保存');
     }
 
-    /** 切换"编辑"下拉菜单显隐 */
-    toggleEditMenu() {
-        if (this.editMenu) this.editMenu.hidden = !this.editMenu.hidden;
-    }
-
-    /** 收起"编辑"下拉菜单 */
-    closeEditMenu() {
-        if (this.editMenu) this.editMenu.hidden = true;
-    }
-
     /**
-     * 打开图片编辑灯箱（编辑 → 画笔）
-     * 与其他按钮一致只取第一张选中图片；编辑器懒创建（打开过才有实例）
+     * 打开图像编辑器（ImageStudio）：三合一统一编辑器，懒创建。
+     * 画笔 / 快速蒙版 / 裁剪扩图都在编辑器内切换，入口不再分子菜单
      */
     openImageEditor() {
         const image = this.selectedImages[0];
@@ -647,37 +589,13 @@ class ImageToolbar {
             console.warn('⚠️ 没有可编辑的图片');
             return;
         }
-        if (!this.imageEditor) this.imageEditor = new ImageEditor(this.canvas);
-        this.imageEditor.open(image);
-    }
-
-    /**
-     * 打开扩图灯箱（编辑 → 扩图）
-     * 与画笔编辑同口径：只取第一张选中图片；灯箱懒创建
-     */
-    openOutpaint() {
-        const image = this.selectedImages[0];
-        if (!image) {
-            console.warn('⚠️ 没有可扩图的图片');
-            return;
+        if (!this.imageStudio) {
+            this.imageStudio = new ImageStudio(this.canvas);
+            // 挂全局供 CanvasInteraction 判断编辑器是否打开——打开时屏蔽
+            // 画布快捷键（Delete 等），否则会误删编辑器背后的画布图片
+            window.imageStudio = this.imageStudio;
         }
-        if (!this.imageOutpaint) this.imageOutpaint = new ImageOutpaint(this.canvas);
-        this.imageOutpaint.open(image);
-    }
-
-    /**
-     * 打开遮罩灯箱（编辑 → 遮罩）
-     * 与画笔/扩图同口径：只取第一张选中图片；灯箱懒创建。
-     * 遮罩图层挂在图片对象上，Comfy 生图节点提交时自动随图传递
-     */
-    openMaskEditor() {
-        const image = this.selectedImages[0];
-        if (!image) {
-            console.warn('⚠️ 没有可涂遮罩的图片');
-            return;
-        }
-        if (!this.imageMaskEditor) this.imageMaskEditor = new ImageMaskEditor(this.canvas);
-        this.imageMaskEditor.open(image);
+        this.imageStudio.open(image, 'strokes');
     }
 
     /**

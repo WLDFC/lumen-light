@@ -266,6 +266,8 @@ class CanvasContextMenu {
         this.canvas.images.images.push(node);
         // 新节点默认选中，便于立即拖动定位
         this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建节点');
         this.canvas.draw();
         window.dispatchEvent(new CustomEvent('promptNodeAdded', {
             detail: { node }
@@ -285,6 +287,8 @@ class CanvasContextMenu {
         this.canvas.images.images.push(node);
         // 新节点默认选中，便于立即拖动定位
         this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建节点');
         this.canvas.draw();
     }
 
@@ -301,6 +305,8 @@ class CanvasContextMenu {
         this.canvas.images.images.push(node);
         // 新节点默认选中，便于立即拖动定位
         this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建节点');
         this.canvas.draw();
     }
 
@@ -317,6 +323,8 @@ class CanvasContextMenu {
         this.canvas.images.images.push(node);
         // 新节点默认选中，便于立即拖动定位
         this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建节点');
         this.canvas.draw();
     }
 
@@ -333,6 +341,8 @@ class CanvasContextMenu {
         this.canvas.images.images.push(node);
         // 新节点默认选中并进入编辑，便于直接输入备注
         this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建节点');
         this.canvas.draw();
     }
 
@@ -350,6 +360,8 @@ class CanvasContextMenu {
         this.canvas.images.images.push(node);
         // 新节点默认选中，便于立即拖动定位
         this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建节点');
         this.canvas.draw();
     }
 }

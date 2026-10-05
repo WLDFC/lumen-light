@@ -29,8 +29,35 @@ const LUMEN_BASE = "http://localhost:8080";
 /** 单次桥接调用超时：略大于后端 30s 命令超时，保证先拿到后端的明确错误 */
 const BRIDGE_TIMEOUT_MS = 35_000;
 
-/** 生图模型调用超时：API 生图比常规命令慢得多（排队+渲染），放宽到 3 分钟 */
-const GEN_TIMEOUT_MS = 180_000;
+/**
+ * 「只读」分级下放行的 comfy 原生查询工具（lumen-comfy 扩展注册）。
+ * 与 lumen-comfy.ts 的 READ_ONLY_TOOLS 保持一致——本扩展的 tool_call
+ * 处理器是最外层门禁（会拦掉所有非画布工具），这里不豁免的话
+ * comfy 查询类在只读分级下会被误杀
+ */
+const READONLY_OK = new Set([
+    "comfy_mcp_system_stats",
+    "comfy_mcp_nodes",
+    "comfy_mcp_search_models",
+    "comfy_mcp_search_templates",
+    "comfy_mcp_list_workflow_slots",
+    "comfy_mcp_workflow_deps",
+    "comfy_mcp_get_logs",
+]);
+
+// ===== 长任务句柄（提交与等待分离）=====
+// 生图/视频类工具不再把 agent 回合挂住等结果：提交后立刻返回任务 id，
+// 实际生成在后台任务里跑完并自动落画布，模型用 canvas_poll_task 查询。
+// 超时只作后台兜底（防悬挂），不再约束回合时长。
+
+/** 后台 API 生图任务超时（此前挂在回合上的 3 分钟上限就此解除） */
+const IMG_TASK_TIMEOUT_MS = 10 * 60_000;
+/** 视频任务轮询间隔与总超时（视频生成常见 5-15 分钟，上限放宽到 30 分钟） */
+const VIDEO_POLL_INTERVAL_MS = 15_000;
+const VIDEO_TASK_TIMEOUT_MS = 30 * 60_000;
+/** 已完成任务在注册表的保留时长与总量上限（防 Map 无限膨胀） */
+const TASK_RETENTION_MS = 30 * 60_000;
+const TASK_KEEP = 50;
 
 /**
  * 写操作串行链：模型可能并行发多条破坏性命令（实测一次并行 8 条删除），
@@ -64,6 +91,91 @@ function text(text: string) {
     return { content: [{ type: "text" as const, text }] };
 }
 
+// ===== 后台任务注册表 =====
+// 任务状态只存在于本扩展进程内存：pi 重启后任务即失联（poll 报未知 id），
+// 属预期行为——后台 fetch/轮询同样随进程消失，不会产生孤儿任务。
+
+type LumenTask = {
+    id: string;
+    kind: "llm_image" | "video";
+    label: string;
+    status: "running" | "done" | "error" | "cancelled";
+    startedAt: number;
+    finishedAt?: number;
+    result?: string;
+    error?: string;
+    promise: Promise<void>;
+    /** video 任务轮询所需（model/provider 透传查询接口） */
+    meta?: { model: string; provider?: string };
+};
+
+const tasks = new Map<string, LumenTask>();
+let taskSeq = 0;
+
+// ===== 用户停止信号 =====
+// 后端在 /api/pi/abort（用户点停止按钮）时记录 lastAbortAt 时间戳。
+// 后台任务提交时快照该值，之后每 5 秒轮询一次 /api/pi/stop-signal：
+// 信号晚于快照 = 用户在任务运行期间点了停止 → 本任务 AbortController.abort()。
+// 点一次停止，排队消息（clear_queue）与全部后台任务一起清空。
+let stopSignalAt = 0;
+async function refreshStopSignal(): Promise<void> {
+    try {
+        const res = await fetch(LUMEN_BASE + "/api/pi/stop-signal", { signal: AbortSignal.timeout(5000) });
+        const j = (await res.json().catch(() => null)) as { status?: string; at?: number } | null;
+        if (j && j.status === "ok" && typeof j.at === "number") stopSignalAt = j.at;
+    } catch { /* 后端不可达：保留旧值，下个周期再试 */ }
+}
+
+/** 为后台任务装上停止检查器：每 5s 拉一次停止信号，晚于提交时刻即触发 controller。
+ *  返回定时器句柄，任务收尾时必须 clearInterval */
+function watchStopSignal(controller: AbortController, submitStopAt: number): ReturnType<typeof setInterval> {
+    return setInterval(() => {
+        void refreshStopSignal().then(() => {
+            if (stopSignalAt > submitStopAt) controller.abort();
+        });
+    }, 5000);
+}
+
+/** 后台任务收尾统一归类：被停止信号取消 → cancelled，其余 → error */
+function settleFailure(task: LumenTask, err: unknown, controller?: AbortController) {
+    const cancelled = controller?.signal.aborted === true;
+    task.status = cancelled ? "cancelled" : "error";
+    task.finishedAt = Date.now();
+    task.error = cancelled ? "用户已停止" : (err instanceof Error ? err.message : String(err));
+}
+
+/** 登记新任务并清理过期/超量旧任务 */
+function registerTask(t: LumenTask) {
+    const now = Date.now();
+    for (const [id, old] of tasks) {
+        if (old.status !== "running" && old.finishedAt && now - old.finishedAt > TASK_RETENTION_MS) {
+            tasks.delete(id);
+        }
+    }
+    if (tasks.size >= TASK_KEEP) {
+        // 超量：优先丢最早的已完成任务，实在没有才丢最早的
+        const doneFirst = [...tasks.values()].sort((a, b) => a.startedAt - b.startedAt);
+        const victim = doneFirst.find((x) => x.status !== "running") || doneFirst[0];
+        if (victim) tasks.delete(victim.id);
+    }
+    tasks.set(t.id, t);
+    return t;
+}
+
+/** 任务状态的人读文本（poll 返回值） */
+function taskStatusText(t: LumenTask): string {
+    const idLine = `任务 ${t.id}（${t.kind === "video" ? "视频生成" : "API 生图"}：${t.label}）`;
+    if (t.status === "running") {
+        const sec = Math.round((Date.now() - t.startedAt) / 1000);
+        return `${idLine}仍在执行，已等待 ${sec} 秒。请隔 30 秒以上再用 canvas_poll_task 查询，不要连续频繁轮询。`;
+    }
+    if (t.status === "done") return `${idLine}已完成。${t.result || ""}`;
+    if (t.status === "cancelled") return `${idLine}已被用户停止。`;
+    return `${idLine}失败：${t.error || "未知错误"}`;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export default async function (pi: ExtensionAPI) {
     // ===== 1. 注册 LumenLight 面板的模型为 pi provider =====
     try {
@@ -84,7 +196,57 @@ export default async function (pi: ExtensionAPI) {
         console.warn("[lumen-canvas] LumenLight provider 注册失败（后端未运行？）:", err);
     }
 
-    // ===== 2. 权限分级拦截（级别存于 LumenLight 后端） =====
+    // ===== 2. 工具启停联动（面板「工具与技能」勾选） =====
+    // 本扩展是工具启停的协调点（setActiveTools 是全量语义，多扩展各自
+    // 调用会互相覆盖，故单点执行）：
+    //   - 会话启动：把 pi 当前配置的全部扩展工具（含其他扩展注册的）上报
+    //     后端注册表，面板「工具」tab 动态展示；
+    //   - 启动 + 每回合开始（before_agent_start）：读禁用清单，经
+    //     setActiveTools 全量重算（当前激活 - 禁用）——面板里勾掉的工具
+    //     下一轮消息即从模型可见清单消失（连同 schema 不占上下文），
+    //     无需重启 pi
+    // 内置工具全集（pi 按平台注册其一的 shell 工具有两个名字：bash / powershell）
+    const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"]);
+
+    function applyDisabledTools(): void {
+        void fetch(`${LUMEN_BASE}/api/pi/disabled-tools`, { signal: AbortSignal.timeout(5000) })
+            .then((r) => r.json())
+            .then((j: { disabledTools?: string[] }) => {
+                const disabled = Array.isArray(j.disabledTools) ? j.disabledTools : [];
+                if (disabled.length === 0) return;
+                const all = (pi.getAllTools() as { name: string }[]).map((t) => t.name);
+                pi.setActiveTools(all.filter((n) => !disabled.includes(n)));
+            })
+            .catch(() => { /* 后端不可达：跳过本轮应用 */ });
+    }
+
+    function reportToolRegistry(): void {
+        try {
+            const tools = (pi.getAllTools() as { name: string; description?: string }[])
+                .filter((t) => !BUILTIN_TOOL_NAMES.has(t.name) && !t.name.startsWith("mcp__"))
+                .map((t) => ({
+                    name: t.name,
+                    label: "",
+                    description: (t.description || "").slice(0, 300),
+                }));
+            void fetch(`${LUMEN_BASE}/api/pi/extension-tools`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ extension: "pi", tools }),
+                signal: AbortSignal.timeout(5000),
+            }).catch(() => { /* 注册表上报失败不影响工具可用性 */ });
+        } catch { /* getAllTools 不可用（旧版 pi）：面板回退到空清单 */ }
+    }
+
+    applyDisabledTools();
+    pi.on("session_start", () => {
+        // 会话启动时全部扩展已注册完毕，此时上报的清单才是全的
+        reportToolRegistry();
+        applyDisabledTools();
+    });
+    pi.on("before_agent_start", () => applyDisabledTools());
+
+    // ===== 3. 权限分级拦截（级别存于 LumenLight 后端） =====
     pi.on("tool_call", async (event) => {
         let level = "standard";
         try {
@@ -105,25 +267,30 @@ export default async function (pi: ExtensionAPI) {
                 "canvas_clear_media",
                 "canvas_run_comfy",
                 "canvas_run_llm_image",
+                "canvas_run_video",
                 "canvas_build_graph",
             ]);
             if (isCanvasTool && !MUTATING.has(event.toolName)) return;
+            // lumen-comfy 的只读查询类工具放行（细粒度门禁由 lumen-comfy
+            // 自身的 tool_call 处理器执行：install_node 等仍会被拦）
+            if (READONLY_OK.has(event.toolName)) return;
             return {
                 block: true,
                 reason: "当前权限分级为「只读」，已阻止该工具（设置 → 通用 → pi 权限分级）",
             };
         }
 
-        // standard：画布工具放行，内置 bash 等系统级工具阻止
-        if (!isCanvasTool && event.toolName === "bash") {
+        // standard：画布工具放行，内置 shell 工具阻止（Windows 上 pi 注册的
+        // shell 工具名为 powershell 而非 bash，两个名字都要拦）
+        if (!isCanvasTool && (event.toolName === "bash" || event.toolName === "powershell")) {
             return {
                 block: true,
-                reason: "当前权限分级为「标准」，bash 已禁用（设置 → 通用 → pi 权限分级）",
+                reason: "当前权限分级为「标准」，shell 工具（bash/powershell）已禁用（设置 → 通用 → pi 权限分级）",
             };
         }
     });
 
-    // ===== 3. 画布工具 =====
+    // ===== 4. 画布工具 =====
     // 画布状态快照
     pi.registerTool({
         name: "canvas_get_state",
@@ -481,13 +648,18 @@ export default async function (pi: ExtensionAPI) {
         },
     });
 
-    // 调用 API 生图模型（LLM 面板生图通道，与 canvas_run_comfy 的工作流通道平行）
+    // 调用 API 生图模型（LLM 面板生图通道，与 canvas_run_comfy 的工作流通道平行）。
+    // 提交与等待分离：本工具只做参数校验与参考图解析（attachment:N 只在本条
+    // 消息上下文有效，必须当场解析成 data URL），实际生成放后台任务，
+    // 立刻返回任务 id 供 canvas_poll_task 查询——不再把 agent 回合挂住数分钟
     pi.registerTool({
         name: "canvas_run_llm_image",
         label: "Run LLM Image",
         description:
             "用 API 生图模型（如 gpt-image-2.5-flare、豆包 seedream 系）生成图片，" +
-            "生成结果自动放置到画布。与 canvas_run_comfy（ComfyUI 工作流）是平行通道：" +
+            "异步任务式：立即返回任务 id，生成完成后图片自动放置到画布。" +
+            "提交后用 canvas_poll_task 查询进度（建议间隔 30 秒以上，不要连续频繁轮询）。" +
+            "与 canvas_run_comfy（ComfyUI 工作流）是平行通道：" +
             "本工具走设置 → API 里配置的 API 生图模型。模型 id 参照设置 → API 中的 image 类模型；" +
             "同一模型 id 配置在多个厂商时，用 provider 指定厂商名。" +
             "传 refImages 时以这些图为参考图做图生图/图像编辑；不传为文生图。每项可以是：" +
@@ -502,43 +674,242 @@ export default async function (pi: ExtensionAPI) {
         }),
         async execute(toolCallId, params) {
             // 参考图（图生图）：attachment:N 或画布名 → data URL；
-            // 后端收到参考图后按模型家族自动选 edits/chat/generations 适配器
+            // 后端收到参考图后按模型家族自动选 edits/chat/generations 适配器。
+            // 必须在提交时当场解析：attachment:N 指向"当前消息"的附图，
+            // 拖到后台再取会被下一条用户消息的附图顶掉
             const images = await resolveRefImages(params.refImages || []);
-            const res = await fetch(LUMEN_BASE + "/api/llm/generate-image", {
+            // 提交前刷新并快照停止信号：之后信号一变即取消本任务
+            await refreshStopSignal();
+            const submitStopAt = stopSignalAt;
+            const controller = new AbortController();
+            const taskId = `img_${++taskSeq}`;
+            const task = registerTask({
+                id: taskId,
+                kind: "llm_image",
+                label: `${params.model}·${params.prompt.slice(0, 30)}`,
+                status: "running",
+                startedAt: Date.now(),
+                promise: Promise.resolve(),
+            });
+            // 后台 worker：生图（超时兜底 10 分钟）→ 取回字节 → 串行落画布；
+            // 期间每 5s 检查用户停止信号，命中即中断 fetch 并标记取消
+            task.promise = (async () => {
+                const stopTimer = watchStopSignal(controller, submitStopAt);
+                try {
+                    const res = await fetch(LUMEN_BASE + "/api/llm/generate-image", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            model: params.model,
+                            prompt: params.prompt,
+                            size: params.size,
+                            provider: params.provider,
+                            images,
+                        }),
+                        signal: AbortSignal.any([AbortSignal.timeout(IMG_TASK_TIMEOUT_MS), controller.signal]),
+                    });
+                    const json = (await res.json().catch(() => null)) as {
+                        status?: string;
+                        imageUrl?: string;
+                        message?: string;
+                    } | null;
+                    if (!res.ok || !json || json.status !== "ok" || !json.imageUrl) {
+                        throw new Error(json?.message || `生图请求失败（HTTP ${res.status}）`);
+                    }
+                    // imageUrl 可能是远程 URL 或 data URL；drop_image 只收 data URL，
+                    // 远程图需先取回转 base64 再落画布
+                    let dataUrl = json.imageUrl;
+                    if (!dataUrl.startsWith("data:")) {
+                        const imgRes = await fetch(dataUrl, {
+                            signal: AbortSignal.any([AbortSignal.timeout(BRIDGE_TIMEOUT_MS), controller.signal]),
+                        });
+                        if (!imgRes.ok) throw new Error(`生成图下载失败（HTTP ${imgRes.status}）`);
+                        const mime = imgRes.headers.get("content-type") || "image/png";
+                        const buf = Buffer.from(await imgRes.arrayBuffer());
+                        dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
+                    }
+                    // 落图是写操作：走串行链，避免与其它写工具并发冲击浏览器
+                    const dropped = await serialized(async () => {
+                        return (await bridge("drop_image", { dataUrl })) as { id: string; name: string };
+                    });
+                    task.status = "done";
+                    task.finishedAt = Date.now();
+                    task.result = `模型 ${params.model} 生图完成（耗时 ${Math.round((task.finishedAt - task.startedAt) / 1000)} 秒），已放置画布「${dropped.name}」（id: ${dropped.id}）`;
+                } catch (err) {
+                    settleFailure(task, err, controller);
+                } finally {
+                    clearInterval(stopTimer);
+                }
+            })();
+            return text(
+                `生图任务已提交（taskId: ${taskId}，模型 ${params.model}）。` +
+                `预计 1-5 分钟，完成后图片自动落画布；` +
+                `用 canvas_poll_task 查询进度（间隔 30 秒以上），等待期间可先做其他事或结束本轮告知用户稍候。`
+            );
+        },
+    });
+
+    // 长任务进度查询（读操作）：配合 canvas_run_llm_image / canvas_run_video 使用
+    pi.registerTool({
+        name: "canvas_poll_task",
+        label: "Poll Task",
+        description:
+            "查询后台长任务（API 生图 / 视频生成）的状态与结果。" +
+            "taskId 来自提交工具的返回值。waitSeconds 可选（0-30）：等待最多 N 秒" +
+            "看任务是否在此期间完成，可减少轮询次数；不传立即返回当前状态。" +
+            "轮询间隔建议 30 秒以上；任务完成后产物已自动落画布，无需再取图。" +
+            "状态长期不变（如超过 10 分钟无进展）时应告知用户而不是无限轮询。",
+        parameters: Type.Object({
+            taskId: Type.String({ description: "任务 id（提交工具返回的 taskId）" }),
+            waitSeconds: Type.Optional(Type.Number({ description: "最长等待秒数（0-30，默认 0 立即返回）" })),
+        }),
+        async execute(toolCallId, params) {
+            const t = tasks.get(params.taskId);
+            if (!t) {
+                const known = [...tasks.keys()];
+                throw new Error(
+                    known.length
+                        ? `未知任务 id：${params.taskId}（当前可查：${known.join("、")}）`
+                        : `未知任务 id：${params.taskId}（当前没有已登记的任务；pi 重启后任务记录会丢失）`
+                );
+            }
+            const wait = Math.max(0, Math.min(30, params.waitSeconds || 0)) * 1000;
+            if (wait > 0 && t.status === "running") {
+                await Promise.race([t.promise, sleep(wait)]);
+            }
+            return text(taskStatusText(t));
+        },
+    });
+
+    // 视频生成（火山方舟等异步任务式 API）：提交与查询本就是任务制，
+    // 这里补齐「轮询 + 完成后自动落画布」的后台闭环，模型只管提交与查询
+    pi.registerTool({
+        name: "canvas_run_video",
+        label: "Run Video Generation",
+        description:
+            "提交 AI 视频生成任务（设置 → API 里的 video 类模型，火山方舟即梦系等）。" +
+            "异步任务式：立即返回任务 id，生成完成后视频自动落画布。" +
+            "视频生成通常需要 5-15 分钟，用 canvas_poll_task 查询（间隔 30 秒以上，" +
+            "不要连续频繁轮询），等待期间可做其他事或先告知用户稍候。" +
+            "prompt 与首帧图片至少提供一个：refImages[0] 作为图生视频首帧" +
+            "（attachment:N=用户本消息第 N 张附图，画布名称=画布已有图片）。",
+        parameters: Type.Object({
+            model: Type.String({ description: "视频模型 id（设置 → API 中的 video 类模型）" }),
+            prompt: Type.Optional(Type.String({ description: "视频提示词（与首帧图片至少其一）" })),
+            refImages: Type.Optional(Type.Array(Type.String(), { description: "首帧图片（只取第一张）：attachment:N=用户本消息第 N 张附图；画布名称=画布已有图片" })),
+            ratio: Type.Optional(Type.String({ description: "宽高比（如 16:9），不传由模型默认" })),
+            duration: Type.Optional(Type.Number({ description: "时长（秒）" })),
+            provider: Type.Optional(Type.String({ description: "厂商名（同一模型 id 存在于多个厂商时必传）" })),
+        }),
+        async execute(toolCallId, params) {
+            if (!params.prompt && !(params.refImages && params.refImages.length)) {
+                throw new Error("视频生成需要提示词或首帧图片至少其一");
+            }
+            // 首帧必须当场解析（attachment:N 只在本条消息上下文有效）
+            let imageUrl: string | undefined;
+            if (params.refImages && params.refImages.length) {
+                const frames = await resolveRefImages([params.refImages[0]]);
+                imageUrl = frames[0];
+            }
+            const res = await fetch(LUMEN_BASE + "/api/llm/submit-video", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     model: params.model,
                     prompt: params.prompt,
-                    size: params.size,
+                    imageUrl,
+                    ratio: params.ratio,
+                    duration: params.duration,
                     provider: params.provider,
-                    images,
                 }),
-                signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
+                signal: AbortSignal.timeout(BRIDGE_TIMEOUT_MS),
             });
-            const json = (await res.json().catch(() => null)) as {
-                status?: string;
-                imageUrl?: string;
-                message?: string;
-            } | null;
-            if (!res.ok || !json || json.status !== "ok" || !json.imageUrl) {
-                throw new Error(json?.message || `生图请求失败（HTTP ${res.status}）`);
+            const json = (await res.json().catch(() => null)) as { status?: string; taskId?: string; message?: string } | null;
+            if (!res.ok || !json || json.status !== "ok" || !json.taskId) {
+                throw new Error(json?.message || `视频任务提交失败（HTTP ${res.status}）`);
             }
-            // imageUrl 可能是远程 URL 或 data URL；drop_image 只收 data URL，
-            // 远程图需先取回转 base64 再落画布
-            let dataUrl = json.imageUrl;
-            if (!dataUrl.startsWith("data:")) {
-                const imgRes = await fetch(dataUrl, { signal: AbortSignal.timeout(BRIDGE_TIMEOUT_MS) });
-                if (!imgRes.ok) throw new Error(`生成图下载失败（HTTP ${imgRes.status}）`);
-                const mime = imgRes.headers.get("content-type") || "image/png";
-                const buf = Buffer.from(await imgRes.arrayBuffer());
-                dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
-            }
-            // 落图是写操作：走串行链，避免与其它写工具并发冲击浏览器
-            return serialized(async () => {
-                const dropped = (await bridge("drop_image", { dataUrl })) as { id: string; name: string };
-                return text(`模型 ${params.model} 生图完成，已放置画布「${dropped.name}」（id: ${dropped.id}）`);
+            const remoteTaskId = json.taskId;
+            // 提交前刷新并快照停止信号；轮询循环每圈检查，命中即跳出并标记取消
+            await refreshStopSignal();
+            const submitStopAt = stopSignalAt;
+            const controller = new AbortController();
+            const taskId = `vid_${++taskSeq}`;
+            const task = registerTask({
+                id: taskId,
+                kind: "video",
+                label: `${params.model}·${(params.prompt || "图生视频").slice(0, 30)}`,
+                status: "running",
+                startedAt: Date.now(),
+                promise: Promise.resolve(),
+                meta: { model: params.model, provider: params.provider },
             });
+            // 后台 worker：每 15s 轮询 /api/llm/video-task（成功时后端自动把
+            // 视频下载到 data/videos/），完成后 drop_video 落画布；
+            // 期间每 5s 检查用户停止信号（取消只停止我们的轮询与落画布，
+            // 平台侧任务无法从这里撤销，产物不会回流）
+            task.promise = (async () => {
+                const stopTimer = watchStopSignal(controller, submitStopAt);
+                const query = new URLSearchParams({ model: params.model });
+                if (params.provider) query.set("provider", params.provider);
+                let consecutiveErrors = 0;
+                try {
+                    while (Date.now() - task.startedAt < VIDEO_TASK_TIMEOUT_MS) {
+                        if (controller.signal.aborted) throw new Error("用户已停止");
+                        await sleep(VIDEO_POLL_INTERVAL_MS);
+                        if (controller.signal.aborted) throw new Error("用户已停止");
+                        let polled: { taskStatus?: string; videoPath?: string; error?: string } | null = null;
+                        try {
+                            const r = await fetch(
+                                `${LUMEN_BASE}/api/llm/video-task/${encodeURIComponent(remoteTaskId)}?${query}`,
+                                { signal: AbortSignal.any([AbortSignal.timeout(BRIDGE_TIMEOUT_MS), controller.signal]) }
+                            );
+                            const j = (await r.json().catch(() => null)) as
+                                { status?: string; taskStatus?: string; videoPath?: string; error?: string; message?: string } | null;
+                            if (!r.ok || !j || j.status !== "ok") {
+                                throw new Error(j?.message || `查询失败（HTTP ${r.status}）`);
+                            }
+                            polled = j;
+                            consecutiveErrors = 0;
+                        } catch (err) {
+                            if (controller.signal.aborted) throw new Error("用户已停止");
+                            // 查询偶发失败（后端重启/网络抖动）容忍连续 5 次，
+                            // 全失败才判定任务失联
+                            if (++consecutiveErrors >= 5) throw err;
+                            continue;
+                        }
+                        if (polled!.taskStatus === "succeeded" && polled!.videoPath) {
+                            let note = "";
+                            try {
+                                const dropped = await serialized(async () => {
+                                    return (await bridge("drop_video", { videoPath: polled!.videoPath })) as
+                                        { id: string; name: string };
+                                });
+                                note = `，已放置画布「${dropped.name}」（id: ${dropped.id}）`;
+                            } catch (dropErr) {
+                                note = `；视频已保存到 ${polled!.videoPath}，但落画布失败：` +
+                                    (dropErr instanceof Error ? dropErr.message : String(dropErr));
+                            }
+                            task.status = "done";
+                            task.finishedAt = Date.now();
+                            task.result = `视频生成完成（耗时 ${Math.round((task.finishedAt - task.startedAt) / 1000)} 秒）${note}`;
+                            return;
+                        }
+                        if (polled!.taskStatus !== "queued" && polled!.taskStatus !== "running") {
+                            throw new Error(`平台任务状态 ${polled!.taskStatus}${polled!.error ? "：" + polled!.error : ""}`);
+                        }
+                    }
+                    throw new Error(`轮询超时（${VIDEO_TASK_TIMEOUT_MS / 60000} 分钟未完成）`);
+                } catch (err) {
+                    settleFailure(task, err, controller);
+                } finally {
+                    clearInterval(stopTimer);
+                }
+            })();
+            return text(
+                `视频任务已提交（taskId: ${taskId}，平台任务 ${remoteTaskId}，模型 ${params.model}）。` +
+                `通常需要 5-15 分钟，完成后视频自动落画布；` +
+                `用 canvas_poll_task 查询进度（间隔 30 秒以上），等待期间可先做其他事或告知用户稍候。`
+            );
         },
     });
 }

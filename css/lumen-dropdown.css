@@ -122,7 +122,7 @@ button.lumen-dd-trigger:hover {
     background: #1b1c21;                 /* 与尺寸/比例按钮同暗色（配色美学：面板层） */
     border: 1px solid rgba(128, 128, 128, 0.3);
     border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    /* 阴影已按用户要求移除（0 8px 24px rgba(0,0,0,0.5) 显得糊边） */
     overscroll-behavior: contain;        /* 滚动到底不透传给页面 */
 }
 
@@ -170,4 +170,86 @@ button.lumen-dd-trigger:hover {
 
 .lumen-dropdown-option.selected .dd-check {
     visibility: visible;
+}
+
+/* ---------- 分类双栏形态（左栏分类 + 右侧条目列表） ----------
+   参考：模型下拉按用途分类（Agent / 图片生成 / 视频生成 / 其他）。
+   菜单本体转为横向 flex 容器，滚动收口到右侧条目列表 */
+
+.lumen-dropdown-menu.categorized {
+    display: flex;
+    gap: 4px;
+    max-height: 400px;
+    overflow: hidden;               /* 滚动交给右侧列表，左栏分类少不滚 */
+}
+
+/* 左栏分类按钮：竖排、文字即分类名 */
+.lumen-dd-cats {
+    flex: 0 0 auto;
+    min-width: 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 4px;
+    border-right: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.lumen-dd-cat {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: 9px 12px;
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.lumen-dd-cat:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+/* 停留分类：半透明白高亮（与选项键盘高亮同级） */
+.lumen-dd-cat.active {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+}
+
+/* 右侧条目列表：唯一滚动容器 */
+.lumen-dd-cat-list {
+    flex: 1 1 auto;
+    min-width: 200px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* 空分类引导文案（如"暂无视频模型"） */
+.lumen-dd-cat-empty {
+    padding: 20px 14px;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+/* 两行条目：主文案 + 副标签（如厂商名），包裹层负责截断 */
+.lumen-dropdown-option .dd-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.lumen-dropdown-option .dd-sublabel {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

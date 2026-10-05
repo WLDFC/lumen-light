@@ -48,9 +48,11 @@ class LumenDropdown {
         this.actionMenu = !!options.actionMenu;
 
         this.value = '';              // 当前选中值
-        this.options = [];            // [{ value, label }]
+        this.options = [];            // [{ value, label }]（分类模式下为全部分类的展平列表）
+        this._categories = null;      // 分类数据（setCategories 设置；setOptions 复位）
+        this._activeCatKey = '';      // 分类模式下左栏当前停留的分类
         this.menuEl = null;           // 菜单元素（挂 body，open 时创建）
-        this._activeIndex = -1;       // 键盘导航高亮索引
+        this._activeIndex = -1;       // 键盘导航高亮索引（按菜单内可见项序）
         this._open = false;
 
         this._buildTriggerUI();
@@ -117,6 +119,7 @@ class LumenDropdown {
             return;
         }
         this._optionsFingerprint = fingerprint;
+        this._categories = null;      // 平铺模式与分类模式互斥，后调用者定形态
         this.options = list.slice();
 
         // 关闭状态下重渲染；打开中先收起（选项集变化属于低频操作）
@@ -128,15 +131,77 @@ class LumenDropdown {
             chosen = this.options.length > 0 ? this.options[0].value : '';
         }
         this.value = chosen;
+        this._syncTrigger();
+        this._refreshSelectionUI();
+    }
 
-        const current = this.options.find((o) => o.value === this.value);
-        // 图标按钮模式没有文案/动态图标元素，只更新悬停 title（当前选中全文）
+    /**
+     * 设置分类选项（双栏菜单形态：左栏分类、右侧该分类的条目列表）。
+     * 选中值仍是跨分类单选（与 setOptions 同一 value 空间），分类只决定
+     * 右侧列表的过滤，不构成独立选择。
+     * @param {Array<{key: string, label: string, items: Array<{value, label,
+     *        sublabel?, icon?}>, emptyText?}>} categories - 分类数组；
+     *        items 为空的分类显示 emptyText 引导文案
+     * @param {string} [selectedValue] - 要选中的值（缺省保持当前值）
+     */
+    setCategories(categories, selectedValue) {
+        const cats = Array.isArray(categories) ? categories : [];
+        const fingerprint = JSON.stringify(cats);
+        if (fingerprint === this._optionsFingerprint) {
+            if (selectedValue !== undefined && selectedValue !== this.value) {
+                this.value = selectedValue;
+                this._activeCatKey = this._catOf(selectedValue) || this._activeCatKey;
+                this._refreshSelectionUI();
+            }
+            return;
+        }
+        this._optionsFingerprint = fingerprint;
+        this._categories = cats;
+        // 展平为 options：value 查找/触发器文案/既有消费方（读 .options）零改动
+        this.options = [];
+        for (const c of cats) {
+            for (const item of (Array.isArray(c.items) ? c.items : [])) {
+                this.options.push(item);
+            }
+        }
+
+        if (this._open) this.close();
+
+        let chosen = selectedValue !== undefined ? selectedValue : this.value;
+        if (!this.options.some((o) => o.value === chosen)) {
+            chosen = this.options.length > 0 ? this.options[0].value : '';
+        }
+        this.value = chosen;
+        // 左栏停留分类：选中值所在分类优先，否则第一个分类
+        this._activeCatKey = this._catOf(chosen) || (cats[0] && cats[0].key) || '';
+        this._syncTrigger();
+        this._refreshSelectionUI();
+    }
+
+    /** 值所属的分类 key（分类模式）；平铺模式恒返回 '' */
+    _catOf(value) {
+        if (!this._categories) return '';
+        for (const c of this._categories) {
+            if ((Array.isArray(c.items) ? c.items : []).some((it) => it.value === value)) {
+                return c.key;
+            }
+        }
+        return '';
+    }
+
+    /** 按值取选项对象 */
+    _findOpt(value) {
+        return this.options.find((o) => o.value === value) || null;
+    }
+
+    /** 同步触发器（图标 + 文案 + 悬停全文）为当前选中项 */
+    _syncTrigger() {
+        const current = this._findOpt(this.value);
         this._setTriggerTitle(current ? current.label : '');
         if (!this.iconButton) {
             this._labelEl.textContent = current ? current.label : this.placeholder;
             this._setTriggerIcon(current);
         }
-        this._refreshSelectionUI();
     }
 
     /** 当前选中值 */
@@ -192,51 +257,145 @@ class LumenDropdown {
         this.menuEl.className = 'lumen-dropdown-menu' + (this.menuClass ? ' ' + this.menuClass : '');
         this.menuEl.setAttribute('role', 'listbox');
 
-        // 渲染选项
-        this._activeIndex = Math.max(0, this.options.findIndex((o) => o.value === this.value));
-        this.options.forEach((opt, i) => {
-            const item = document.createElement('div');
-            item.className = 'lumen-dropdown-option' +
-                (opt.value === this.value ? ' selected' : '') +
-                (i === this._activeIndex ? ' active' : '');
-            item.setAttribute('role', 'option');
-            item.setAttribute('aria-selected', opt.value === this.value ? 'true' : 'false');
-            item.dataset.value = opt.value;
-            item.dataset.index = String(i);
-            // 纯白线条图标（Feather 风格路径由调用方提供）
-            if (opt.icon) {
-                const icon = document.createElement('span');
-                icon.className = 'lumen-dd-icon';
-                icon.innerHTML = this._svgShell(opt.icon);
-                item.appendChild(icon);
+        if (this._categories) {
+            // ---- 分类双栏形态：左栏分类 + 右侧该分类条目 ----
+            this.menuEl.classList.add('categorized');
+            const rail = document.createElement('div');
+            rail.className = 'lumen-dd-cats';
+            for (const cat of this._categories) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'lumen-dd-cat' + (cat.key === this._activeCatKey ? ' active' : '');
+                btn.textContent = cat.label || cat.key;
+                btn.addEventListener('click', () => {
+                    if (this._activeCatKey === cat.key) return;
+                    this._activeCatKey = cat.key;
+                    rail.querySelectorAll('.lumen-dd-cat').forEach((b) => {
+                        b.classList.toggle('active', b === btn);
+                    });
+                    this._renderCategoryItems(listWrap);
+                    // 列表条数变化会改变菜单高度：top 是打开时按旧高度算的，
+                    // 不重定位会出现"单条目分类悬空一截 / 多条目分类向下长出
+                    // 屏幕被裁"——切换后必须按新高度重新定位与钳制
+                    this._positionMenu();
+                    this._scrollActiveIntoView();
+                });
+                rail.appendChild(btn);
             }
-            const label = document.createElement('span');
-            label.className = 'dd-label';
-            label.textContent = opt.label;
-            item.appendChild(label);
-            // 选中对勾：动作型菜单不渲染（动作无"当前选中"语义）
-            if (!this.actionMenu) {
-                const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                check.setAttribute('class', 'dd-check');
-                check.setAttribute('viewBox', '0 0 24 24');
-                check.setAttribute('fill', 'none');
-                check.setAttribute('stroke', 'currentColor');
-                check.setAttribute('stroke-width', '2.4');
-                check.setAttribute('stroke-linecap', 'round');
-                check.setAttribute('stroke-linejoin', 'round');
-                check.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
-                item.appendChild(check);
-            }
-            item.addEventListener('click', () => {
-                this._selectByIndex(i);
+            const listWrap = document.createElement('div');
+            listWrap.className = 'lumen-dd-cat-list';
+            this.menuEl.append(rail, listWrap);
+            this._renderCategoryItems(listWrap);
+        } else {
+            // ---- 平铺形态（既有行为）----
+            this._activeIndex = Math.max(0, this.options.findIndex((o) => o.value === this.value));
+            this.options.forEach((opt, i) => {
+                const item = this._buildOptionRow(opt, i === this._activeIndex);
+                item.addEventListener('click', () => {
+                    this._selectByIndex(i);
+                });
+                this.menuEl.appendChild(item);
             });
-            this.menuEl.appendChild(item);
-        });
+        }
 
         document.body.appendChild(this.menuEl);
         this._positionMenu();
         this._scrollActiveIntoView();
         this.trigger.classList.add('lumen-dd-open');
+    }
+
+    /**
+     * 构建一个选项行（平铺与分类两形态共用）：图标 + 文案（分类形态带
+     * 副标签两行展示）+ 选中对勾
+     * @param {Object} opt - 选项 { value, label, sublabel?, icon? }
+     * @param {boolean} [active] - 是否带键盘高亮
+     * @returns {HTMLElement}
+     */
+    _buildOptionRow(opt, active = false) {
+        const item = document.createElement('div');
+        item.className = 'lumen-dropdown-option' +
+            (opt.value === this.value ? ' selected' : '') +
+            (active ? ' active' : '');
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', opt.value === this.value ? 'true' : 'false');
+        item.dataset.value = opt.value;
+        if (opt.icon) {
+            const icon = document.createElement('span');
+            icon.className = 'lumen-dd-icon';
+            icon.innerHTML = this._svgShell(opt.icon);
+            item.appendChild(icon);
+        }
+        // 分类形态支持两行条目（主文案 + 副标签如厂商名）；平铺保持单行
+        if (opt.sublabel !== undefined && this._categories) {
+            const text = document.createElement('span');
+            text.className = 'dd-text';
+            const label = document.createElement('span');
+            label.className = 'dd-label';
+            label.textContent = opt.label;
+            const sub = document.createElement('span');
+            sub.className = 'dd-sublabel';
+            sub.textContent = opt.sublabel;
+            text.append(label, sub);
+            item.appendChild(text);
+        } else {
+            const label = document.createElement('span');
+            label.className = 'dd-label';
+            label.textContent = opt.label;
+            item.appendChild(label);
+        }
+        // 选中对勾：动作型菜单不渲染（动作无"当前选中"语义）
+        if (!this.actionMenu) {
+            const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            check.setAttribute('class', 'dd-check');
+            check.setAttribute('viewBox', '0 0 24 24');
+            check.setAttribute('fill', 'none');
+            check.setAttribute('stroke', 'currentColor');
+            check.setAttribute('stroke-width', '2.4');
+            check.setAttribute('stroke-linecap', 'round');
+            check.setAttribute('stroke-linejoin', 'round');
+            check.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+            item.appendChild(check);
+        }
+        return item;
+    }
+
+    /** 渲染分类模式下右侧条目列表（切分类/重建菜单时调用） */
+    _renderCategoryItems(listWrap) {
+        listWrap.innerHTML = '';
+        const cat = this._categories.find((c) => c.key === this._activeCatKey);
+        const items = (cat && Array.isArray(cat.items)) ? cat.items : [];
+        if (items.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'lumen-dd-cat-empty';
+            empty.textContent = (cat && cat.emptyText) || '该分类暂无条目';
+            listWrap.appendChild(empty);
+            this._activeIndex = -1;
+            return;
+        }
+        this._activeIndex = Math.max(0, items.findIndex((o) => o.value === this.value));
+        items.forEach((opt, i) => {
+            const item = this._buildOptionRow(opt, i === this._activeIndex);
+            item.addEventListener('click', () => {
+                this._selectByValue(opt.value);
+            });
+            listWrap.appendChild(item);
+        });
+    }
+
+    /** 按值选中：更新值/触发器/对勾，收起菜单，回调 onChange */
+    _selectByValue(value) {
+        const opt = this._findOpt(value);
+        if (!opt) return;
+        const changed = opt.value !== this.value;
+        this.value = opt.value;
+        // 分类模式下顺带把左栏停留分类对齐到所选值（下次打开停在该分类）
+        if (this._categories) this._activeCatKey = this._catOf(value) || this._activeCatKey;
+        this._syncTrigger();
+        this.close();
+        this._refreshSelectionUI();
+        // 动作型菜单每次都触发（重复执行同一动作是正常使用）；
+        // 状态型菜单仅值变化时触发
+        if ((changed || this.actionMenu) && this.onChange) this.onChange(opt.value);
     }
 
     /** 收起菜单 */
@@ -251,14 +410,29 @@ class LumenDropdown {
         this.menuEl = null;
     }
 
-    /** 定位菜单：默认展开于触发器上方；上方空间不足时改为向下弹 */
+    /** 定位菜单：默认展开于触发器上方；上方空间不足且下方更宽裕时向下弹。
+     *  分类双栏形态用固定高度（350px，切换分类忽高忽低体验差）——空分类
+     *  留白、长列表内部滚动；视口放不下时按可用空间收缩。平铺形态维持
+     *  按内容自适应 + 320px 上限。切换分类改变内容后由调用方重新调用 */
     _positionMenu() {
         if (!this.menuEl) return;
         const rect = this.trigger.getBoundingClientRect();
-        const menuH = this.menuEl.offsetHeight;
-        const menuW = Math.max(rect.width, 200);
         const vw = window.innerWidth;
         const vh = window.innerHeight;
+        // 上/下可用空间（各留 8px 屏幕边距 + 6px 间隙）：择大者作为可用高度，
+        // 最小 140px 保住可滚动性——两侧都挤时宁可内滚也不消失
+        const spaceUp = rect.top - 14;
+        const spaceDown = vh - rect.bottom - 14;
+        const avail = Math.max(140, Math.max(spaceUp, spaceDown));
+        if (this._categories) {
+            this.menuEl.style.maxHeight = 'none';
+            this.menuEl.style.height = Math.min(350, avail) + 'px';
+        } else {
+            this.menuEl.style.maxHeight = Math.min(320, avail) + 'px';
+        }
+
+        const menuH = this.menuEl.offsetHeight;
+        const menuW = Math.max(rect.width, this._categories ? 380 : 200);
 
         let left = rect.left;
         if (left + menuW > vw - 8) left = vw - 8 - menuW;
@@ -289,22 +463,12 @@ class LumenDropdown {
         });
     }
 
-    /** 按索引选中选项：更新值/文案/对勾，收起菜单，回调 onChange */
+    /** 按可见项索引选中（键盘 Enter 用）：平铺形态 DOM 序 == options 序，
+     *  分类形态 DOM 序 == 当前分类条目序，统一走 DOM dataset 取值 */
     _selectByIndex(index) {
-        const opt = this.options[index];
-        if (!opt) return;
-        const changed = opt.value !== this.value;
-        this.value = opt.value;
-        this._setTriggerTitle(opt.label);
-        if (!this.iconButton) {
-            this._labelEl.textContent = opt.label;
-            this._setTriggerIcon(opt);
-        }
-        this.close();
-        this._refreshSelectionUI();
-        // 动作型菜单每次都触发（重复执行同一动作是正常使用）；
-        // 状态型菜单仅值变化时触发
-        if ((changed || this.actionMenu) && this.onChange) this.onChange(opt.value);
+        if (!this.menuEl) return;
+        const item = this.menuEl.querySelectorAll('.lumen-dropdown-option')[index];
+        if (item) this._selectByValue(item.dataset.value);
     }
 
     /** 绑定触发器与全局事件（destroy 时成对移除） */
@@ -322,11 +486,17 @@ class LumenDropdown {
                 return;
             }
             switch (e.key) {
-                case 'ArrowDown':
+                case 'ArrowDown': {
                     e.preventDefault();
-                    this._activeIndex = Math.min(this._activeIndex + 1, this.options.length - 1);
+                    // 分类模式下可见项 = 当前分类条目，上界按 DOM 实际项数
+                    const count = this.menuEl
+                        ? this.menuEl.querySelectorAll('.lumen-dropdown-option').length
+                        : this.options.length;
+                    if (count === 0) break;
+                    this._activeIndex = Math.min(this._activeIndex + 1, count - 1);
                     this._paintActive();
                     break;
+                }
                 case 'ArrowUp':
                     e.preventDefault();
                     this._activeIndex = Math.max(this._activeIndex - 1, 0);

@@ -640,6 +640,131 @@
     margin-bottom: calc(10px * var(--ns));
 }
 
+/* 生成按钮行：生成按钮 + 停止控件（GenStopControl 的 X）并排；
+   原"生成按钮 margin-top:auto 贴底"的语义上移到行容器 */
+.image-gen-actions {
+    margin-top: auto;
+    display: flex;
+    align-items: stretch;
+    gap: calc(8px * var(--ns));
+}
+
+.image-gen-actions .image-gen-generate-btn {
+    margin-top: 0;
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* 停止控件 X 按钮：与生成按钮同高的方块，常驻两态（与面板 ■停止按钮
+   全局一致）：无任务暗红灭置不可点，生成中由组件加 active 点亮为红底白叉 */
+.gen-stop-btn {
+    flex: 0 0 auto;
+    width: calc(36px * var(--ns));
+    height: calc(36px * var(--ns));
+    padding: 0;
+    border: none;
+    border-radius: calc(6px * var(--ns));
+    background: #3d2529;                    /* 暗置态：暗红底，灭而不隐身 */
+    color: #a35b63;                         /* 图标暗红灰（SVG currentColor 继承） */
+    cursor: default;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.gen-stop-btn svg {
+    width: calc(16px * var(--ns));
+    height: calc(16px * var(--ns));
+}
+
+/* 点亮态（组件在任务进行中加 active）：红色实底白叉，悬停加深——
+   色值与面板 .llm-stop-btn 完全一致 */
+.gen-stop-btn.active {
+    background: #ef4444;
+    color: #ffffff;
+    cursor: pointer;
+}
+
+.gen-stop-btn.active:hover {
+    background: #dc2626;
+}
+
+/* 数量步进器（ImageGenNode 生成行左侧）：结构与交互迁移自 Comfy 生图
+   节点的 .comfy-count-stepper（行为层同为 CountStepper），色值/尺寸一致，
+   类名独立避免 API 节点依赖 comfy 前缀样式 */
+.image-gen-node .gen-count-stepper {
+    display: flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    border: calc(1px * var(--ns)) solid rgba(128, 128, 128, 0.3);
+    border-radius: calc(6px * var(--ns));
+    background: #0f0f12;
+    overflow: hidden;
+}
+
+.image-gen-node .gen-count-stepper-input {
+    width: calc(48px * var(--ns));
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #ffffff;
+    font-size: calc(15px * var(--ns));
+    font-family: inherit;
+    text-align: center;
+    padding: 0;
+    caret-color: #6cebff;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.image-gen-node .gen-count-stepper-input::-webkit-outer-spin-button,
+.image-gen-node .gen-count-stepper-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.image-gen-node .gen-count-stepper-arrows {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: calc(1px * var(--ns));
+    padding: 0 calc(3px * var(--ns));
+    border-left: calc(1px * var(--ns)) solid rgba(128, 128, 128, 0.2);
+}
+
+.image-gen-node .gen-count-stepper-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(18px * var(--ns));
+    height: calc(15px * var(--ns));
+    padding: 0;
+    border: none;
+    border-radius: calc(3px * var(--ns));
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.image-gen-node .gen-count-stepper-arrow svg {
+    width: calc(10px * var(--ns));
+    height: calc(10px * var(--ns));
+}
+
+.image-gen-node .gen-count-stepper-arrow:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+.image-gen-node .gen-count-stepper-arrow:active {
+    background: rgba(255, 255, 255, 0.18);
+}
+
 /* 生成按钮：表单底部的通栏强调按钮 */
 .image-gen-generate-btn {
     margin-top: auto;
@@ -837,6 +962,32 @@
     font-size: calc(14px * var(--ns));
     color: rgba(255, 255, 255, 0.45);
     user-select: none;
+}
+
+/* ==================== RunningHub 节点（RunningHubGenNode） ==================== */
+/* 复用 comfy-gen-node 全套样式，仅补充 ID 输入行：输入框占满剩余宽度，
+   拉取按钮窄条自适应内容——生成按钮的通栏规格（width:100% +
+   margin-top:auto）不能带进这一行 */
+.runhub-gen-node .rh-id-row {
+    display: flex;
+    align-items: center;
+    gap: calc(6px * var(--ns));
+}
+
+.runhub-gen-node .rh-id-row .rh-id-input {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    text-align: left;
+    padding-left: calc(10px * var(--ns));
+    padding-right: calc(10px * var(--ns));
+}
+
+.runhub-gen-node .rh-id-row .rh-fetch-btn {
+    flex: 0 0 auto;
+    width: auto;
+    margin-top: 0;
+    padding: 0 calc(20px * var(--ns));
 }
 
 /* LoRA 行：模型下拉 + 启用勾选框并排 */

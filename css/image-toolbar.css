@@ -394,66 +394,11 @@
     background: rgba(239, 68, 68, 0.95);
 }
 
-/* ==================== 编辑下拉（编辑 ∨ → 画笔） ====================
-   复刻提示词技能栏的"按钮 + caret + 菜单层"下拉模式；
-   菜单面板按配色规范：浮起层底色 + 通用边框 + 阴影 */
-
-/* 下拉按钮与菜单的定位基准 */
-.toolbar-edit-wrap {
-    position: relative;
-    display: inline-flex;
-}
-
-/* 按钮右侧的下拉箭头（参考技能栏"优化提示词 ∨"），与文字留 5px 间距 */
+/* 按钮右侧的下拉箭头（参考技能栏"优化提示词 ∨"），与文字留 5px 间距
+   ——目前仅高清放大按钮在用 */
 .toolbar-btn .btn-caret {
     width: 12px;
     height: 12px;
     margin-left: 5px;
     opacity: 0.7;
-}
-
-.edit-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
-    min-width: 120px;
-    padding: 4px;
-    background: var(--icon-bg, #1b1c21);              /* 浮起层 */
-    border: 1px solid rgba(128, 128, 128, 0.3);       /* 通用边框 */
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    z-index: 1001;
-    display: flex;
-    flex-direction: column;
-}
-
-.edit-menu[hidden] {
-    display: none;
-}
-
-/* 菜单项：图标 + 文字，叠加式悬停 */
-.edit-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: #ffffff;
-    font-size: 13px;
-    cursor: pointer;
-    text-align: left;
-    white-space: nowrap;
-}
-
-.edit-menu-item svg {
-    width: 14px;
-    height: 14px;
-    flex: none;
-}
-
-.edit-menu-item:hover {
-    background: rgba(255, 255, 255, 0.1);
 }

@@ -11,6 +11,13 @@
 
 class CanvasClipboard {
     /**
+     * 画布复制时写入系统剪贴板的占位文本。真实内容存在内部剪贴板，
+     * 外部（如 LLM 输入框粘贴）识别到此文本时可经 extractImageDataUrls()
+     * 取回真实图片，避免把这句话粘进聊天
+     */
+    static PLACEHOLDER_TEXT = 'LumenLight 画布剪贴板内容（请在画布上按 Ctrl+V 粘贴）';
+
+    /**
      * 构造函数：保存画布主类引用并初始化事件
      * @param {Canvas} canvas - 画布主类实例
      */
@@ -198,6 +205,32 @@ class CanvasClipboard {
     }
 
     /**
+     * 提取内部剪贴板中图片对象的 data URL（供 LLM 附件等外部消费）。
+     * 跳过节点（无位图）与视频对象（img 是封面帧，贴给 AI 会误导）。
+     * 跨域污染的图片 toDataURL 会抛错，逐张捕获不影响其余。
+     * @returns {string[]} base64 data URL 数组
+     */
+    extractImageDataUrls() {
+        if (!this.hasInternal()) return [];
+        const urls = [];
+        for (const entry of this._internal) {
+            if (entry.kind !== 'image') continue;
+            const d = entry.data;
+            if (d.videoUrl || !d.img) continue;
+            try {
+                const cv = document.createElement('canvas');
+                cv.width = d.img.naturalWidth || d.img.width;
+                cv.height = d.img.naturalHeight || d.img.height;
+                cv.getContext('2d').drawImage(d.img, 0, 0);
+                urls.push(cv.toDataURL('image/png'));
+            } catch (err) {
+                console.error('提取画布剪贴板图片失败:', err);
+            }
+        }
+        return urls;
+    }
+
+    /**
      * 重置粘贴错位计数（在画布上按下鼠标时调用）：
      * 点击画布代表开启新一段操作，之后的粘贴重新从贴近原位/画布中心开始
      */
@@ -250,7 +283,7 @@ class CanvasClipboard {
         // 同步向系统剪贴板写入占位文本：替换掉残留的旧图片内容。
         // 否则系统剪贴板里的旧图会让 Ctrl+V 永远走外部粘贴，
         // 内部复制的画布对象无法粘出（与系统应用"复制即替换剪贴板"的习惯一致）
-        navigator.clipboard?.writeText('LumenLight 画布剪贴板内容（请在画布上按 Ctrl+V 粘贴）').catch(() => {});
+        navigator.clipboard?.writeText(CanvasClipboard.PLACEHOLDER_TEXT).catch(() => {});
         return true;
     }
 
@@ -259,19 +292,12 @@ class CanvasClipboard {
      * @returns {boolean} 是否剪切了内容
      */
     cutSelection() {
-        if (!this.copySelection()) return false;
         const c = this.canvas;
-        for (const img of c.images.getSelected()) {
-            // 剪切跳过视频文件清理：剪贴板里保留了 videoUrl，
-            // 粘贴出的副本仍指向同一个工作区文件
-            c.images.delete(img.id, { skipFileCleanup: true });
-            // DOM 节点（提示词/生图节点）需要同步移除 DOM 元素
-            if (typeof img.destroy === 'function') img.destroy();
-            // 同步清理被删对象关联的所有连线
-            c.connections.removeByImage(img.id);
-        }
-        c.images.select(null);
-        c.draw();
+        const objs = c.images.getSelected();
+        if (objs.length === 0 || !this.copySelection()) return false;
+        // 删除统一走历史模块：剪切跳过视频文件清理（文件要留给粘贴出的
+        // 新对象使用，撤销栈淘汰时也不清理——剪贴板里的引用仍可能被粘贴）
+        c.history.deleteObjects(objs, [], { label: '剪切', fileCleanup: 'skip' });
         return true;
     }
 
@@ -397,6 +423,8 @@ class CanvasClipboard {
             obj.selected = true;
             c.images.selectedIds.add(obj.id);
         }
+        // 撤销记账：整次粘贴（多对象混合）作为一条命令回退
+        c.history?.recordCreate(newObjects, '粘贴');
         c.draw();
         return true;
     }

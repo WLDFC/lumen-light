@@ -488,6 +488,15 @@
     line-height: 1.5;
 }
 
+/* 编辑器覆盖徽标：登记卡下方一行灰字，提示该工作流在 Comfy 编辑器里有 N 项
+   参数覆盖（提交 RunningHub 时生效）；信息性文字不做成按钮避免误点 */
+.rh-wf-override-note {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-dim, #8a8b92);
+    line-height: 1.5;
+}
+
 /* ==================== 抠图模型管理 ==================== */
 .settings-rembg-item {
     display: flex;              /* 弹性布局 */

@@ -72,6 +72,7 @@ class PiAgentManager {
         this.rpcFailStreak = 0;   // 连续 RPC 超时计数（疑似卡死上报判定用）
         this.probeFailStreak = 0;  // 连续探测超时计数（阈值更高，与真实命令分开）
         this.lastEventAt = 0;      // 最近一次 pi 生命迹象时间（stdout 活动/spawn，状态灯 tooltip 用）
+        this.lastAbortAt = 0;      // 最近一次用户点停止的时间（停止信号：扩展后台任务据此自我取消）
         this._unresponsiveNotified = false;  // 已广播疑似卡死，恢复时据此广播 pi_responsive 回绿
         this.logFile = path.join(dataDir, 'pi', 'agent.log');
         this._fp = null;          // spawn 时的 API 设置指纹（变化则重启）
@@ -115,6 +116,24 @@ class PiAgentManager {
         // 共存于此文件；旧版整体覆盖会把并存字段抹掉）
         const cur = this._readJson(this.settingsFile, {});
         this._writeJson(this.settingsFile, { ...cur, permissionLevel: level });
+    }
+
+    /**
+     * 禁用工具清单（面板「工具与技能」勾选维护）：扩展在 pi 启动与每回合
+     * 开始读取，经 setActiveTools 把禁用工具从模型可见工具集移除
+     */
+    getDisabledTools() {
+        const list = this._readJson(this.settingsFile, {}).disabledTools;
+        return Array.isArray(list) ? list.filter((x) => typeof x === 'string') : [];
+    }
+
+    setDisabledTools(list) {
+        const cur = this._readJson(this.settingsFile, {});
+        this._writeJson(this.settingsFile, {
+            ...cur,
+            disabledTools: (Array.isArray(list) ? list : []).filter((x) => typeof x === 'string')
+        });
+        return this.getDisabledTools();
     }
 
     /**
@@ -243,17 +262,23 @@ class PiAgentManager {
                 const spawnArgs = [this.bundlePath, '--mode', 'rpc', '--session-dir', this.sessionsDir,
                      '--append-system-prompt', PI_LANG_APPEND];
                 if (fs.existsSync(guardExt)) spawnArgs.push('-e', guardExt);
-                this.proc = spawn(process.execPath, spawnArgs,
+                const child = spawn(process.execPath, spawnArgs,
                     { cwd: this.projectRoot, env: this._buildEnv(), windowsHide: true });
+                this.proc = child;
             } catch (err) {
                 this.starting = null;
                 this._logLine('[spawn] 启动失败: ' + err.message);
                 return reject(err);
             }
 
-            this.proc.stdout.on('data', (chunk) => this._onStdout(chunk));
+            // 绑定基准 = 刚 spawn 的子进程（spawn 到此无 await 间隙，
+            // this.proc 即它）。不用 try 块里的局部 child：其作用域到
+            // catch 为止，块外引用是运行时 ReferenceError（node --check
+            // 查不出未声明引用，曾致 pi 完全不可用）
+            const proc = this.proc;
+            proc.stdout.on('data', (chunk) => this._onStdout(chunk));
             this._logLine('[spawn] pi RPC 进程启动');
-            this.proc.stderr.on('data', (chunk) => {
+            proc.stderr.on('data', (chunk) => {
                 const text = chunk.toString().trim();
                 if (text) {
                     console.warn('[pi stderr]', text.slice(0, 300));
@@ -262,16 +287,22 @@ class PiAgentManager {
             });
             // stdin/进程错误必须显式接管：pi 退出瞬间的写入会触发 EPIPE，
             // 流 'error' 事件无监听者时会抛未捕获异常直接带走整个后端
-            this.proc.stdin.on('error', (err) => {
+            proc.stdin.on('error', (err) => {
                 console.warn('[pi] stdin 错误（进程可能已退出）:', err.message);
                 this._noteRpcFail();
             });
-            this.proc.on('error', (err) => {
+            proc.on('error', (err) => {
                 console.error('[pi] 进程错误:', err.message);
             });
-            this.proc.on('exit', (code) => {
-                console.log(`[pi] 进程退出（code=${code}）`);
-                this._logLine(`[exit] 进程退出 code=${code}`);
+            proc.on('exit', (code, signal) => {
+                // 历史教训：旧进程的 exit 事件可能在新进程 spawn 之后才被处理，
+                // 若不核对身份，迟到退出会把刚拉起的新进程引用抹成 null——
+                // 新 pi 被孤儿化持有会话文件，前端还收到假的"进程退出"广播
+                const isCurrent = this.proc === proc;
+                this._logLine(`[exit] 进程退出 code=${code} signal=${signal}` +
+                    (isCurrent ? '' : '（旧进程迟到退出，忽略——当前进程不受影响）'));
+                if (!isCurrent) return;
+                console.log(`[pi] 进程退出（code=${code} signal=${signal}）`);
                 this.proc = null;
                 this.currentModel = null;
                 this.currentArchiveKey = null;
@@ -284,7 +315,7 @@ class PiAgentManager {
                 // 否则表现为无声卡死）
                 this._broadcast({
                     type: 'pi-event',
-                    event: { type: 'pi_process_exit', code }
+                    event: { type: 'pi_process_exit', code, signal }
                 });
             });
 
@@ -618,10 +649,33 @@ class PiAgentManager {
         });
     }
 
-    /** 中止当前流式推理 */
+    /** 中止当前推理（用户点停止按钮）：完整语义为「清队列 + 掐 bash + 中止」。
+     *  官方文档明确 abort **不会**清排队消息、且残留队列会在中止后继续投递
+     *  （"abort continues queued messages when they remain in the session"，
+     *  推荐的 Esc 实现是先 clear_queue 再 abort）——不清队列就是此前
+     *  "点了停止循环却复活"的主因。返回各步执行结果供前端提示 */
     async abort() {
-        if (!this.proc || this.proc.exitCode !== null) return;
-        await this.send({ type: 'abort' });
+        const out = { clearQueue: false, abortBash: false, abortSent: false };
+        if (!this.proc || this.proc.exitCode !== null) return out;
+        // 停止信号时间戳：后台生图/视频任务的取消检查器轮询 /api/pi/stop-signal，
+        // 发现信号晚于自己提交时间即中止（点一次停止，排队消息与后台任务全清）
+        this.lastAbortAt = Date.now();
+        // 清队列与掐 bash 并行等（各 5s 上限）：pi 忙时也应答很快，僵死时
+        // 两个超时并行最多拖 5s；失败不阻塞 abort 写入
+        await Promise.allSettled([
+            this.send({ type: 'clear_queue' }, 5000).then(() => { out.clearQueue = true; }),
+            this.send({ type: 'abort_bash' }, 5000).then(() => { out.abortBash = true; })
+        ]).catch(() => { });
+        // abort 的应答要等会话空闲才回来（rpc.md："wait for the session to
+        // become idle before responding"）——工具挂住时可能永不回来。
+        // 这里只写入不等应答：停止的完成信号由事件流 agent_end 承担，
+        // HTTP 立即返回保证按钮即时反馈；真僵死由 pi_unresponsive 上报兜底
+        try {
+            const id = `r${++this.seq}`;
+            this.proc.stdin.write(JSON.stringify({ id, type: 'abort' }) + '\n');
+            out.abortSent = true;
+        } catch { /* 管道已断，进程退出事件会跟进 */ }
+        return out;
     }
 
     /** 当前 pi 状态（未运行时返回 running:false）。

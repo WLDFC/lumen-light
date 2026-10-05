@@ -134,6 +134,9 @@ class ProjectSerializer {
                     ? { editStrokesOpacity: img.editStrokesOpacity } : {}),
                 // 遮罩层（局部重绘元数据，非破坏性图层，data URL）
                 ...(img.mask ? { mask: img.mask } : {}),
+                // 图像编辑器图层栈（ImageStudio：每层笔迹/遮罩/透明度，
+                // data URL 内嵌；无图层结构时不写字段）
+                ...(img.studioLayers ? { studioLayers: img.studioLayers } : {}),
                 // 视频对象额外保存视频地址（恢复时重建 videoEl）
                 ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
             }));
@@ -182,6 +185,8 @@ class ProjectSerializer {
                     ? { editStrokesOpacity: img.editStrokesOpacity } : {}),
                 // 遮罩层（局部重绘元数据，非破坏性图层，data URL 内嵌 project.json）
                 ...(img.mask ? { mask: img.mask } : {}),
+                // 图像编辑器图层栈（同上，studioLayers 随存档持久化）
+                ...(img.studioLayers ? { studioLayers: img.studioLayers } : {}),
                 // 视频对象额外保存视频地址（恢复时重建 videoEl）
                 ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
             };
@@ -248,7 +253,11 @@ class ProjectSerializer {
     collectNodes() {
         return this.canvas.images.images
             .filter(img => NodeTypes.isPanelNode(img.source))
-            .map(node => node.toJSON());
+            .map(node => {
+                const d = node.toJSON();
+                if (node.seqId) d.seqId = node.seqId;   // 编号随存档持久化（删除不复用）
+                return d;
+            });
     }
 
     /**
@@ -324,6 +333,14 @@ class ProjectSerializer {
      * @param {Object} data - 存档数据（images 中每项含可加载的 src）
      */
     async restoreProject(data) {
+        // 撤销栈随全量恢复作废：先挂起记录（恢复期间的 add 等调用不记账）
+        // 并清栈（清栈同时收尾被延迟清理的视频文件），恢复完解除挂起
+        const history = this.canvas.history;
+        if (history) {
+            history.setSuspended(true);
+            history.clear();
+        }
+
         // 清空当前画布图片和选择状态（DOM 节点需先销毁元素）
         for (const img of this.canvas.images.images) {
             if (typeof img.destroy === 'function') img.destroy();
@@ -375,6 +392,12 @@ class ProjectSerializer {
                         };
                         layer.src = imgData.editStrokes;
                     }
+                    // 图像编辑器图层栈：原样恢复（编辑器打开时按
+                    // studioLayers 重建图层结构，无此字段则从
+                    // editStrokes/mask 自动迁移为单图层）
+                    if (imgData.studioLayers) {
+                        imageObj.studioLayers = imgData.studioLayers;
+                    }
                     // 遮罩层（局部重绘元数据）：恢复字段并异步加载位图。
                     // 遮罩以半透明红叠画在画布上（渲染器处理），位图就位后
                     // 补一次重绘，同时供遮罩灯箱重入与 Comfy 提交时烘焙 alpha
@@ -417,12 +440,17 @@ class ProjectSerializer {
 
         // 恢复提示词节点（在连线之前，连线端点可能指向节点）
         this.restoreNodes(data.nodes, idMap);
+        // 节点编号计数器下限同步（见 Canvas.syncNodeSeq；旧存档无 nodeSeq 字段跳过）
+        this.canvas.syncNodeSeq?.(data.nodeSeq);
 
         // 恢复连线：按映射换算 id 后重建，指向已不存在图片的连线直接丢弃
         this.restoreConnections(data.connections, idMap);
 
         // 恢复编组（纯几何对象，无引用换算；在图片/节点之后恢复仅为顺序直观）
         this.restoreGroups(data.groups);
+
+        // 恢复完毕：解除撤销记录挂起
+        if (history) history.setSuspended(false);
 
         // 重绘画布
         this.canvas.draw();
@@ -557,6 +585,12 @@ class ProjectSerializer {
             // 自定义标题回填（旧存档无 title 字段 → 保持类默认标题；
             // 恢复流程的写入由 RealtimeSaveManager 的 restoring 标志抑制）
             if (n.title) node.setTitle(n.title);
+            // 编号回填：构造时已分配过占位编号，以存档记录为准
+            // （旧存档无 seqId 字段 → 保留构造时新分配的编号）
+            if (n.seqId) {
+                node.seqId = n.seqId;
+                node.refreshTitle();
+            }
             this.canvas.images.images.push(node);
             idMap.set(n.id, node.id);
         }

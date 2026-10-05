@@ -126,6 +126,8 @@ class NewCanvasManager {
         }
         this.canvas.images.images = [];
         this.canvas.images.selectedIds.clear();
+        this.canvas.nodeSeq = 0;             // 节点编号计数器随画布归零（新画布从 #001 起）
+        this.canvas.history?.clear();        // 撤销栈随画布清空作废（收尾延迟的视频清理）
         this.canvas.groups.clearSelection(); // 同步清空编组选中
         this.canvas.groups.groups = [];      // 编组是纯几何对象，清数组即可
         this.canvas.connections.clear(); // 同步清空连线，避免残留指向已清空图片的连线

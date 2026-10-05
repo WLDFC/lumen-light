@@ -56,6 +56,8 @@ class ImageManager {
                     };
                     
                     this.images.push(imageObj);
+                    // 撤销记账：新增可回退（undo=摘下、redo=放回）
+                    window.canvas?.history?.recordCreate([imageObj], '添加图片');
                     resolve(imageObj);
                 };
                 img.src = e.target.result;
@@ -108,6 +110,9 @@ class ImageManager {
         if (options.videoUrl) imageObj.videoUrl = options.videoUrl;
 
         this.images.push(imageObj);
+        // 撤销记账：程序化落图（LLM 拖拽/桥接回流/视频落画布等）可回退
+        window.canvas?.history?.recordCreate([imageObj],
+            options.videoUrl ? '添加视频' : '添加图片');
         return imageObj;
     }
 
@@ -232,16 +237,27 @@ class ImageManager {
     _cleanupVideoFile(obj, options) {
         if (options.skipFileCleanup) return;
         if (!NodeTypes.isVideo(obj.source) || !obj.videoUrl) return;
-        const url = obj.videoUrl;
-        if (!url.includes('data/videos')) return;
-        if (this.images.some(i => NodeTypes.isVideo(i.source) && i.videoUrl === url)) return;
+        this.cleanupVideoFileByUrl(obj.videoUrl);
+    }
 
-        // 该视频的播放器若正打开着，先关闭
-        window.canvas?.videoManager?.dispose?.(obj);
+    /**
+     * 按工作区地址清理视频文件（撤销栈淘汰延迟清理的复用入口）：
+     * 仅处理 data/videos/ 内的地址；引用计数校验（仍有其他对象引用
+     * 同一视频时不删）；该视频的播放器若开着先关闭。执行时机由调用方
+     * 决定——常规删除立即执行，撤销栈内的删除延迟到命令淘汰时执行
+     * @param {string} url - 视频工作区地址（data/videos/...）
+     * @returns {boolean} 是否真正发起了删除
+     */
+    cleanupVideoFileByUrl(url) {
+        if (!url || !url.includes('data/videos')) return false;
+        if (this.images.some(i => NodeTypes.isVideo(i.source) && i.videoUrl === url)) return false;
+        const owner = this.images.find(i => i.videoUrl === url);
+        if (owner) window.canvas?.videoManager?.dispose?.(owner);
 
         const filename = url.split('/').pop();
         fetch('/api/videos/' + encodeURIComponent(filename), { method: 'DELETE' })
             .catch((err) => console.warn('删除视频工作区文件失败:', err));
+        return true;
     }
 
     /**

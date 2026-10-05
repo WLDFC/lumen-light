@@ -216,7 +216,7 @@ class ImagePipeline {
                 const mg = m.getContext('2d');
                 mg.drawImage(obj.maskImg, 0, 0);
                 const md = mg.getImageData(0, 0, m.width, m.height);
-                const threshold = ImageMaskEditor.ALPHA_THRESHOLD;
+                const threshold = ImageStudio.ALPHA_THRESHOLD;
                 for (let i = 0; i < md.data.length; i += 4) {
                     // 遮罩层笔迹是纯色红，覆盖度读 alpha 即可；二值化为黑白
                     const on = md.data[i + 3] > threshold ? 255 : 0;

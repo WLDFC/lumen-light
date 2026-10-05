@@ -176,7 +176,9 @@ class CanvasConnections {
         // 入线即"当前提示词链末端"，换线等于换整条链；
         // LoRA 节点同为单入（一条提示词/LoRA 上游链）；
         // 存档恢复在 clear 之后逐条 add，数组为空不会触发本分支
+        let replacedEdges = [];
         if (NodeTypes.isGenNode(toObj.source) || NodeTypes.isLoraNode(toObj.source)) {
+            replacedEdges = this.connections.filter(c => c.toId === toId);   // 捕获被挤掉的旧边（撤销还原用）
             this.connections = this.connections.filter(c => c.toId !== toId);
         }
 
@@ -186,6 +188,8 @@ class CanvasConnections {
 
         const conn = { id: LumenLight.generateId(), fromId, toId, order };
         this.connections.push(conn);
+        // 撤销记账：undo=撤下新边并还原被替换的旧边，redo=反向
+        this.canvas.history?.recordConnectionAdd(conn, replacedEdges);
         return conn;
     }
 
@@ -194,7 +198,11 @@ class CanvasConnections {
      * @param {string} id - 连线 id
      */
     remove(id) {
+        const conn = this.connections.find(c => c.id === id);
+        if (!conn) return;
         this.connections = this.connections.filter(c => c.id !== id);
+        // 撤销记账：对象删除引发的连线清理不走这里（删除命令统一记账）
+        this.canvas.history?.recordConnectionRemove(conn);
     }
 
     /**

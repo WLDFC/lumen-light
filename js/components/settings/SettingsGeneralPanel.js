@@ -2,7 +2,7 @@
  * ==========================================================================
  * LumenLight 设置 - 通用面板
  * 作用：渲染「通用」分类的设置项：画布缩放锚点显隐、画布显示质量档位、
- *       提示词自动补全开关。
+ *       ComfyUI 根目录、提示词自动补全开关。
  * 交互约定：切换即生效，无需点保存；配置存在 localStorage 而非后端。
  * 由 SettingsManager 在构造时实例化并按分类调用 render()。
  * ==========================================================================
@@ -93,6 +93,23 @@ class SettingsGeneralPanel {
                 </div>
                 <div class="settings-models-section">
                     <div class="settings-models-header">
+                        <span class="settings-models-title">ComfyUI</span>
+                    </div>
+                    <div class="settings-switch-row">
+                        <div class="settings-switch-info">
+                            <span class="settings-switch-label">ComfyUI 根目录</span>
+                            <span class="settings-switch-desc">
+                                本机 ComfyUI 安装目录（含 main.py，便携版选外层也可）。
+                                agent 的 comfy 工具（lumen-comfy 扩展）下载模型落盘时
+                                按它定位 models 子目录
+                            </span>
+                        </div>
+                        <input type="text" class="settings-input" id="settingsComfyRoot"
+                               placeholder="如 I:\ComfyUI-aki\ComfyUI" spellcheck="false">
+                    </div>
+                </div>
+                <div class="settings-models-section">
+                    <div class="settings-models-header">
                         <span class="settings-models-title">提示词</span>
                     </div>
                     <div class="settings-switch-row">
@@ -140,6 +157,26 @@ class SettingsGeneralPanel {
         if (acEl) {
             acEl.onchange = () => {
                 SettingsManager.setPromptAutocompleteEnabled(acEl.checked);
+            };
+        }
+
+        // ===== ComfyUI 根目录 =====
+        // comfy 原生工具（lumen-comfy 扩展）模型下载落盘的定位依据；
+        // 存 data/settings.json 的 comfy.root，改完即保存（后端 5s 缓存内生效）
+        const comfyRootEl = document.getElementById('settingsComfyRoot');
+        if (comfyRootEl) {
+            fetch('/api/settings')
+                .then((r) => r.json())
+                .then((result) => {
+                    comfyRootEl.value = result.settings?.comfy?.root || '';
+                })
+                .catch((err) => console.error('加载 ComfyUI 根目录配置失败:', err));
+            comfyRootEl.onchange = () => {
+                fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ comfy: { root: comfyRootEl.value.trim() } })
+                }).catch((err) => console.error('保存 ComfyUI 根目录失败:', err));
             };
         }
 

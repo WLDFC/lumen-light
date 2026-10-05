@@ -109,6 +109,8 @@ class GroupManager {
             selected: false
         };
         this.groups.push(group);
+        // 撤销记账：新建组可回退（undo=摘壳、redo=原对象放回）
+        this.canvas.history?.recordGroupCreate(group);
         return group;
     }
 
@@ -139,7 +141,10 @@ class GroupManager {
     setColor(id, color) {
         const g = this.groups.find(g => g.id === id);
         if (!g) return;
+        const from = g.color;
         g.color = GroupManager.COLOR_PRESETS[color] ? color : '';
+        // 撤销记账：配色可回退（值未变不记）
+        this.canvas.history?.recordValue(g, 'color', from, g.color, '标题栏配色');
         this.canvas.draw();
     }
 
@@ -440,7 +445,10 @@ class GroupManager {
         this._renameInput = null;   // 先摘引用，防止 blur/Enter 双触发重复提交
         const value = ctx.input.value.trim();
         if (commit && value) {
+            const from = ctx.group.title;
             ctx.group.title = value;
+            // 撤销记账：改名可回退（值未变不记）
+            this.canvas.history?.recordValue(ctx.group, 'title', from, value, '组改名');
         }
         ctx.input.remove();
         this.canvas.draw();

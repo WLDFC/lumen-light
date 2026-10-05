@@ -438,3 +438,23 @@
         width: 160px;   /* 窄屏下 220px 太占空间，缩到 160px */
     }
 }
+
+/* ===== 工具行右侧：筛选排序下拉 + 搜索框 ===== */
+
+/* 工具行原本是 space-between 两段式（标签名 | 搜索框），加入排序下拉后
+   用右侧容器把两个控件捆成一组，标签名仍独占左侧；
+   LoRA 管理窗口（lora-manager.css .lora-toolbar-right）同款布局 */
+.recipe-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+/* 排序下拉触发器：底高从 32px 提到 40px，与右侧搜索框同高对齐；
+   其余观感（面板底色/边框/悬停/展开蓝）由 lumen-dropdown.css 的
+   .lumen-dd-icon-btn 提供 */
+.recipe-toolbar-right .lumen-dd-icon-btn {
+    height: 40px;
+    border-radius: 10px;    /* 与搜索框同圆角，成组更整体 */
+}

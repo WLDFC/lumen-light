@@ -169,7 +169,12 @@ const canvasMasksTimestamp = {
 
 app.use(cors()); // 允许跨域请求
 app.use(express.json({ limit: '100mb' })); // 解析 JSON 请求体，最大 100MB（支持 base64 图片）
-app.use(express.static('.')); // 提供静态文件服务
+// no-cache = 每次都协商缓存（ETag/304 代价极小），但保证前端改代码后
+// 刷新页面必然拿到新文件——裸 express.static 只有 Last-Modified，浏览器
+// 会启发式缓存，曾出现"改了 JS 浏览器仍跑旧代码"的排查陷阱
+app.use(express.static('.', {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache')
+})); // 提供静态文件服务
 
 // ==================== WebSocket 管理 ====================
 
@@ -293,11 +298,46 @@ app.use('/api/comfy-node', createComfyNodeRouter({
     comfyApiUrl: COMFY_API_URL
 }));
 
+// Comfy 原生工具 API（/api/comfy-tools：comfy-mcp 精选工具的原生实现，
+// 供 pi 扩展 lumen-comfy 调用）。comfy.root（ComfyUI 根目录，模型下载
+// 落盘用）实时读设置——设置面板改完即生效，5 秒缓存免每次落盘读取
+const createComfyToolsRouter = require('./routes/comfyTools');
+const comfySettingsPath = path.join(DATA_DIR, 'settings.json');
+let comfyRootCache = { value: '', at: 0 };
+function readComfyRoot() {
+    if (Date.now() - comfyRootCache.at < 5000) return comfyRootCache.value;
+    try {
+        const s = JSON.parse(require('fs').readFileSync(comfySettingsPath, 'utf-8'));
+        comfyRootCache = { value: s.comfy?.root || '', at: Date.now() };
+    } catch {
+        comfyRootCache = { value: '', at: Date.now() };
+    }
+    return comfyRootCache.value;
+}
+// 供 lora 自动检测写回配置后立即清缓存（否则 /list 5 秒内仍读到旧值）
+function invalidateComfyRootCache() { comfyRootCache.at = 0; }
+app.use('/api/comfy-tools', createComfyToolsRouter({
+    comfyApiUrl: COMFY_API_URL,
+    getComfyRoot: readComfyRoot
+}));
+
+// LoRA 管理 API（/api/lora：画布顶栏「LoRA 管理」窗口——扫描
+// <comfy.root>/models/loras 清单、sidecar 封面图、置顶元数据）
+const createLoraRouter = require('./routes/lora');
+app.use('/api/lora', createLoraRouter({
+    getComfyRoot: readComfyRoot,
+    invalidateRootCache: invalidateComfyRootCache,
+    comfyApiUrl: COMFY_API_URL
+}));
+
 // 高清放大 API（/api/upscale）
 app.use('/api/upscale', upscaleRouter);
 
 // 抠图去背景 API（/api/rembg）
 app.use('/api/rembg', rembgRouter);
+
+// 本地物体移除 API（/api/lama，LaMa inpainting 模型）
+app.use('/api/lama', require('./routes/lama'));
 
 // 存档管理 API（/api/saves）
 app.use('/api/saves', createSavesRouter({ savesDir: SAVES_DIR, videosDir: VIDEOS_DIR }));

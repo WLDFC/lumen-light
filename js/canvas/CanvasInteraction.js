@@ -133,7 +133,8 @@ class CanvasInteraction {
         const clicked = c.images.isHit(cp.x, cp.y);
         if (!clicked || NodeTypes.isPlaceholder(clicked.source)) return;
 
-        // 视频对象：双击打开原生控件播放器（委托给 CanvasVideoManager）
+        // 视频对象：双击打开原生控件播放器（委托给 CanvasVideoManager）。
+        // 单击已在 onMouseUp 触发播放，此分支仅为兜底（正常到不了这里）
         if (NodeTypes.isVideo(clicked.source)) {
             c.videoManager.showPlayer(clicked);
             return;
@@ -157,6 +158,13 @@ class CanvasInteraction {
             return;
         }
 
+        // 图像编辑器（ImageStudio 全屏灯箱）打开时，画布快捷键整体失效：
+        // 键盘事件由编辑器自己消费（Delete 删图层、ESC 关编辑器），否则
+        // Delete 会误删编辑器背后画布上仍选中、正在编辑的那张图
+        if (window.imageStudio?.isOpen()) {
+            return;
+        }
+
         // 空格键按下时进入平移模式，但不阻止默认行为（避免页面滚动由 Canvas 区域单独处理）
         if (e.code === 'Space') {
             this.isSpacePressed = true;
@@ -170,6 +178,23 @@ class CanvasInteraction {
         // 系统剪贴板有图片（截图等）时优先粘贴外部图片，否则粘贴内部复制的对象
         if ((e.ctrlKey || e.metaKey) && !e.altKey) {
             const key = e.key.toLowerCase();
+            // Ctrl+Z 撤销 / Ctrl+Shift+Z、Ctrl+Y 重做：焦点在输入框/编辑器
+            // 打开时已在上方守卫拦下（节点文本框内保留原生撤销）
+            if (key === 'z' || key === 'y') {
+                e.preventDefault();
+                const wantRedo = key === 'y' || e.shiftKey;
+                if (wantRedo) this.canvas.history.redo();
+                else this.canvas.history.undo();
+                return;
+            }
+            // 页面上有正在选中的 DOM 文字（LLM 聊天面板等）时放行原生复制/剪切：
+            // 否则会劫持文字复制，并把画布占位文本写进系统剪贴板。
+            // 画布复制场景必然先点过画布，DOM 文字选区已折叠，不受影响
+            const sel = window.getSelection();
+            if ((key === 'c' || key === 'x') &&
+                sel && !sel.isCollapsed && sel.toString().trim()) {
+                return;
+            }
             if (key === 'c') {
                 if (this.canvas.clipboard.copySelection()) e.preventDefault();
                 return;
@@ -181,26 +206,15 @@ class CanvasInteraction {
         }
 
         // Delete 键删除选中的对象（Backspace 不触发删除，避免输入框误操作）：
-        // 图片/节点整对象删除；组只删组壳，成员原样保留（解除编组的入口）
+        // 图片/节点整对象删除；组只删组壳，成员原样保留（解除编组的入口）。
+        // 删除的捕获/执行/入栈统一走历史模块（撤销栈持有被删对象，
+        // 视频文件清理延迟到命令淘汰）
         if (e.key === 'Delete') {
             const selected = this.canvas.images.getSelected();
             const selectedGroups = this.canvas.groups.getSelected();
             if (selected.length === 0 && selectedGroups.length === 0) return;
             e.preventDefault();
-            for (const img of selected) {
-                this.canvas.images.delete(img.id);
-                // DOM 节点（提示词/生图节点）需要同步移除 DOM 元素
-                if (typeof img.destroy === 'function') img.destroy();
-                // 同步清理被删图片关联的所有连线
-                this.canvas.connections.removeByImage(img.id);
-            }
-            for (const group of selectedGroups) {
-                this.canvas.groups.delete(group.id);
-            }
-            // 清空选中状态并触发事件，通知工具栏等组件隐藏
-            this.canvas.images.select(null);
-            this.canvas.groups.clearSelection();
-            this.canvas.draw();
+            this.canvas.history.deleteObjects(selected, selectedGroups, { label: '删除' });
         }
     }
 
@@ -361,6 +375,9 @@ class CanvasInteraction {
         c.isDraggingImage = true;
         c.dragTarget = clicked;
         c.dragStartMouse = { x: cp.x, y: cp.y };
+        // 单击判定标记：按下后未超过位移阈值即视为一次点击
+        // （mouseup 时据此触发视频的单击播放，见 onMouseUp）
+        this._dragMoved = false;
 
         // 触发拖动开始事件（占位图不触发）
         if (!isPlaceholder) {
@@ -632,6 +649,11 @@ class CanvasInteraction {
             }
             c.draw();
         } else if (c.isDraggingImage && c.dragTarget) {
+            // 位移超过阈值即判定为拖动（抑制单击播放，见 onMouseUp）
+            if (c.dragStartMouse &&
+                Math.hypot(cp.x - c.dragStartMouse.x, cp.y - c.dragStartMouse.y) > 4) {
+                this._dragMoved = true;
+            }
             // 多选同时移动 - 直接使用数组更新，避免重复计算
             if (c.dragOffsets && c.dragOffsets.length > 1) {
                 for (let i = 0; i < c.dragOffsets.length; i++) {
@@ -728,6 +750,13 @@ class CanvasInteraction {
         // 如果之前正在拖动图片，触发拖动结束事件
         if (c.isDraggingImage) {
             window.dispatchEvent(new CustomEvent('canvasImageDragEnd'));
+            // 单击（无拖动位移）视频对象：直接打开就地播放器。
+            // 原为双击触发，单击播放后双击事件实际不会再到画布
+            // （第一次点击弹出的播放器覆盖层吃掉了第二次点击）
+            if (!this._dragMoved && c.dragTarget &&
+                NodeTypes.isVideo(c.dragTarget.source)) {
+                c.videoManager.showPlayer(c.dragTarget);
+            }
         }
 
         // 缩放结束：通知工具栏按新尺寸重新定位并恢复完整显示
@@ -743,6 +772,55 @@ class CanvasInteraction {
         // 编组拖动/缩放结束：通知编组工具栏恢复显示（在状态复位前判定）
         if (c.isDraggingGroup || c.isResizingGroup) {
             window.dispatchEvent(new CustomEvent('canvasGroupDragEnd'));
+        }
+
+        // ==================== 撤销记录：手势提交 ====================
+        // 起点/终点快照都取自手势开始时的记录（_startXxx 已快照），
+        // 对比无实际变化则不入栈。必须在下方状态复位之前读取
+        if (c.isDraggingImage && this._dragMoved && c.dragOffsets && c.dragStartMouse) {
+            const entries = c.dragOffsets.map(item => ({
+                obj: item.img,
+                from: { x: c.dragStartMouse.x + item.offsetX, y: c.dragStartMouse.y + item.offsetY },
+                to: { x: item.img.x, y: item.img.y }
+            }));
+            if (entries.some(en => en.from.x !== en.to.x || en.from.y !== en.to.y)) {
+                c.history.recordGeometry(entries, '移动');
+            }
+        }
+        if (c.isResizing && c.resizeTarget && c.resizeStartRect) {
+            const r = c.resizeStartRect;
+            const t = c.resizeTarget;
+            if (r.x !== t.x || r.y !== t.y || r.width !== t.width || r.height !== t.height) {
+                c.history.recordGeometry([{
+                    obj: t,
+                    from: { x: r.x, y: r.y, width: r.width, height: r.height },
+                    to: { x: t.x, y: t.y, width: t.width, height: t.height }
+                }], '缩放');
+            }
+        }
+        if (c.isDraggingGroup && c.dragGroup && c.groupDragStartRect && c.groupDragMembers) {
+            const s = c.groupDragStartRect;
+            const g = c.dragGroup;
+            const entries = [
+                { obj: g, from: { x: s.x, y: s.y }, to: { x: g.x, y: g.y } },
+                ...c.groupDragMembers.map(m => ({
+                    obj: m.obj, from: { x: m.ox, y: m.oy }, to: { x: m.obj.x, y: m.obj.y }
+                }))
+            ];
+            if (entries.some(en => en.from.x !== en.to.x || en.from.y !== en.to.y)) {
+                c.history.recordGeometry(entries, '移动编组');
+            }
+        }
+        if (c.isResizingGroup && c.resizeGroupTarget && c.resizeGroupStartRect) {
+            const s = c.resizeGroupStartRect;
+            const g = c.resizeGroupTarget;
+            if (s.x !== g.x || s.y !== g.y || s.width !== g.width || s.height !== g.height) {
+                c.history.recordGeometry([{
+                    obj: g,
+                    from: { x: s.x, y: s.y, width: s.width, height: s.height },
+                    to: { x: g.x, y: g.y, width: g.width, height: g.height }
+                }], '调整编组');
+            }
         }
 
         // 重置所有交互状态

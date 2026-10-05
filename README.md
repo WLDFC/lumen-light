@@ -1,6 +1,6 @@
 # LumenLight（流光）
 
-AI 绘画工作台：画布 + ComfyUI 工作流（本地 / RunningHub 云端）+ LLM 对话绘图 + 本地资产库 + agent 智能体（pi 内核）与 MCP 扩展（画布任务自动化）。
+AI 绘画工作台：画布 + ComfyUI 工作流（本地 / RunningHub 云端）+ LLM 对话绘图 + 本地资产库 + LoRA 管理器 + agent 智能体（pi 内核）与 MCP 扩展（画布任务自动化）。
 
 ## 项目结构
 
@@ -27,8 +27,22 @@ lumen-light/
 ├─ css/                                # 前端样式文件
 │  ├─ image-toolbar.css                # 图片工具栏样式（含编组工具栏按钮样式——
 │  │                                   #   颜色/布局/解组按钮的宿主）
-│  ├─ image-editor.css                 # 画布图片编辑器（画笔灯箱）样式
+│  ├─ image-editor.css                 # 图像编辑器灯箱基础样式（遮罩/舞台/光标/
+│  │                                   #   确认框/忙碌转圈遮罩）
+│  ├─ image-studio.css                 # 图像编辑器 ImageStudio 布局样式（PS 式四栏：
+│  │                                   #   左工具栏/舞台/右侧工具栏/色板+图层面板，
+│  │                                   #   面板宽度可拖拽；含顶栏「文件」菜单与字体
+│  │                                   #   下拉、PS 式内嵌取色器、文字选项与就地
+│  │                                   #   编辑框、画布选图弹窗（多选瀑布流网格）、
+│  │                                   #   图层选中框覆盖层、磁吸粉线、历史面板、
+│  │                                   #   移动工具全域输入（.moving 绘制面放行））
 │  ├─ asset-library.css                # 本地资产库窗口样式
+│  ├─ lora-manager.css                 # LoRA 管理器样式（复用收藏页全屏弹窗骨架：
+│  │                                   #   左文件夹栏/右封面网格 + 信息窗/投递弹窗/
+│  │                                   #   删除确认/画布选图浮层；触发词备注块为
+│  │                                   #   凹陷层 #0f0f12，《配色美学》色板取色；
+│  │                                   #   工具行右侧筛选排序下拉+搜索框控件组
+│  │                                   #   .lora-toolbar-right，触发器抬到 40px 同高）
 │  ├─ llm-chat.css                     # AI 对话界面样式
 │  ├─ llm-system-prompt.css            # 系统提示词弹窗样式
 │  ├─ llm-skills.css                   # pi 技能库弹窗样式（查阅/启停/上传）
@@ -36,13 +50,15 @@ lumen-light/
 │  ├─ node.css                         # 提示词节点与画布右键菜单样式
 │  ├─ prompt-autocomplete.css          # 提示词自动补全样式
 │  ├─ prompt-panel.css                 # 提示词面板样式
-│  ├─ recipe-manager.css               # 提示词收藏页面样式
+│  ├─ recipe-manager.css               # 提示词收藏页面样式（含工具行右侧筛选排序
+│  │                                   #   下拉+搜索框控件组 .recipe-toolbar-right，
+│  │                                   #   与 lora-manager.css 同款布局）
 │  ├─ recipe-models-sidebar.css        # 收藏页模型标签侧栏样式
 │  ├─ save-manager.css                 # 存档管理器样式
 │  ├─ save-tag-dialog.css              # 保存提示词弹窗样式
 │  ├─ settings.css                     # 设置界面样式
 │  ├─ side-toolbar.css                 # 侧边工具栏样式
-│  ├─ style.css                        # 全局基础样式
+│  ├─ style.css                        # 全局基础样式（含画布撤销/重做轻提示）
 │  ├─ tag-detail-dialog.css            # 收藏详情弹窗样式
 │  ├─ top-toolbar.css                  # 顶部工具栏样式
 │  ├─ workflow-manager.css             # 工作流管理器样式
@@ -68,10 +84,17 @@ lumen-light/
 │  │                                   #   临时落点；保存画布时归档进存档 videos/ 并自动清理）
 │  ├─ webbridge/                       # 网页桥接专用浏览器数据（profile/ 登录态与缓存、
 │  │                                   #   server.log 日志；首次启动桥接时自动生成）
+│  ├─ lora-meta.json                   # LoRA 元数据（LoRA 管理器读写：置顶 pinned、
+│  │                                   #   触发词 triggers、备注 notes——均按 lora
+│  │                                   #   相对路径做 key；删除 lora 时同步清理）
 │  ├─ workflow-layouts.json            # 工作流编辑器节点布局 sidecar（拖拽位置与视图
 │  │                                   #   缩放平移 + 忽略节点（bypass）清单，按 workflow id
 │  │                                   #   分键；API 格式模板本身不含坐标，布局/运行时状态
 │  │                                   #   单独存避免污染模板）
+│  ├─ rh-snapshots.json                # RunningHub 快照 diff 基准（按 workflows/ 里的
+│  │                                   #   快照 id 分键，存拉取原版全文；编辑器写回快照时
+│  │                                   #   以此算字段 diff 生成编辑器覆盖——镜像存条目
+│  │                                   #   editorOverrides，画布节点直连提交时按资源 id 反查）
 │  ├─ skills/                          # 用户自定义技能（一个技能一个 .md，或
 │  │                                   #   Agent Skills 文件夹 <id>/SKILL.md；放入即生效）
 │  │  ├─ README.md                     # 技能文件格式说明与编写建议
@@ -81,8 +104,12 @@ lumen-light/
 │  └─ settings.json                    # 持久化设置：多厂商 API 配置（api.providers）
 │                                      #   与用途绑定（api.bindings：对话/技能/生图各用
 │                                      #   哪个模型）；RunningHub 配置（runninghub：
-│                                      #   apiKey/endpoint/工作流登记卡 workflows）；
-│                                      #   MCP 服务器（mcp.servers：用户自挂的 MCP）
+│                                      #   apiKey/endpoint/旧工作流登记卡 workflows——
+│                                      #   登记卡模式已退役只读保留，画布节点直连后
+│                                      #   仅旧存档节点仍按卡提交）；
+│                                      #   MCP 服务器（mcp.servers：用户自挂的 MCP）；
+│                                      #   ComfyUI 根目录（comfy.root：comfy 原生
+│                                      #   工具下载模型落盘的定位依据）
 │
 ├─ image/                              # 项目图片资源
 │  ├─ 1.png
@@ -93,12 +120,15 @@ lumen-light/
 │  ├─ api/                             # 前端 API 与通信封装
 │  │  └─ LumenSocket.js                # Lumen WebSocket 客户端（接收 ComfyUI 生成图片/视频、
 │  │                                   #   画布桥接命令执行器（drop_image 支持 dataUrl
-│  │                                   #   或公网图片直链——直链经后端代理取图）、
+│  │                                   #   或公网图片直链——直链经后端代理取图；
+│  │                                   #   drop_video 引用 data/videos/ 已落盘视频）、
 │  │                                   #   pi 事件转发、心跳）
 │  │
 │  ├─ canvas/                          # 画布核心模块
 │  │  ├─ nodes/                        # 画布节点本体（一个节点一个文件）
-│  │  │  ├─ BaseCanvasNode.js          # 节点基类（几何/生命周期/两种布局模式）
+│  │  │  ├─ BaseCanvasNode.js          # 节点基类（几何/生命周期/两种布局模式/
+│  │  │  │                             #   标题 #NNN 全局编号——构造时从画布计数器
+│  │  │  │                             #   分配、随存档持久化、删除不复用防顶替）
 │  │  │  ├─ PromptNode.js              # 提示词节点（DOM 面板，支持参考图缩略图、
 │  │  │  │                             #   @图片N 引用与中文提示词补全）
 │  │  │  ├─ PromptSkillBar.js          # 提示词节点技能栏（技能下拉+模型下拉+执行；
@@ -108,14 +138,22 @@ lumen-light/
 │  │  │  ├─ LoraNode.js                # LoRA 节点（可堆叠 LoRA 组合，串在提示词链路中
 │  │  │  │                             #   作用于下游 Comfy 生图；提交时后端图拼接注入，
 │  │  │  │                             #   追加在模板 lora 之后——补充/无模板 lora 场景）
-│  │  │  ├─ ImageGenNode.js            # 生图节点（收集上游提示词链并调用生图 API）
+│  │  │  ├─ ImageGenNode.js            # 生图节点（收集上游提示词链并调用生图 API；
+│  │  │  │                             #   生成行=数量步进器（CountStepper，1-8 并发）
+│  │  │  │                             #   +生成按钮+停止 X（常驻两态，中止本轮并发
+│  │  │  │                             #   请求，后端断连同步掐断上游））
 │  │  │  ├─ ComfyGenNode.js            # Comfy 生图节点（选工作流动态调参，提交 ComfyUI；
-│  │  │  │                             #   含模板内嵌 lora 的文件/启用管理）
-│  │  │  └─ RunningHubGenNode.js       # RunningHub 云端工作流生成节点（第三条生成链路：
-│  │  │                                #   本地无工作流 JSON，按"登记卡"渲染参数行；
-│  │  │                                #   提交平台→轮询→结果转存回流，与本地 Comfy
-│  │  │                                #   链路同构）
-│  │  ├─ Canvas.js                     # 画布主控制器（生命周期与核心状态）
+│  │  │  │                             #   含模板内嵌 lora 的文件/启用管理；停止 X
+│  │  │  │                             #   与 API 生图节点同款——GenStopControl）
+│  │  │  └─ RunningHubGenNode.js       # RunningHub 云端生成节点（第三条生成链路，工作流/
+│  │  │                                #   应用双模式：节点上输平台 ID 点「拉取」动态
+│  │  │                                #   布局参数行，模板随存档持久化+localStorage
+│  │  │                                #   最近缓存；应用模式多实例档位下拉；提交平台→
+│  │  │                                #   轮询→结果转存回流，与本地 Comfy 链路同构；
+│  │  │                                #   旧登记卡在「已登记」分组兼容旧存档）
+│  │  ├─ Canvas.js                     # 画布主控制器（生命周期与核心状态、
+│  │  │                                #   节点编号计数器 allocNodeSeq/syncNodeSeq
+│  │  │                                #   ——只增不减，存档恢复做下限同步）
 │  │  ├─ CanvasClipboard.js            # 画布剪贴板（拖放/粘贴上传图片与视频、Ctrl+C/X/V）
 │  │  ├─ CanvasConnections.js          # 图片连线管理（端口、贝塞尔连线、命中检测）
 │  │  ├─ NodeTextMirror.js             # 节点文本镜像层（@引用高亮 + 自绘光标，多节点共用）
@@ -125,11 +163,20 @@ lumen-light/
 │  │  ├─ CanvasVideoManager.js         # 画布视频管理器（首帧封面 + 双击就地播放器，
 │  │  │                                #   播放器跟随视口变换，ESC/点击外部关闭；
 │  │  │                                #   本地视频文件导入共享入口 addVideoFile）
+│  │  ├─ CanvasHistory.js              # 画布撤销/重做（Ctrl+Z / Ctrl+Shift+Z、
+│  │  │                                #   Ctrl+Y；命令栈上限 50 步，移动/缩放/
+│  │  │                                #   删除/新增/连线/编组全可回退；位图删除
+│  │  │                                #   后持引用按原下标放回（id 不变连线免
+│  │  │                                #   重映射），节点删除走 toJSON 重建（新旧
+│  │  │                                #   id 经映射表换算，连线重做仍指向正确
+│  │  │                                #   对象，#NNN 编号保留）；视频文件清理
+│  │  │                                #   延迟到命令淘汰，存档切换/新建画布清栈）
 │  │  ├─ CanvasHitTester.js            # 画布命中检测与光标决策（纯几何判定层）
 │  │  ├─ CanvasInteraction.js          # 鼠标及键盘交互（选择、拖拽、缩放、平移、
 │  │  │                                #   连线；编组的标题栏拖动/边缘缩放/删除也
 │  │  │                                #   在此路由，手势派发 canvasGroupDragStart/End；
-│  │  │                                #   组与图片选中互斥在此双向收口）
+│  │  │                                #   组与图片选中互斥在此双向收口；Ctrl+Z/Y
+│  │  │                                #   撤销/重做快捷键与手势提交入栈在此收口）
 │  │  ├─ ImageProxyCache.js             # 图片显示代理缓存（低分辨率档位下缩小查看画
 │  │  │                                #   降采样副本、放大自动切回原图；纯函数决策 +
 │  │  │                                #   空闲分片构建；只影响绘制，原始图片不受影响）
@@ -155,7 +202,8 @@ lumen-light/
 │  │  │  ├─ ProjectSerializer.js       # 存档序列化器（画布状态 <-> project.json；
 │  │  │  │                             #   视频封面 .png 命名、videoUrl 恢复与回写；
 │  │  │  │                             #   编组序列化为顶层 groups 字段（几何 + 标题
-│  │  │  │                             #   + color/titleNS，无引用换算））
+│  │  │  │                             #   + color/titleNS，无引用换算）；节点 seqId
+│  │  │  │                             #   与计数器 nodeSeq 随存档持久化）
 │  │  │  ├─ SaveModal.js               # 存档相关模态框 UI（打开/保存/另存为等）
 │  │  │  ├─ CanvasChangeWatcher.js     # 画布变更捕获器（hook draw + 全局事件，
 │  │  │  │                             #   RealtimeSaveManager 共用）
@@ -181,31 +229,132 @@ lumen-light/
 │  │  │                                #   （/api/assets 数据源，可删可自动恢复）、
 │  │  │                                #   缩略网格、拖拽入画布、双击灯箱预览；
 │  │  │                                #   FSA API+webkitdirectory 降级）
+│  ├─ LoraManager.js                   # LoRA 管理器（顶栏「LoRA」按钮：复用收藏页
+│  │                                   #   全屏弹窗骨架——左文件夹/右封面网格（整卡
+│  │                                   #   3:4、一行 5 个），sidecar 预览图+渐变占位；
+│  │                                   #   筛选排序下拉（LumenDropdown 图标按钮模式：
+│  │                                   #   置顶优先/添加时间 新→旧/旧→新/仅看置顶，
+│  │                                   #   选择存 localStorage，时间用 mtime 近似）；
+│  │                                   #   星标置顶；纸飞机投递到画布 LoRA 节点
+│  │                                   #   （标题带 #NNN 编号）或右侧 Comfy 面板
+│  │                                   #   loraStack（追加语义）；点封面开信息窗——
+│  │                                   #   画布/本地上传封面、触发词/备注编辑、
+│  │                                   #   删除确认（源文件+预览+元数据）、打开
+│  │                                   #   所在文件夹；ComfyUI 目录未配置时自动
+│  │                                   #   检测——运行进程命令行反推并写回配置；
+│  │                                   #   数据源 /api/lora，见 routes/lora.js）
 │  ├─ CountStepper.js                  # 数量步进器行为层（上下箭头/键入/钳制，
 │  │                                   #   画布 Comfy 生图节点与面板运行行共用）
+│  ├─ GenStopControl.js                # 生成任务停止控件（任务级 X 按钮 + 每轮一个
+│  │                                   #   AbortController 内核；面板 ■停止为无头
+│  │                                   #   模式聚合逐个 abort，生图节点 X 挂生成
+│  │                                   #   按钮右侧仅生成中显示；AbortError 判别
+│  │                                   #   静态方法供错误分支分流）
 │  ├─ Controls.js                   # 左下角视图控制（自适应屏幕、缩放指示）
 │  │  ├─ GenerationFeedback.js         # 面板侧生成占位图门面（FIFO 队列语义）
 │  │  ├─ PlaceholderManager.js         # 全局生成占位图管理器（归属/句柄/动画/落图）
-│  │  ├─ ImageToolbar.js               # 图片选中浮动工具栏（含「编辑 → 画笔/扩图/
-│  │  │                                #   遮罩」入口与「添加到资产」（POST
-│  │  │                                #   /api/assets 存 data/assets/），调起对应灯箱）
+│  │  ├─ ImageToolbar.js               # 图片选中浮动工具栏（含「编辑」入口——
+│  │  │                                #   直接打开 ImageStudio 图像编辑器——与
+│  │  │                                #   「添加到资产」（POST /api/assets 存
+│  │  │                                #   data/assets/）、下载、高清放大等按钮）
 │  │  ├─ GroupToolbar.js                # 编组选中工具栏（样式复用 image-toolbar.css，
 │  │  │                                #   显隐经 canvasGroupSelected 事件驱动；
 │  │  │                                #   「标题栏颜色」「布局」下拉（宫格/水平/
 │  │  │                                #   垂直排列成员并重_fit 组矩形）+「解组」
 │  │  │                                #   按钮——删组壳保留成员）
-│  │  ├─ ImageEditor.js                # 画布图片编辑器（画笔灯箱：双层画布涂画、
-│  │  │                                #   橡皮/还原/粗细/8 色块、保存合成写回原图）
-│  │  ├─ ImageOutpaint.js              # 画布图片扩图灯箱（编辑→扩图：四边中点锚点
-│  │  │                                #   拉伸画幅可扩可裁、三分网格、实时尺寸标签、
-│  │  │                                #   保存白色填充扩展区并作为新图落原图旁）
-│  │  ├─ ImageMaskEditor.js            # 画布图片遮罩灯箱（编辑→遮罩：涂抹局部重绘
-│  │  │                                #   遮罩，半透明红显示/画笔橡皮还原/粗细；遮罩
-│  │  │                                #   图层挂图片对象不碰原图，随存档持久化；
-│  │  │                                #   Comfy 提交时烘焙进槽位图 alpha 自动传递）
+│  │  ├─ image-studio/                 # ImageStudio 功能区子模块（主类保留状态/
+│  │  │                                #   打开关闭/绘制/视图变换 + 同名薄代理，
+│  │  │                                #   子模块持有宿主实例读写其状态）
+│  │  │  ├─ StudioDomBuilder.js        # DOM 构建与事件绑定（顶栏/左右工具栏/
+│  │  │  │                             #   舞台/右侧面板/历史面板/弹窗/键盘
+│  │  │  │                             #   快捷键/面板拖宽）
+│  │  │  ├─ StudioLayerPanel.js        # 图层栈 DOM 与图层面板 UI（增删/复制/
+│  │  │  │                             #   拖放排序（指针拖拽 + 蓝色插入条，
+│  │  │  │                             #   松手 FLIP 滑入落位）/眼睛开关/类型
+│  │  │  │                             #   视觉（像素层实时缩略图/文字层 T 徽标/
+│  │  │  │                             #   背景层锁标）/透明度联动/右键菜单）
+│  │  │  ├─ StudioImport.js            # 置入本地/画布图片为图层（隐藏 file
+│  │  │  │                             #   input 多选 + 画布选图多选弹窗）
+│  │  │  ├─ StudioMoveTool.js          # 移动工具（图层选中/拖动/拖角等比缩放
+│  │  │  │                             #   + 磁吸吸附——图层边/中心对齐画幅
+│  │  │  │                             #   边/中心，移动与缩放均生效，吸附
+│  │  │  │                             #   轴画粉色参考线 + 选中框覆盖层绘制）
+│  │  │  ├─ StudioTextTool.js          # 文字工具（点击画布新建文字层就地输入、
+│  │  │  │                             #   点击已有文字层再编辑，Ctrl+Enter/点击
+│  │  │  │                             #   外部提交、Esc 撤销；文字按属性渲染进
+│  │  │  │                             #   图层画布复用全部图层管线，属性随
+│  │  │  │                             #   studioLayers 序列化支持恢复后再编辑；
+│  │  │  │                             #   竖排逐字自绘——CJK 直立、西文段转 90°）
+│  │  │  ├─ StudioShapeTool.js         # 形状工具（属性驱动形状层：矩形/圆角
+│  │  │  │                             #   矩形/椭圆/气泡框（椭圆+尾巴单一路径），
+│  │  │  │                             #   顶栏类型四选一/填充/边框色/边宽/圆角，
+│  │  │  │                             #   填充与边框各配 PS 式红斜杠去除色块
+│  │  │  │                             #   （开关式：去除↔恢复上次值）；拖拽创建
+│  │  │  │                             #   （Shift 约束正方）、点击已有形状改属性；
+│  │  │  │                             #   画布按尾巴方向/描边外伸扩展防裁切；
+│  │  │  │                             #   不做矢量——缩放提交时倍率烘焙回属性
+│  │  │  │                             #   重渲染，永远锐利）
+│  │  │  ├─ StudioBlurTool.js          # 模糊笔刷（平铺语义：一笔之内每个像素
+│  │  │  │                             #   只模糊一次，回描/重叠不叠加；拖动中
+│  │  │  │                             #   把笔迹画进遮罩，实时预览 = 起笔快照
+│  │  │  │                             #   模糊后经遮罩（羽化边缘）合成，σ =
+│  │  │  │                             #   强度/10；渲染限帧 + 起笔快照重建保
+│  │  │  │                             #   证大笔刷下光标流畅、所见即所得）
+│  │  │  ├─ StudioColorPicker.js       # 色板取色器（PS 式内嵌面板：当前/上次色
+│  │  │  │                             #   叠块 + SV 渐变方框 + 垂直色相条 + Hex
+│  │  │  │                             #   输入；拖拽实时 setColor，松手入最近
+│  │  │  │                             #   使用色；HSV/RGB/Hex 纯函数可单测）
+│  │  │  ├─ StudioHistory.js           # 历史记录（PS 历史面板同款：操作完成点
+│  │  │  │                             #   拍图层栈全量快照，上限 20 条；右栏
+│  │  │  │                             #   按钮唤出浮动面板，点击条目回退/前进，
+│  │  │  │                             #   Ctrl+Z / Ctrl+Shift+Z 步进；中间状态
+│  │  │  │                             #   再操作截断未来条目）
+│  │  │  ├─ StudioCropTool.js          # 裁剪/扩图（画幅框四边锚点拖拽 + 三分
+│  │  │  │                             #   网格覆盖层渲染，移植自 ImageOutpaint）
+│  │  │  └─ StudioSave.js              # 保存拍平契约（底片/笔迹/遮罩/图层栈
+│  │  │                                #   序列化/扩图导出）
+│  │  ├─ ImageStudio.js                # 图像编辑器主类（PS 式统一灯箱，编辑→
+│  │  │                                #   画笔/遮罩/移除/扩图多入口合一，进入默认
+│  │  │                                #   移动工具；功能区拆分见 image-studio/）：
+│  │  │                                #   左工具栏（移动/画笔/
+│  │  │                                #   橡皮/模糊笔刷（平铺柔化，顶栏「强度」
+│  │  │                                #   调 σ）/文字（顶栏字体/字号/横竖排选项，
+│  │  │                                #   文字层可再编辑）/形状（顶栏类型/填充/
+│  │  │                                #   描边/圆角选项，形状层可再编辑）/遮罩
+│  │  │                                #   开关/移除工具（自带
+│  │  │                                #   遮罩涂抹，松手自动 AI 抹除——LaMa 本地
+│  │  │                                #   推理，推理期忙碌遮罩拦截全部操作）/还原
+│  │  │                                #   （清空全部遮罩/重置画幅/还原图层像素）/裁剪）
+│  │  │                                #   + Delete 键删除激活图层 + 顶栏「文件」
+│  │  │                                #   菜单（置入本地/画布图片→新图层，画布图经
+│  │  │                                #   中央多选弹窗挑选）+ 粗细 + 右侧色板
+│  │  │                                #   （PS 式内嵌取色器 + 最近使用 MRU +
+│  │  │                                #   预设 8 色）+ 右侧工具栏（历史记录
+│  │  │                                #   按钮，Ctrl+Z/Ctrl+Shift+Z 步进）与
+│  │  │                                #   图层面板（白底背景层垫底锁变换，图片=
+│  │  │                                #   图层0 可移动缩放/拖动排序/删除（背景
+│  │  │                                #   层恒在最底），置入图层=内容尺寸
+│  │  │                                #   内容紧致，其上可涂画可拖拽排序、
+│  │  │                                #   右键新建/复制/删除图层、逐层透明度）；保存按
+│  │  │                                #   契约拍平——背景+图片层按变换合成写回
+│  │  │                                #   图片本体、上层内容拍平 editStrokes、
+│  │  │                                #   遮罩并集 mask（Comfy 烘焙 alpha）、
+│  │  │                                #   画幅变更按变换合成导出新图；图层栈与
+│  │  │                                #   变换随存档持久化（studioLayers），
+│  │  │                                #   旧格式自动迁移
 │  │  ├─ LlmAttachments.js             # AI 对话待发送图片附件管理
 │  │  ├─ LlmChat.js                    # AI 对话核心组件（多轮对话、多模态、生图、
-│  │  │                                #   agent 模式路由、流式气泡、聊天记录持久化）
+│  │  │                                #   agent 模式路由、流式气泡；发送链路与生图
+│  │  │                                #   任务拆至 LlmApiSender，历史持久化拆至
+│  │  │                                #   LlmHistoryController——本类留同名薄代理；
+│  │  │                                #   模型下拉为四分类双栏菜单（Agent/图片/
+│  │  │                                #   视频/其他），对话模型选中即写 piModelKey
+│  │  │                                #   走 agent；输入框 Ctrl+V 粘贴图片直达附件
+│  │  │                                #   槽位，画布复制的图片也可贴进对话）
+│  │  ├─ LlmApiSender.js               # LLM 发送链路控制器（LlmChat 第二刀拆分：
+│  │  │                                #   发送路由分流 pi agent/网页桥接/视频/生图、
+│  │  │                                #   生图全流程与停止内核（GenStopControl
+│  │  │                                #   无头集合）、生成图块构造与重新生成）
 │  │  ├─ ChatHistoryStore.js           # 聊天记录持久化（消息区 DOM 快照存 IndexedDB，
 │  │  │                                #   跨存档统一键、网页桥接按站点分键，F5 后恢复）
 │  │  ├─ LlmHistoryController.js       # 聊天记录持久化编排（LlmChat 拆出：防抖快照/
@@ -217,7 +366,11 @@ lumen-light/
 │  │  ├─ LlmVideoGen.js                # LLM 视频生成控制器（文/图生视频任务提交、
 │  │  │                                #   轮询进度、播放器渲染、视频拖到画布）
 │  │  ├─ LlmPiAgent.js                 # pi 智能体控制器（消息发往 pi RPC 子进程，
-│  │  │                                #   流式分阶段块/执行中指示器/失败重试/卡死上报按钮）
+│  │  │                                #   流式分阶段块——思考/工具默认折叠，工具块
+│  │  │                                #   中文标题映射（bash→终端等，_toolMeta）
+│  │  │                                #   +头部计时/执行中指示器/失败重试/卡死
+│  │  │                                #   上报按钮；停止为乐观立即收尾——清队列+
+│  │  │                                #   中止指令后台发送，不等 pi 应答）
 │  │  ├─ LlmWebBridge.js               # 网页桥接控制器（消息驱动进目标站点网页——
 │  │  │                                #   豆包等，回复流式回流；与 LlmPiAgent 平级）
 │  │  ├─ PiStatusLight.js              # pi 健康状态灯（面板头部四态指示：灰未运行/
@@ -230,8 +383,10 @@ lumen-light/
 │  │  ├─ LlmSkillManager.js            # pi 技能库管理（面板头部按钮+弹窗：查阅/
 │  │  │                                #   勾选启停/上传单 .md 与 Agent Skills 文件夹）
 │  │  ├─ LumenDropdown.js              # 通用自定义下拉组件（触发器/菜单/键盘导航；
-│  │  │                                #   图标按钮/动作型菜单两形态，setLabel 恢复
-│  │  │                                #   触发器文案、reposition 供视口变化时跟随）
+│  │  │                                #   图标按钮/动作型菜单/分类双栏三形态——
+│  │  │                                #   双栏=左栏分类右栏两行条目，跨分类单选；
+│  │  │                                #   setLabel 恢复触发器文案、reposition 供
+│  │  │                                #   视口变化时跟随）
 │  │  ├─ NewCanvasManager.js           # 新建画布管理（含未保存确认框）
 │  │  ├─ PromptAutocomplete.js         # 提示词自动补全 UI（词典在共享单例
 │  │                                #   PromptDictStore；光标就近定位 + IME 兼容）
@@ -244,10 +399,12 @@ lumen-light/
 │  │  ├─ ComfyParamRows.js             # Comfy 动态参数行控制器（画布生图节点与
 │  │  │                                #   右侧面板 Comfy 模式共用同一套渲染；
 │  │  │                                #   loraStack 选项渲染可折叠 LoRA 叠加区）
-│  │  ├─ RunningHubParamRows.js        # RunningHub 参数行控制器（按登记卡渲染
+│  │  ├─ RunningHubParamRows.js        # RunningHub 参数行控制器（按参数模板渲染
 │  │  │                                #   文本/下拉参数行，图片槽位不渲染——
 │  │  │                                #   生成时取节点连线图片；宽高合并尺寸行）
-│  │  ├─ RecipeManager.js              # 提示词收藏页面（瀑布流卡片 + 标签筛选）
+│  │  ├─ RecipeManager.js              # 提示词收藏页面（瀑布流卡片 + 标签筛选；
+│  │                                #   搜索框左侧筛选排序下拉：收藏先后/添加时间
+│  │                                #   新→旧（createdAt）/名称 A→Z，localStorage 记忆）
 │  │  ├─ WorkflowEditor.js             # 工作流编辑器（顶栏 Comfy 按钮：左列表 +
 │  │  │                                #   右节点图；API JSON 自动布局、Comfy 风
 │  │  │                                #   节点内嵌全参数控件、拖拽布局 sidecar、
@@ -278,8 +435,12 @@ lumen-light/
 │  │  ├─ ComfyParamScanner.js          # Comfy 工作流参数扫描/覆盖表编译（画布
 │  │  │                                #   生图节点与面板参数区共用的纯数据层）
 │  │  ├─ RhWorkflowImporter.js         # RunningHub 工作流 JSON 导入解析器（API 格式
-│  │  │                                #   JSON → 登记卡参数映射；图片槽位/提示词
+│  │  │                                #   JSON → 参数行定义；图片槽位/提示词
 │  │  │                                #   role/标量白名单三类识别，纯函数可测试）
+│  │  ├─ RhAppImporter.js              # RunningHub 应用参数模板解析器（apiCallDemo
+│  │  │                                #   返回 → 参数行定义；fieldType 分流——
+│  │  │                                #   IMAGE 槽位/LIST 选项/STRING 角色/BOOLEAN
+│  │  │                                #   开关，description 作中文标签，纯函数可测试）
 │  │  ├─ PromptMerge.js               # 提示词段合并（节点链/面板双正面框共用，
 │  │  │                                #   拼接处自动补逗号区分中英文）
 │  │  ├─ llmQuality.js                 # 生图模型 quality 参数档位判断
@@ -308,13 +469,21 @@ lumen-light/
 │                                      #   DDG 主源+Bing 备源、web_fetch 读网页正文、
 │                                      #   web_image_search 搜图 Bing→百度→DDG
 │                                      #   三源回退+source 强制参数，无 key 零依赖）；
-│                                      #   lumen-canvas.ts 画布工具扩展（12 个画布
-│                                      #   工具+provider 注册+权限分级拦截）
+│                                      #   lumen-canvas.ts 画布工具扩展（14 个画布
+│                                      #   工具+provider 注册+权限分级拦截；
+│                                      #   生图/视频为异步任务句柄式——提交即返回
+│                                      #   任务 id，canvas_poll_task 查询，完成自动
+│                                      #   落画布，不挂住 agent 回合）；
+│                                      #   lumen-comfy.ts Comfy 原生工具扩展（18 个
+│                                      #   comfy_mcp_* 工具，comfy-mcp MCP 服务器
+│                                      #   退役后的原生替代：命名与上游一一对应，
+│                                      #   经后端 /api/comfy-tools 直连 ComfyUI
+│                                      #   HTTP API / Manager / 模板画廊，零 venv）
 │
 ├─ mcp/                                # 本地 MCP 服务器运行时（与 pi/ 同策略：随发行
-│                                      #   包分发、不入 git）；comfy-mcp/ 为 ComfyUI
-│                                      #   认领用的 comfy-mcp 服务器虚拟环境
-│                                      #   （.venv/Scripts/comfy.exe 等）
+│                                      #   包分发、不入 git）；comfy-mcp/ 为已退役
+│                                      #   的 comfy-mcp 服务器虚拟环境——工具已原
+│                                      #   生化为 lumen-comfy 扩展，整个目录可删
 │
 ├─ lumen_nodes/                        # ComfyUI 自定义 Python 节点
 │  ├─ LumenReceiveImageFromCanvas.py   # 从画布槽位接收图片（用于 Edit/局部重绘工作流；
@@ -325,12 +494,14 @@ lumen-light/
 │  └─ __init__.py                      # Python 包及节点注册入口
 │
 ├─ models/                             # 本地 AI 模型（download-model.js 下载）
-│  └─ rembg/
-│     └─ RMBG-2.0-fp16.onnx            # RMBG 2.0 FP16 抠图模型
+│  ├─ rembg/
+│  │  └─ RMBG-2.0-fp16.onnx            # RMBG 2.0 FP16 抠图模型
+│  └─ lama/
+│     └─ lama_fp32.onnx                # LaMa inpainting 模型（Carve ONNX 导出
+│                                      #   版，opset 17；物体移除本地推理用）
 │
 ├─ routes/                             # Node.js 后端路由
-│  ├─ autosave.js                      # 实时保存接口（内容寻址资产上传、恢复元数据
-│  │                                   #   原子写入/读取/清空、孤儿资产回收）
+│  ├─ autosave.js                      # 实时保存接口（内容寻址资产上传、恢复元数据│  │                                   #   原子写入/读取/清空、孤儿资产回收）
 │  ├─ assets.js                        # 用户资产接口（图片工具栏「添加到资产」：
 │  │                                   #   内容寻址保存去重 + 展示名 sidecar +
 │  │                                   #   列表/文件读取，路径穿越防护）
@@ -344,10 +515,22 @@ lumen-light/
 │  │                                   #   采样器枚举代理、工作流编辑器用通用
 │  │                                   #   /object-info 参数类型代理；注入参数/提示
 │  │                                   #   词/种子/参考图槽位/画布 LoRA 堆栈后提交工作流；
-│  │                                   #   提交前应用编辑器的忽略节点（bypass）状态）
-│  ├─ runninghub.js                    # RunningHub 云端工作流路由（登记卡列表、
-│  │                                   #   提交生成→平台轮询→结果下载转存后经 WS
-│  │                                   #   回流画布、拉取云端工作流 JSON 供登记）
+│  │                                   #   提交前应用编辑器的忽略节点（bypass）状态；
+│  │                                   #   POST /stop 按本轮 promptId 中断/删队列，
+│  │                                   #   支撑停止 X 真正取消 ComfyUI 任务）
+│  ├─ comfyTools.js                    # Comfy 原生工具路由（comfy-mcp MCP 服务器退役
+│  │                                   #   后的精选工具原生实现，供 pi 扩展
+│  │                                   #   lumen-comfy 调用：状态/队列/输出取回/
+│  │                                   #   工作流执行与槽位/模板画廊/模型检索下载/
+│  │                                   #   文件上传/Manager 节点安装/依赖分析/日志；
+│  │                                   #   utils/comfyWorkflowFormat 为格式转换与
+│  │                                   #   槽位扫描的纯函数层）
+│  ├─ runninghub.js                    # RunningHub 云端路由（节点直连：/run 按
+│  │                                   #   kind+resourceId+params 提交工作流/应用、
+│  │                                   #   /fetch-app 拉应用参数模板；旧登记卡按
+│  │                                   #   workflowId 兼容提交；提交生成→平台轮询→
+│  │                                   #   结果下载转存后经 WS 回流画布；编辑器覆盖
+│  │                                   #   直连模式从快照 sidecar 反查——运行时参数行优先）
 │  ├─ mcp.js                           # MCP 宿主路由（用户自挂 MCP 服务器：登记/
 │  │                                   #   连接/状态/工具清单/调用代理/resources/
 │  │                                   #   prompts/refresh，供设置界面与 pi 桥接）
@@ -356,9 +539,23 @@ lumen-light/
 │  │                                   #   回复流与产物经 WS 推送）
 │  ├─ llm.js                           # 大语言模型代理接口（避免浏览器跨域；模型路由
 │  │                                   #   支持显式指定厂商，未指定时按模型 ID 自动回退；
+│  │                                   #   生图请求监听客户端断连并同步中止上游；
 │  │                                   #   含本地视频上传接口）
-│  ├─ piAgent.js                       # pi RPC 子进程管理入口（prompt/中止/状态/
-│  │                                   #   权限分级/provider 配置/会话重置/人工重启）
+│  ├─ lama.js                          # 本地物体移除接口（LaMa inpainting ONNX 推理：
+│  │                                   #   遮罩 bbox 裁剪 + 等比镜像 pad + refiner
+│  │                                   #   二次细化，羽化软边贴回原图；懒加载常驻 +
+│  │                                   #   推理串行队列；编辑器「移除」模式调用）
+│  ├─ lora.js                          # LoRA 管理接口（递归扫描 <comfy.root>/models/
+│  │                                   #   loras 清单（相对路径=Comfy lora_name 同源）、
+│  │                                   #   sidecar 封面预览与上传、置顶/触发词/备注
+│  │                                   #   元数据（data/lora-meta.json）、删除（源文件
+│  │                                   #   +预览+元数据）、打开所在文件夹；comfy.root
+│  │                                   #   未配置/失效时 /detect 自动检测——查运行中的
+│  │                                   #   python 进程命令行反推根目录并写回配置）
+│  ├─ piAgent.js                       # pi RPC 子进程管理入口（prompt/中止（清队列+
+│  │                                   #   掐 bash+中止，明细返回）/状态/权限分级/
+│  │                                   #   provider 配置/会话重置/人工重启/
+│  │                                   #   停止信号时间戳查询）
 │  ├─ prompts.js                       # 系统提示词库增删改查（data/prompts.json）
 │  ├─ rembg.js                         # AI 抠图接口（onnxruntime-node 本地推理）
 │  ├─ saves.js                         # 存档接口（save/ 目录；三段式协议+视频归档）
@@ -374,7 +571,10 @@ lumen-light/
 │  └─ workflows.js                     # 工作流读写接口（列表/详情；PUT 写回编辑器
 │                                      #   修改——严格保持包装/纯 API 格式不变；
 │                                      #   GET/PUT /:id/layout 节点布局 sidecar，
-│                                      #   含忽略节点（bypass）清单）
+│                                      #   含忽略节点（bypass）清单；
+│                                      #   POST /import-runninghub 存 RH 平台快照，
+│                                      #   快照写回时自动 diff 字段覆盖（同步登记卡
+│                                      #   +镜像进快照条目供节点直连提交反查）
 │
 ├─ save/                               # 画布存档数据（后端自动生成）
 │  └─ 存档名/                          # 每个存档一个文件夹（图片 + project.json）
@@ -413,6 +613,14 @@ lumen-light/
 │  │  ├─ videos.test.js                # 视频工作区清理测试（删除 API/保存 GC）
 │  │  ├─ workflows.test.js             # 工作流路由测试（编辑器写回格式保持/
 │  │  │                                #   路径穿越拦截/布局 sidecar 读写）
+│  │  ├─ comfyTools.test.js            # Comfy 原生工具路由测试（状态/队列取消不误杀/
+│  │  │                                #   UI 格式自动转换提交/槽位清单/模型检索/
+│  │  │                                #   未配根目录报错/日志）
+│  │  ├─ rhSnapshot.test.js            # RH 快照与编辑器覆盖测试（字段级 diff/
+│  │  │                                #   提交合并纯函数 + 覆盖双落点读写 + 导入
+│  │  │                                #   upsert/写回联动/重新拉取清除/格式拦截）
+│  │  ├─ rhAppImporter.test.js         # 应用参数模板解析测试（fieldType 分流/
+│  │  │                                #   role 识别/fieldData 双形态/去重/报错）
 │  │  └─ receiveVideo.test.js          # ComfyUI 视频回传接收测试
 │  └─ utils/
 │     ├─ llmModelRules.test.js         # LLM 模型规则测试（识别/比例指令）
@@ -424,6 +632,8 @@ lumen-light/
 │     ├─ nodeTypes.test.js             # 节点类型注册表谓词测试
 │     ├─ promptDictStore.test.js       # 提示词词典共享单例搜索排序测试
 │     ├─ comfyParamScanner.test.js     # Comfy 参数扫描/覆盖表编译测试
+│     ├─ comfyWorkflowFormat.test.js   # 工作流格式工具测试（UI→API 转换：控件对位/
+│     │                                #   seed 控制词/Reroute 穿透；槽位扫描/写入）
 │     ├─ promptMerge.test.js           # 提示词段合并/拼接逗号规则测试
 │     ├─ workflowInjector.test.js      # 工作流注入辅助函数测试
 │     ├─ workflowBypass.test.js        # 工作流 bypass（忽略节点）图改写测试：类型
@@ -437,7 +647,11 @@ lumen-light/
 │     │                                #   工具矩阵/结构性保护/guard.json 规则表/日志）
 │     ├─ lumenSkills.smoke.mjs         # lumen-skills 技能库扩展冒烟测试（列表/加载/
 │     │                                #   文件夹形态/面板禁用联动/非法文件忽略）
-│     └─ lumenMcp.smoke.mjs            # lumen-mcp 桥接扩展冒烟测试（注册/代理/去重）
+│     ├─ lumenMcp.smoke.mjs            # lumen-mcp 桥接扩展冒烟测试（注册/代理/去重）
+│     ├─ lumenComfy.smoke.mjs          # lumen-comfy 扩展冒烟测试（18 工具注册/契约
+│     │                                #   包装/端点路由/错误透传/三级权限拦截）
+│     ├─ lumenCanvas.smoke.mjs         # lumen-canvas 扩展冒烟测试（工具上报过滤/
+│     │                                #   禁用清单应用/回合开始重应用）
 │     └─ lumenWeb.smoke.mjs            # lumen-web 联网扩展冒烟测试（搜索/搜图三源
 │                                      #   回退/HTML 正文提取/二进制拒读/内网拦截/
 │                                      #   分段续读；mock fetch 不依赖真实网络，
@@ -459,14 +673,26 @@ lumen-light/
 ├─ utils/                              # Node.js 后端通用模块
 │  ├─ modelAdapters/                   # 模型协议适配器（按模型家族分派，路由层
 │  │                                   #   只做调度；接新家族=加适配器文件并注册）
-│  │  ├─ index.js                      # 适配器注册表与统一接口约定
+│  │  ├─ index.js                      # 适配器注册表与统一接口约定（run 请求可
+│  │  │                                #   携带 AbortSignal，适配器须透传以支持
+│  │  │                                #   「停止生图」中止上游）
 │  │  ├─ editsImageAdapter.js          # OpenAI 系图生图（/images/edits，multipart）
 │  │  ├─ chatImageAdapter.js           # Gemini 图像系对话式编辑（chat/completions）
 │  │  └─ generationsImageAdapter.js    # 标准 /images/generations（兜底适配器）
 │  ├─ comfySubmit.js                   # ComfyUI /prompt 提交工具（双路由共用）
-│  ├─ runninghub.js                    # RunningHub OpenAPI 客户端（提交任务/轮询
-│  │                                   #   状态/上传素材/结果下载转存/拉取工作流
-│  │                                   #   JSON；兼容新旧两种响应包装）
+│  ├─ comfyWorkflowFormat.js           # 工作流格式纯函数层（UI/API 识别与互转——
+│  │                                   #   控件对位消费 widgets_values、seed 控制
+│  │                                   #   词跳过、Reroute 链穿透；可调槽位扫描与
+│  │                                   #   按地址写入；子图显式不支持）
+│  ├─ runninghub.js                    # RunningHub OpenAPI 客户端（提交工作流/应用
+│  │                                   #   任务/轮询状态/上传素材/结果下载转存/拉取
+│  │                                   #   工作流 JSON 与应用参数模板；兼容新旧两种
+│  │                                   #   响应包装）
+│  ├─ rhSnapshot.js                    # RH 快照与编辑器覆盖（字段级 diff：编辑器
+│  │                                   #   保存快照 → 相对拉取原版算覆盖清单写入
+│  │                                   #   editorOverrides（登记卡+快照条目双落点）；
+│  │                                   #   提交时并入 nodeInfoList——结构变化无法
+│  │                                   #   上云只报告）
 │  ├─ mcpManager.js                    # MCP 客户端管理器（stdio spawn / Streamable
 │  │                                   #   HTTP + SSE 回退；连接生命周期/工具发现/
 │  │                                   #   调用代理/资源与提示词/权限分级门禁）
@@ -490,9 +716,13 @@ lumen-light/
 │  │                                   #   供 LLM 聊天附件；重型解析库按需惰性加载）
 │  ├─ llmModelRules.js                 # LLM 模型识别与参数映射规则（比例指令等）
 │  ├─ llmProviders.js                  # LLM 提供商 HTTP 请求封装（多级响应解析：
-│  │                                   #   标准JSON/BOM/gzip解压/SSE事件流聚合）
+│  │                                   #   标准JSON/BOM/gzip解压/SSE事件流聚合；
+│  │                                   #   请求可携带 AbortSignal，客户端取消时
+│  │                                   #   中止上游请求）
 │  ├─ piAgentManager.js                # pi RPC 进程管理器（spawn/存档↔会话映射、
-│  │                                   #   模型接线、权限分级）
+│  │                                   #   模型接线、权限分级；停止=并行 clear_queue+
+│  │                                   #   abort_bash 再写入 abort（不等应答），并记
+│  │                                   #   lastAbortAt 供扩展后台任务自取消）
 │  ├─ piExtensionSync.js               # pi 扩展差量同步（pi-extensions/*.ts →
 │  │                                   #   ~/.pi/agent/extensions/，拉起 pi 前调用：
 │  │                                   #   一致跳过/缺失或过期覆盖，发行包解压即用）
@@ -518,6 +748,8 @@ lumen-light/
 │  ├─ qwen edit 2509-api-2图.json      # Qwen 双图编辑工作流
 │  ├─ qwen edit 2509-api.json          # Qwen 单图编辑工作流
 │  ├─ wan2.1_fun_camera_v1.1_1.3B-测试api.json  # wan2.1 Fun Camera 视频工作流（测试用）
+│  ├─ RH-mmh3首帧-api.json             # RunningHub 平台快照工作流（用户添加）
+│  ├─ SeedVR2放大工作流-api.json       # SeedVR2 视频放大工作流（用户添加）
 │  └─ MiniMax H3 FL2VA开源版-首帧参考生视频_api.json  # MiniMax H3 视频工作流（用户添加）
 │
 ├─ .gitignore                          # Git 忽略规则
@@ -561,12 +793,20 @@ npm test          # 运行 Jest 单元测试
   直链经后端代理取图，base64 不进 agent 上下文，与 web_image_search 配合
   实现「搜图并落画布」）/ 批量清空 / 存档 / 跑 ComfyUI 工作流（支持
   refImages 参考图写入画板槽位，供 From Canvas (Edit Image) 节点读取）/
-  API 模型生图 / 资产检索 / 搭建节点工作流（一次性创建提示词/LoRA/生图等节点并连线，自动布局）等
+  API 模型生图 / AI 视频生成（两者均为异步任务句柄：提交即返回任务 id，
+  canvas_poll_task 查询进度，完成后产物自动落画布，不挂住回合）/
+  资产检索 / 搭建节点工作流（一次性创建提示词/LoRA/生图等节点并连线，自动布局）等
   （经 `/api/canvas-bridge` 桥接，写命令路由活跃客户端）；
 - 技能库：`data/pi/skills/`（lumen-skills 扩展提供 skill_list / skill_load，
   按需加载流程 SOP——如画布出图流程；pi 也可自行沉淀新技能，目录在写门禁
-  白名单内）。LLM 面板头部技能库按钮可查阅/勾选启停/上传（单 .md 或
+  白名单内）。LLM 面板头部「工具与技能」弹窗可查阅/勾选启停/上传（单 .md 或
   Agent Skills 文件夹），禁用即时生效——skill_list 不列出、skill_load 拒绝；
+- 工具启停：面板「工具与技能」弹窗的「工具」tab 可对扩展注册的全部工具
+  （画布/Comfy/联网/技能四族共 37 个）逐个勾选启停。禁用清单存
+  data/pi/settings.json 的 disabledTools，lumen-canvas 扩展在 pi 启动与
+  每回合开始经 setActiveTools 把禁用工具从模型可见清单移除（连同 schema
+  不占上下文），改动下一轮消息生效、无需重启；MCP 工具在 设置 → MCP
+  管理，权限分级独立生效与勾选叠加；
 - 联网工具：lumen-web 扩展提供 web_search（DuckDuckGo 主源 + Bing 备源，无 API key）、
   web_fetch（读网页正文，二进制拒读、内网地址拒访）与 web_image_search
   （Bing → 百度 → DDG 三源回退 + source 强制指定，返回原图直链配合落画布），
@@ -619,6 +859,6 @@ LLM 面板模型下拉里的「网页桥接」入口：后端用 puppeteer-core 
 - 首次使用：设置 → 网页桥接 → 启动桥接，在弹出的浏览器里登录站点一次即可；
 - 可扩展：站点差异封装在 `utils/webbridge/adapters/`（一站一文件，
   base.js 为契约），新增 Gemini/ChatGPT 等站点 = 加一个适配器文件并登记；
-- 聊天记录按「存档 + 桥接站点」分键（IndexedDB），与 LLM 模式互不串；
+- 聊天记录按「桥接站点」分键（IndexedDB），跨存档统一、与 LLM 模式互不串；
 - 站点适配器基于 DOM 候选选择器 + 文本稳定判定，站点改版时只需校准
   对应适配器文件里的候选清单。

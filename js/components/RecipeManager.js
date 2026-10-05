@@ -11,6 +11,9 @@
  *   3. 双击卡片名字 -> 原地行内重命名（回车提交 / Esc 取消 / 失焦提交）
  *   4. 点击右上角 × -> 直接删除该收藏（无确认框，同步清理磁盘文件）
  *   5. 点击 Copy   -> 仅复制正向提示词，按钮短暂变绿反馈
+ *   6. 搜索栏左侧筛选排序下拉（LumenDropdown 图标按钮模式）：收藏先后
+ *      （默认）/ 添加时间 新→旧（按收藏记录的 createdAt）/ 名称 A→Z，
+ *      选择存 localStorage（key lumen.recipeSortMode）
  *
  * 数据来源：GET /api/tags            读取收藏列表
  *           GET /api/tags/models     读取模型标签清单
@@ -34,6 +37,10 @@ class RecipeManager {
         this.models = [];          // 模型标签清单（[{ id, name, createdAt }]）
         this.selectedModel = '';   // 当前筛选的模型名（空字符串 = 全部）
         this.searchKeyword = '';   // 当前搜索词（按名字模糊检索，与标签筛选叠加）
+        // 排序策略（搜索框左侧漏斗下拉，localStorage 记忆上次选择）：
+        // default=收藏先后（tags.json 原顺序）/ time-desc=添加时间 新→旧 /
+        // name=名称 A→Z（收藏先后与旧→新等价，不设重复档）
+        this.sortMode = localStorage.getItem('lumen.recipeSortMode') || 'default';
         this.isCreatingModel = false; // 新建标签请求进行中标记（防重复提交/误收起输入框）
         this.init();
     }
@@ -105,10 +112,14 @@ class RecipeManager {
                     <div class="recipe-cards-area">
                         <div class="recipe-toolbar">
                             <h3 class="recipe-current-model" aria-live="polite">全部</h3>
-                            <!-- 搜索栏：按图片名字模糊检索，与左侧标签筛选叠加生效 -->
-                            <div class="recipe-search-box">
-                                <svg class="recipe-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                                <input class="recipe-search-input" type="text" placeholder="搜索图片名字…" aria-label="按名字搜索收藏">
+                            <!-- 右侧控件组：筛选排序下拉 + 搜索栏（搜索按图片名字
+                                 模糊检索，与左侧标签筛选叠加生效） -->
+                            <div class="recipe-toolbar-right">
+                                <button class="recipe-sort-btn" type="button" aria-label="排序"></button>
+                                <div class="recipe-search-box">
+                                    <svg class="recipe-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    <input class="recipe-search-input" type="text" placeholder="搜索图片名字…" aria-label="按名字搜索收藏">
+                                </div>
                             </div>
                         </div>
                         <div class="recipe-grid" aria-label="提示词图片列表"></div>
@@ -134,6 +145,26 @@ class RecipeManager {
             this.searchKeyword = searchInput.value.trim();
             this.render();
         });
+
+        // 筛选排序下拉（LumenDropdown 图标按钮模式——提示词节点技能栏同款
+        // 预制件：漏斗图标触发器，当前策略在菜单里打对勾，悬停可见全文；
+        // 收藏页无置顶概念，选项比 LoRA 管理器少置顶两档）
+        this.sortDropdown = new LumenDropdown(this.dialog.querySelector('.recipe-sort-btn'), {
+            iconButton: true,
+            triggerIcon: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+            onChange: v => {
+                this.sortMode = v;
+                localStorage.setItem('lumen.recipeSortMode', v);
+                this.render();
+            }
+        });
+        this.sortDropdown.setOptions([
+            { value: 'default', label: '收藏先后（默认）' },
+            { value: 'time-desc', label: '添加时间 新→旧' },
+            { value: 'name', label: '名称 A→Z' }
+        ], this.sortMode);
+        // localStorage 里存了已废弃的值时归位到第一项（与下拉显示一致）
+        this.sortMode = this.sortDropdown.value;
 
         document.body.appendChild(this.dialog);
     }
@@ -419,6 +450,14 @@ class RecipeManager {
             visibleTags = visibleTags.filter(tag =>
                 (tag.name || '').toLowerCase().includes(keyword)
             );
+        }
+        // 排序（漏斗下拉选择）：default=收藏先后（tags.json 原顺序，
+        // 即旧→新）；time-desc=按收藏记录的 createdAt 新→旧；name=名称
+        visibleTags = [...visibleTags];
+        if (this.sortMode === 'time-desc') {
+            visibleTags.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        } else if (this.sortMode === 'name') {
+            visibleTags.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         }
         grid.replaceChildren();
         empty.style.display = visibleTags.length ? 'none' : 'flex';

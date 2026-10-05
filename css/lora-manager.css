@@ -1,0 +1,618 @@
+/* ==========================================================================
+   LoRA 管理窗口样式（css/lora-manager.css）
+   骨架复用提示词收藏页（recipe-manager.css / recipe-models-sidebar.css）：
+   recipe-dialog 全屏遮罩 + 面板 + 头部 + 内容分栏 + 左侧栏条目——
+   尺寸观感与「提示词」窗口完全一致。本文件只写 LoRA 特有部分：
+   左栏计数角标、封面网格（3:4、一行 5 个）、置顶星星、空态。
+   配色遵循项目深色主题色板（同 recipe-manager.css 头注）。
+   ========================================================================== */
+
+/* 顶栏按钮展开态（与 .recipe-trigger-btn[aria-expanded="true"] 同款） */
+.top-toolbar-btn[aria-expanded="true"] {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+/* 头部标题旁的数量灰字 */
+.lora-count {
+    margin-left: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* 头部自动检测结果提示（首次检测成功后显示） */
+.lora-detect-note {
+    margin-left: 6px;
+    font-size: 11px;
+    color: #22c55e;
+}
+
+/* 左栏条目右侧的小计数（条目主体复用 recipe-models-item/label） */
+.lora-folder-count {
+    flex-shrink: 0;
+    margin-right: 10px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* 文件夹名过长时省略号截断：recipe-models-label 是 flex 容器，
+   text-overflow 对其不生效（收藏页标签名短从未暴露），这里改回
+   block + 行高居中让 ellipsis 生效，避免与右侧计数贴在一起 */
+.lora-folder-list .recipe-models-label {
+    display: block;
+    line-height: 44px;
+}
+
+/* ===== 封面网格（区别于收藏页瀑布流：固定一行 5 个、3:4 封面）===== */
+
+.lora-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);   /* 一行 5 个（初始规格） */
+    gap: 14px;
+}
+.lora-card {
+    min-width: 0;
+    aspect-ratio: 3 / 4;           /* 整卡 3:4（封面 + 名称条都在卡内） */
+    display: flex;
+    flex-direction: column;
+    cursor: default;
+}
+.lora-cover {
+    position: relative;
+    flex: 1;                       /* 撑满名称条以外的卡内空间 */
+    min-height: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+}
+.lora-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+/* 无封面占位：纯渐变底（不放文字，名称在封面下方） */
+.lora-cover.no-preview .lora-placeholder {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(145deg, #31344a 0%, #23253a 60%, #1d1e2e 100%);
+}
+
+/* 置顶星星（封面右上角）：常驻显示；置顶后金色实心 */
+.lora-star {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.45);
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: color 0.15s;
+    padding: 0;
+}
+.lora-star.on {
+    color: #fbbf24;                /* 置顶 = 金色实心星 */
+}
+.lora-star:hover {
+    color: #fde68a;
+}
+
+/* 纸飞机按钮（星星左侧，同款底座） */
+.lora-send {
+    position: absolute;
+    top: 4px;
+    right: 32px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.45);
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: color 0.15s;
+    padding: 0;
+}
+.lora-send:hover {
+    color: #93c5fd;                /* 悬停淡蓝，与"发送"语义呼应 */
+}
+
+/* 投递弹窗：小浮层，覆盖在 LoRA 窗口（z-index 1200）之上 */
+.lora-send-popup {
+    position: fixed;
+    z-index: 1250;
+    min-width: 200px;
+    max-width: 340px;
+    max-height: 50vh;
+    overflow-y: auto;
+    display: none;
+    padding: 6px;
+    border-radius: 10px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.lora-send-head {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lora-send-target {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lora-send-target:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+.lora-send-hint {
+    padding: 6px 8px 4px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* ===== 信息窗（点封面弹出，居中） ===== */
+.lora-info-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1300;                 /* 高于 LoRA 窗口（1200）与投递弹窗（1250） */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 15, 18, 0.7);
+}
+.lora-info-panel {
+    width: 690px;
+    height: 775px;                 /* 固定高度（用户指定） */
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+    max-width: calc(100vw - 48px);
+    border-radius: 12px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+.lora-info-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+.lora-info-title {
+    flex: 0 1 auto;                /* 不撑满：垃圾桶紧跟名字右侧；超长省略 */
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #e5e7eb;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lora-info-delete {
+    flex-shrink: 0;
+    margin-left: 6px;              /* 紧跟名字右侧，与 X 隔开整段空白防误点 */
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+}
+.lora-info-delete:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #ef4444;
+}
+.lora-info-close {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+}
+.lora-info-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e5e7eb;
+}
+.lora-info-body {
+    flex: 0 0 auto;                /* 不再吃空间：多余高度分给下面两个框 */
+    min-height: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    padding: 20px 20px 16px;
+}
+.lora-info-cover {
+    flex-shrink: 0;
+    width: 260px;                  /* 3:4 竖版预览（210→260：更高等更大） */
+    aspect-ratio: 3 / 4;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+}
+.lora-info-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.lora-info-placeholder {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(145deg, #31344a 0%, #23253a 60%, #1d1e2e 100%);
+}
+.lora-info-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-top: 4px;
+}
+.lora-info-row {
+    display: flex;
+    gap: 14px;
+    min-width: 0;
+}
+.lora-info-key {
+    flex-shrink: 0;
+    width: 64px;
+    font-size: 14px;               /* 字号加大一轮 */
+    color: rgba(255, 255, 255, 0.5);
+}
+.lora-info-val {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.9);
+    word-break: break-all;
+}
+.lora-info-fullpath {
+    font-size: 11px;               /* 完整路径长，缩小一号 */
+    color: rgba(255, 255, 255, 0.55);
+}
+.lora-info-status {
+    min-height: 18px;
+    padding: 0 20px;
+    font-size: 12px;
+    color: #22c55e;
+}
+.lora-info-status.error {
+    color: #ef4444;
+}
+
+/* ===== 触发词/备注块（信息窗底部）：面板内"凹陷"输入语义区，
+        按《配色美学》色板回落 #0f0f12（与输入框/下拉同层） ===== */
+.lora-trigger-block {
+    flex: 1;                       /* 平分弹窗多余高度，随高度自动拉伸 */
+    min-height: 88px;
+    display: flex;
+    flex-direction: column;        /* 文本/编辑框随块撑满 */
+    margin: 0 20px 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    background: var(--canvas-bg, #0f0f12);
+}
+.lora-trigger-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.lora-trigger-head span {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);   /* 色板：说明/提示文字 */
+}
+.lora-trigger-edit,
+.lora-note-edit {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    padding: 0;
+}
+.lora-trigger-edit:hover,
+.lora-note-edit:hover {
+    background: rgba(255, 255, 255, 0.1);   /* 色板：悬停叠加半透明白 */
+    color: #fff;
+}
+.lora-trigger-text,
+.lora-note-text {
+    flex: 1;                       /* 文本区撑满块内剩余高度 */
+    display: flex;                 /* 编辑态：让内部 textarea 的 flex:1 生效 */
+    flex-direction: column;
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.85);
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+.lora-trigger-text.empty,
+.lora-note-text.empty {
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.3);    /* 色板：占位文字 */
+}
+.lora-trigger-input {
+    flex: 1;                       /* 编辑框随块撑满 */
+    min-height: 44px;
+    margin-top: 4px;
+    padding: 6px 8px;
+    border: 1px solid rgba(59, 130, 246, 0.6);   /* 色板：聚焦/选中边框 */
+    border-radius: 6px;
+    background: transparent;             /* 块本身已是凹陷层，不再叠底 */
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.5;
+    box-sizing: border-box;
+    resize: none;
+    outline: none;
+}
+.lora-info-actions {
+    display: flex;
+    gap: 12px;
+    padding: 0 20px 20px;
+}
+.lora-info-btn {
+    flex: 1;
+    height: 34px;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.lora-info-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* ===== 画布选图浮层（信息窗之上的二级弹层） ===== */
+.lora-canvas-picker {
+    position: fixed;
+    inset: 0;
+    z-index: 1310;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 15, 18, 0.7);
+}
+.lora-picker-panel {
+    width: 560px;
+    max-width: calc(100vw - 48px);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+.lora-picker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #e5e7eb;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+    flex-shrink: 0;
+}
+.lora-picker-close {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 16px;
+    cursor: pointer;
+}
+.lora-picker-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e5e7eb;
+}
+.lora-picker-grid {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    /* 多列瀑布流（同收藏页 recipe-grid）：列宽定列数，图片按原始比例完整显示 */
+    columns: 4 160px;
+    column-gap: 12px;
+}
+.lora-picker-item {
+    display: block;
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 0;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    transition: border-color 0.15s;
+    break-inside: avoid;           /* 禁止卡片跨列拆分 */
+    line-height: 0;
+}
+.lora-picker-item:hover {
+    border-color: rgba(59, 130, 246, 0.8);
+}
+.lora-picker-item img {
+    width: 100%;                   /* 高度自适应原始比例，不裁切 */
+    display: block;
+}
+.lora-picker-empty {
+    grid-column: 1 / -1;
+    padding: 40px 0;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+}
+
+/* ===== 删除确认弹窗（信息窗之上，z 1320） ===== */
+.lora-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1320;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 15, 18, 0.7);
+}
+.lora-confirm-panel {
+    width: 400px;
+    max-width: calc(100vw - 48px);
+    padding: 18px;
+    border-radius: 12px;
+    background: #1b1c21;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.lora-confirm-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ef4444;
+    margin-bottom: 10px;
+}
+.lora-confirm-text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.8);
+    word-break: break-all;
+}
+.lora-confirm-status {
+    min-height: 18px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #ef4444;
+    word-break: break-all;
+}
+.lora-confirm-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+.lora-confirm-actions button {
+    flex: 1;
+    height: 34px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+}
+.lora-confirm-cancel {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+}
+.lora-confirm-cancel:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+.lora-confirm-ok {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #fff;
+    font-weight: 600;
+}
+.lora-confirm-ok:hover {
+    background: #dc2626;
+}
+.lora-confirm-ok:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* 名称（卡内封面下方一条，占位固定高度） */
+.lora-name {
+    flex-shrink: 0;
+    height: 26px;
+    line-height: 26px;
+    margin-top: 4px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 加载与空态（卡片区内提示） */
+.lora-loading {
+    padding: 60px 0;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+}
+.lora-empty {
+    padding: 60px 0;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+}
+.hidden {
+    display: none !important;
+}
+
+/* ===== 工具行右侧：筛选排序下拉 + 搜索框 ===== */
+
+/* 收藏页 .recipe-toolbar 是 space-between 两段式（标题 | 搜索框），
+   LoRA 版在搜索框左边插了排序下拉，用右侧容器把两个控件捆成一组，
+   标题仍独占左侧 */
+.lora-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+/* 排序下拉触发器：底高从 32px 提到 40px，与右侧搜索框同高对齐；
+   其余观感（面板底色/边框/悬停/展开蓝）由 lumen-dropdown.css 的
+   .lumen-dd-icon-btn 提供 */
+.lora-toolbar-right .lumen-dd-icon-btn {
+    height: 40px;
+    border-radius: 10px;    /* 与搜索框同圆角，成组更整体 */
+}

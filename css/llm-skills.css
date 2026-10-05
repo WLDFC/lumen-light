@@ -22,7 +22,8 @@
 .llm-sk-dialog {
     width: 620px;
     max-width: 92vw;
-    max-height: 80vh;
+    height: 800px;          /* 固定高度：技能/工具两个 tab 内容量不同， */
+    max-height: 80vh;       /* 高度跟随内容切换时会跳；列表区自身滚动 */
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -240,4 +241,62 @@
     flex: 1;
     font-size: 11px;
     color: rgba(255, 255, 255, 0.4);
+}
+
+/* ---------- 工具与技能 tab 切换 ---------- */
+.llm-sk-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    padding-bottom: 8px;
+}
+
+.llm-sk-tab {
+    padding: 5px 16px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.llm-sk-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.llm-sk-tab.active {
+    background: rgba(59, 130, 246, 0.18);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* ---------- 工具清单（「工具」tab） ---------- */
+
+/* 工具族分组标题 */
+.llm-sk-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.llm-sk-group-title {
+    padding: 4px 2px 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* 工具行不可点击展开，光标回归默认（勾选框自身可点） */
+.llm-sk-item.tool {
+    cursor: default;
+}
+
+/* 工具名走等宽字体：与 agent 会话里工具调用标识一致 */
+.llm-sk-item.tool .tool-name {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
 }

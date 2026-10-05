@@ -126,13 +126,21 @@ class RunningHubParamRows {
             }
 
             if (p.type === 'list' && Array.isArray(p.options) && p.options.length > 0) {
-                const options = p.options.map((opt) =>
-                    `<option value="${LumenLight.escapeHtml(String(opt))}">${LumenLight.escapeHtml(String(opt))}</option>`
+                // 默认选中模板 def（应用参数空提交会给强类型字段报错）；
+                // def 不在选项里时按大小写不敏感再试一次，仍无则首项兜底
+                let sel = p.def;
+                if (sel !== undefined && !p.options.includes(sel)) {
+                    const hit = p.options.find((o) =>
+                        o.toLowerCase() === String(sel).toLowerCase());
+                    sel = hit;   // 找不到保持 undefined，浏览器停在首项
+                }
+                const optionTags = p.options.map((opt) =>
+                    `<option value="${LumenLight.escapeHtml(String(opt))}"${opt === sel ? ' selected' : ''}>${LumenLight.escapeHtml(String(opt))}</option>`
                 ).join('');
                 rows.push(`
                     <div class="comfy-param-row">
                         <div class="comfy-param-label">${label}</div>
-                        <select class="llm-count-select rh-param-input" data-key="${LumenLight.escapeHtml(key)}">${options}</select>
+                        <select class="llm-count-select rh-param-input" data-key="${LumenLight.escapeHtml(key)}">${optionTags}</select>
                     </div>
                 `);
                 continue;
@@ -156,11 +164,13 @@ class RunningHubParamRows {
             }
             if (p === heightParam) continue;   // 已并入尺寸行
 
-            // string（默认）：文本输入框
+            // string（默认）：文本输入框，value 预填模板默认值（values 快照
+            // 有存值时在下方统一覆盖回填）
             rows.push(`
                 <div class="comfy-param-row">
                     <div class="comfy-param-label">${label}</div>
                     <input type="text" class="comfy-num-input rh-param-input" data-key="${LumenLight.escapeHtml(key)}"
+                           value="${LumenLight.escapeHtml(String(p.def ?? ''))}"
                            title="${label}${p.role === 'prompt' ? '（空时自动使用连线提示词）' : ''}">
                 </div>
             `);

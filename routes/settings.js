@@ -79,6 +79,11 @@ function createSettingsRouter({ dataDir }) {
                 apiKey: '',
                 endpoint: '',
                 workflows: []
+            },
+            // ComfyUI 本机根目录（含 main.py 的安装目录）：comfy 原生工具
+            // （lumen-comfy 扩展）下载模型落盘的定位依据
+            comfy: {
+                root: ''
             }
         };
     }
@@ -125,6 +130,10 @@ function createSettingsRouter({ dataDir }) {
         }
         if (!Array.isArray(settings.runninghub.workflows)) {
             settings.runninghub.workflows = [];
+        }
+        // 为存量配置补 ComfyUI 根目录区块（comfy 原生工具的落盘定位）
+        if (!settings.comfy || typeof settings.comfy !== 'object') {
+            settings.comfy = getDefaultSettings().comfy;
         }
         return settings;
     }

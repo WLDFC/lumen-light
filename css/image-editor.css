@@ -18,6 +18,36 @@
     flex-direction: column;
 }
 
+/* ==================== 忙碌遮罩（模型推理期） ==================== */
+/* 盖住整个编辑器：拦截一切指针操作。由 ImageStudio._setBusy()
+   在推理开始/结束时挂载/移除 */
+.ie-busy-shield {
+    position: absolute;
+    inset: 0;
+    z-index: 60;              /* 编辑器内最上层（confirm 10 / zoom 顶栏之上） */
+    cursor: default;
+    background: rgba(0, 0, 0, 0.35);   /* 轻压暗画面，突出中央 spinner */
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 自定义转圈：应用强调蓝圆环旋转——不用系统 wait 光标，
+   那会让用户误以为程序卡死；明确的"正在处理"动画 + 下方文字提示 */
+.ie-busy-spinner {
+    width: 44px;
+    height: 44px;
+    border: 4px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #3b82f6;                /* 强调蓝（配色美学规范） */
+    border-radius: 50%;
+    animation: ie-busy-spin 0.9s linear infinite;
+}
+
+@keyframes ie-busy-spin {
+    to { transform: rotate(360deg); }
+}
+
 /* ==================== 顶栏 ==================== */
 .image-editor-topbar {
     display: flex;
@@ -36,7 +66,7 @@
     gap: 6px;
 }
 
-/* 工具按钮（画笔/橡皮/还原）：方形图标钮 */
+/* 工具按钮（移动/画笔/橡皮/遮罩/还原/裁剪）：方形图标钮（无边框） */
 .ie-tool-btn {
     width: 34px;
     height: 34px;
@@ -44,12 +74,12 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    border: 1px solid rgba(128, 128, 128, 0.25);
+    border: none;
     border-radius: 6px;
     background: transparent;
     color: rgba(255, 255, 255, 0.85);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
 .ie-tool-btn svg {
@@ -65,7 +95,6 @@
 /* 激活工具：强调蓝（配色规范：选中态用主蓝） */
 .ie-tool-btn.active {
     background: #3b82f6;
-    border-color: #3b82f6;
     color: #ffffff;
 }
 
@@ -141,7 +170,7 @@
     background: #2563eb;
 }
 
-/* 关闭：图标钮 */
+/* 关闭：图标钮（红色底显眼，与「保存」蓝钮并排形成主次对比） */
 .ie-close-btn {
     width: 30px;
     height: 30px;
@@ -151,9 +180,10 @@
     padding: 0;
     border: none;
     border-radius: 6px;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.7);
+    background: #ef4444;
+    color: #ffffff;
     cursor: pointer;
+    transition: background 0.15s ease;
 }
 
 .ie-close-btn svg {
@@ -162,7 +192,7 @@
 }
 
 .ie-close-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: #dc2626;
     color: #ffffff;
 }
 
@@ -208,11 +238,12 @@
     cursor: grabbing;
 }
 
-/* ==================== 左下角缩放指示（适应屏幕 + 百分比） ====================
-   与主画布左下角"适应屏幕 / NN%"同款布局与观感 */
+/* ==================== 左下角缩放指示（百分比，点击恢复 100%） ====================
+   注意与主画布左下角"适应屏幕 / NN%"（Controls.js）无关，类名 ie- 前缀
+   仅灯箱编辑器使用。left 需清开左侧工具栏（.is-toolbar 宽 52px） */
 .ie-zoomctrl {
     position: absolute;
-    left: 16px;
+    left: 64px;
     bottom: 16px;
     display: flex;
     flex-direction: column;
@@ -245,33 +276,47 @@
     color: #ffffff;
 }
 
+/* 纯数字样式：无胶囊背景/边框（点击恢复 100% 的可点性以悬停变色提示） */
 .ie-zoom-pill {
-    min-width: 58px;
-    padding: 6px 12px;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 14px;
-    background: var(--icon-bg, #1b1c21);
+    padding: 0;
+    border: none;
+    background: none;
     color: rgba(255, 255, 255, 0.85);
     font-size: 12px;
     cursor: pointer;
-    text-align: center;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: color 0.15s ease;
 }
 
 .ie-zoom-pill:hover {
-    background: rgba(255, 255, 255, 0.1);
     color: #ffffff;
 }
 
-/* ==================== 笔刷光标（跟随圆圈） ==================== */
+/* ==================== 笔刷光标（跟随圆圈） ====================
+   白圈 + 内外黑晕双描边：舞台空白区是纯黑背景，单色圈（尤其 fx 原本的
+   黑圈）在黑底上不可见；黑白互补在任何底色上都可辨。中心点用于低缩放
+   下圈径只剩几 px 时的定位（34% 缩放 × 粗细 14 ≈ 5px） */
 .ie-cursor {
     position: fixed;
     transform: translate(-50%, -50%);
     border: 1px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(0, 0, 0, 0.9);
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.15);
     pointer-events: none;
     z-index: 5;
+}
+
+.ie-cursor::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 3px;
+    height: 3px;
+    margin: -1.5px 0 0 -1.5px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9);
 }
 
 /* ==================== 丢弃确认框 ==================== */

@@ -4,6 +4,9 @@ node_modules/
 # 第三方工具及其模型文件（体积大，不会修改）
 Real-ESRGAN/
 
+# 本地 AI 模型权重（LaMa inpainting 等，198MB 级，不入 git）
+/models/
+
 # 用户存档数据（应用运行时会不断变化，不属于代码）
 # 注意必须锚定根目录（/save/），否则会误伤源码目录 js/components/save/
 /save/
@@ -19,6 +22,10 @@ data/assets/
 
 # 工作流编辑器节点布局 sidecar（运行时状态，按 workflow id 分键）
 data/workflow-layouts.json
+
+# 持久化设置（含各厂商 API Key 与网页桥接配置，仅本地保存，不入版本库；
+# 注意基线历史中仍有旧版本，将来若添加远程仓库请先轮换各厂商 Key）
+data/settings.json
 
 # 视频生成缓存（临时下载的视频文件，不属于代码）
 data/videos/

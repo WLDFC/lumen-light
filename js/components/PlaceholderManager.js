@@ -196,6 +196,8 @@ class PlaceholderManager {
                     created: Date.now()
                 };
                 this.canvas.images.images.push(imageObj);
+                // 撤销记账：生成落图可回退（undo=摘下真实图，再撤恢复占位图）
+                this.canvas.history?.recordCreate([imageObj], '生成落图');
                 this.canvas.draw();
                 resolve(imageObj);
             };

@@ -273,3 +273,60 @@ describe('POST /api/comfy-node/run', () => {
         expect(res.body.message).toContain('Checkpoint not found');
     });
 });
+
+describe('POST /api/comfy-node/stop', () => {
+    test('本轮任务正在执行：中断 + 按 id 删队列', async () => {
+        const calls = [];
+        global.fetch = jest.fn(async (url, options) => {
+            calls.push({ url, body: options && options.body });
+            if (url.endsWith('/queue') && (!options || !options.body)) {
+                // GET /queue：queue_running 条目 [执行序号, prompt_id, ...]
+                return { ok: true, json: async () => ({ queue_running: [[7, 'p-run'], [8, 'other']], queue_pending: [] }) };
+            }
+            return { ok: true, json: async () => ({}) };
+        });
+
+        const res = await request(createApp())
+            .post('/api/comfy-node/stop')
+            .send({ promptIds: ['p-run', 'p-queued'] });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({ status: 'ok', interrupted: true, deleted: 2 });
+        // 第二次调用应为 POST /queue 删队列（携带 delete 清单）
+        const deleteCall = calls.find((c) => c.body && c.body.includes('delete'));
+        expect(deleteCall).toBeTruthy();
+        const parsed = JSON.parse(deleteCall.body);
+        expect(parsed.delete).toEqual(['p-run', 'p-queued']);
+    });
+
+    test('正在执行的不是本轮任务：不触发中断，只删队列', async () => {
+        global.fetch = jest.fn(async (url, options) => {
+            if (url.endsWith('/queue') && (!options || !options.body)) {
+                return { ok: true, json: async () => ({ queue_running: [[7, 'another-run']], queue_pending: [] }) };
+            }
+            return { ok: true, json: async () => ({}) };
+        });
+
+        const res = await request(createApp())
+            .post('/api/comfy-node/stop')
+            .send({ promptIds: ['p-queued'] });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.interrupted).toBe(false);
+        expect(res.body.deleted).toBe(1);
+        // 全部调用里不应出现 /interrupt
+        expect(global.fetch.mock.calls.some((c) => String(c[0]).includes('/interrupt'))).toBe(false);
+    });
+
+    test('promptIds 为空或缺失：直接返回 ok，不触碰 ComfyUI', async () => {
+        global.fetch = jest.fn();
+
+        const res = await request(createApp())
+            .post('/api/comfy-node/stop')
+            .send({});
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.status).toBe('ok');
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+});

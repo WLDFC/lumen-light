@@ -348,6 +348,9 @@ class LumenSocket {
      *   - drop_image  ：落一张图（params: {dataUrl?|url?, name?, x?, y?}——
      *                    dataUrl 为 base64 数据，url 为公网图片直链（经后端
      *                    同源代理取图，base64 不进 agent 上下文）；缺省落视口中心）
+     *   - drop_video  ：落一个视频（params: {videoPath, name?, x?, y?}——
+     *                    videoPath 为 data/videos/ 工作区相对路径，pi 视频任务
+     *                    完成后由后端下载落盘，此处直接引用不二次上传）
      *   - get_prompts ：读取正面/负面提示词
      * @param {string} command - 命令名
      * @param {Object} params - 命令参数
@@ -480,7 +483,8 @@ class LumenSocket {
             const targets = c.images.images.filter(img =>
                 !NodeTypes.isPanelNode(img.source) &&
                 !NodeTypes.isPlaceholder(img.source));
-            for (const t of targets) c.images.delete(t.id);
+            // 撤销记账：agent 批量清除可回退（误清救回）
+            c.history?.deleteObjects(targets, [], { label: '清空画布' });
             c.draw();
             return { deleted: targets.length };
         }
@@ -492,7 +496,7 @@ class LumenSocket {
                 !NodeTypes.isPlaceholder(img.source) &&
                 (img.name || '') === params.name);
             if (targets.length === 0) throw new Error(`未找到名为「${params.name}」的画布对象`);
-            for (const t of targets) c.images.delete(t.id);
+            c.history?.deleteObjects(targets, [], { label: '删除对象' });
             c.draw();
             return { deleted: targets.length };
         }
@@ -547,6 +551,27 @@ class LumenSocket {
                 source: 'bridge',
                 name: params.name || `bridge_${Date.now()}.png`
             });
+            c.draw();
+            return { id: obj.id, name: obj.name };
+        }
+
+        if (command === 'drop_video') {
+            // 落视频到画布：videoPath 为后端视频工作区的相对路径
+            // （如 data/videos/video_xxx.mp4——pi 视频任务完成后已由后端
+            // 下载落盘，这里直接引用，不再二次上传）。只接受工作区路径，
+            // 防止借命令探测任意文件
+            const videoPath = String(params.videoPath || '');
+            if (!/^data\/videos\/[\w.\-\u4e00-\u9fff]+$/.test(videoPath)) {
+                throw new Error(`非法的 videoPath：${videoPath}（须为 data/videos/ 下的文件）`);
+            }
+            if (!c.videoManager) throw new Error('视频管理器未初始化');
+            const opts = {};
+            if (params.name) opts.name = params.name;
+            if (params.x !== undefined && params.y !== undefined) {
+                opts.x = params.x;
+                opts.y = params.y;
+            }
+            const obj = await c.videoManager.addVideo('/' + videoPath, opts);
             c.draw();
             return { id: obj.id, name: obj.name };
         }

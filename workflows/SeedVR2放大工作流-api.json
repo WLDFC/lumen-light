@@ -1,0 +1,93 @@
+{
+  "1": {
+    "class_type": "SeedVR2LoadVAEModel",
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": true,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": true,
+      "decode_tile_size": 1024,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "cpu",
+      "cache_model": false
+    },
+    "_meta": {
+      "title": "SeedVR2LoadVAEModel"
+    }
+  },
+  "9": {
+    "inputs": {
+      "slot": "1",
+      "wait_for_image": true,
+      "force_reload": true,
+      "seed": 0
+    },
+    "class_type": "LumenReceiveImageFromCanvas",
+    "_meta": {
+      "title": "From Canvas (Edit Image)"
+    }
+  },
+  "15": {
+    "class_type": "SeedVR2LoadDiTModel",
+    "inputs": {
+      "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+      "device": "cuda:0",
+      "blocks_to_swap": 32,
+      "swap_io_components": false,
+      "offload_device": "cpu",
+      "cache_model": false,
+      "attention_mode": "sdpa"
+    },
+    "_meta": {
+      "title": "SeedVR2LoadDiTModel"
+    }
+  },
+  "16": {
+    "inputs": {
+      "images": [
+        "28",
+        0
+      ],
+      "auto_send": true
+    },
+    "class_type": "LumenSendImageRealtime",
+    "_meta": {
+      "title": "To Canvas (Image)"
+    }
+  },
+  "28": {
+    "class_type": "SeedVR2VideoUpscaler",
+    "inputs": {
+      "image": [
+        "9",
+        0
+      ],
+      "dit": [
+        "15",
+        0
+      ],
+      "vae": [
+        "1",
+        0
+      ],
+      "seed": 2398609016,
+      "resolution": 1800,
+      "max_resolution": 3200,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "color_correction": "lab",
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "cpu",
+      "enable_debug": false
+    },
+    "_meta": {
+      "title": "SeedVR2视频放大器"
+    }
+  }
+}

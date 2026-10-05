@@ -626,6 +626,26 @@
     gap: 4px;                 /* 相邻控件之间的间距 */
 }
 
+/* 模型选择触发器（LumenDropdown 文本模式）：图标 + 当前模型名 + 展开箭头。
+   宽度用变量收口——调按钮宽度只改 --llm-model-btn-width 一处；
+   长模型名超出按省略号截断（悬停 title 看全文，由组件写入） */
+.llm-chat-toolbar .llm-model-select.lumen-dd-trigger {
+    width: var(--llm-model-btn-width, 150px);
+    min-width: 110px;
+    max-width: 260px;
+    height: 32px;
+    padding: 0 8px;
+    flex: 0 0 auto;
+    background: #1b1c21;                            /* 与质量按钮同面板色 */
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    font-size: 12px;
+}
+
+.llm-chat-toolbar .llm-model-select.lumen-dd-trigger:hover {
+    border-color: rgba(128, 128, 128, 0.4);
+}
+
 /* 工具栏小方块按钮（上传图片），内含 16px SVG 线条图标 */
 .llm-tool-btn {
     width: 32px;
@@ -1137,7 +1157,7 @@
     display: block;
 }
 
-/* 工具块默认张开（JS 建块时加 .open），仍可点击头部折叠；
+/* 工具块默认折叠（与其他块一致），点击头部展开；
    正文为空（既无参数也无结果）时不占空白 */
 .pi-block-tool .pi-block-body:empty {
     display: none;

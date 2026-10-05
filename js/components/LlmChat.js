@@ -58,12 +58,12 @@ class LlmChat {
         this.webBridge = new LlmWebBridge(this);
         // 比例 + 分辨率档位双段选择面板（已从本类拆分出去）
         this.sizePicker = new LlmSizePicker('llmSizeSelect');
-        // 模型 / 质量自定义下拉（图标按钮模式：纯图标触发器，点击弹出
-        // 菜单选择，当前选中在菜单里以青色对勾标记，展开时按钮变强调蓝；
-        // 交互与技能栏下拉一致。尺寸比例双段选择器维持原实现）
+        // 模型 / 质量自定义下拉。模型下拉为分类双栏菜单（Agent·对话 /
+        // 图片生成 / 视频生成 / 其他四分类，见 loadModels），触发器为
+        // 文本模式：图标 + 当前模型名（宽度可经 --llm-model-btn-width 调节）
         this.modelDropdown = new LumenDropdown(this.modelSelect, {
-            iconButton: true,
-            triggerIcon: LLM_DD_ICONS.box,
+            menuClass: 'llm-model-menu',
+            placeholder: '选择模型',
             onChange: () => this._onModelChanged()
         });
         this.qualityDropdown = new LumenDropdown(this.qualitySelect, {
@@ -82,11 +82,15 @@ class LlmChat {
         this.history = [];
         // 是否正在等待模型回复
         this.isSending = false;
-        // 在飞生图任务的 AbortController 集合（停止按钮的作用域：
-        // 生图不走 isSending 串行锁，任务彼此独立可并发，点停止全部中止）
-        this._imageGenTasks = new Set();
+        // 发送链路控制器（已从本类拆分出去）：发送路由、生图任务与
+        // 停止内核（GenStopControl 集合）、生成图片块构造归它，本类留
+        // 同名薄代理——_imageGenTasks 随之迁移，外部仍经本类同名方法访问
+        this._sender = new LlmApiSender(this);
         // 当前厂商的模型配置列表（含 type 标记），用于区分聊天/绘图模型
         this.modelsConfig = [];
+        // 下拉值 → 分类 key（agent/image/video/other，loadModels 填充），
+        // 选中 Agent 分类模型时据此写 piModelKey
+        this._modelCatMap = new Map();
 
         // ===== 聊天记录持久化（F5 后恢复） =====
         // 存取编排拆至 LlmHistoryController（同名方法，下方留同名薄代理，
@@ -118,6 +122,34 @@ class LlmChat {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.send();
+            }
+        });
+
+        // 输入框粘贴图片 → 直接进待发送附件槽位：截图后聚焦输入框 Ctrl+V
+        // 即可快速发给 AI，无需经上传按钮选文件。剪贴板无图片时不拦截，
+        // 文字照常粘贴；stopPropagation 避免画布粘贴处理器重复处理
+        this.inputEl?.addEventListener('paste', (e) => {
+            const items = Array.from(e.clipboardData?.items || []);
+            const imageFiles = items
+                .filter((item) => item.type.startsWith('image/'))
+                .map((item) => item.getAsFile())
+                .filter(Boolean);
+            if (imageFiles.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                imageFiles.forEach((file) => this.attachments.addFromFile(file));
+                return;
+            }
+
+            // 画布 Ctrl+C 复制对象后到输入框粘贴：系统剪贴板里只有占位文本，
+            // 真实内容在画布内部剪贴板——提取其中的图片对象入附件槽位；
+            // 内部剪贴板没有图片（纯节点/视频）时仅拦下占位文本，不粘进输入框
+            const text = e.clipboardData?.getData('text/plain') || '';
+            if (text && text === CanvasClipboard.PLACEHOLDER_TEXT) {
+                e.preventDefault();
+                e.stopPropagation();
+                const urls = window.canvas?.clipboard?.extractImageDataUrls() || [];
+                urls.forEach((url) => this.attachments.addImageUrl(url));
             }
         });
 
@@ -245,17 +277,6 @@ class LlmChat {
      * @returns {boolean}
      */
     /**
-     * 是否为 pi 智能体入口（厂商名 'pi'）
-     */
-    isAgentModel(modelId) {
-        try {
-            return LumenLight.parseModelKey(modelId).provider === 'pi';
-        } catch {
-            return false;
-        }
-    }
-
-    /**
      * 是否为网页桥接入口（厂商名 'web'）
      */
     isWebBridgeModel(modelId) {
@@ -323,10 +344,12 @@ class LlmChat {
     // ==================== 模型列表 ====================
 
     /**
-     * 从设置中加载模型列表并填充下拉框。
-     * 聚合所有已配置厂商的模型（多厂商并存）：后端按模型 ID 自动路由
-     * 到对应厂商，这里只负责把可选模型列全。配置了多个厂商时，
-     * 选项文案带厂商名便于区分。
+     * 从设置中加载模型列表并按用途分类填充下拉框（双栏四分类）：
+     *   Agent（对话模型，选中即以该模型运行 pi agent）/ 图片生成 / 视频生成 /
+     *   其他（网页桥接入口）。类型口径与发送分发一致：type 手动标记优先，
+     *   auto 按名称关键词识别（video → image → 其余归对话）。
+     * 聚合所有已配置厂商的模型（多厂商并存）：value 为"厂商||模型ID"复合键，
+     * 副标签显示厂商名便于区分。
      */
     async loadModels() {
         try {
@@ -335,58 +358,93 @@ class LlmChat {
             const api = result.settings?.api || {};
             const { models, providerCount } = LumenLight.collectConfiguredModels(api);
 
-            // 缓存模型配置（含 type 标记），供 isImageModel 区分聊天/绘图模型
+            // 缓存模型配置（含 type 标记），供 isImageModel/isVideoModel 区分类型
             this.modelsConfig = models;
 
             const previousValue = this.modelDropdown?.value;
             const showProvider = providerCount > 1;
 
+            // 未配置任何 API 模型：网页桥接不依赖 API 配置，仍保底可用
             if (models.length === 0) {
-                // 未配置任何 API 模型：网页桥接不依赖 API 配置，仍保底可用
-                this.modelDropdown.setOptions(
-                    [{ value: 'web||webbridge', label: '网页桥接', icon: LLM_DD_ICONS.box }],
-                    'web||webbridge');
                 this.modelsConfig = [];
+                this._modelCatMap = new Map([['web||webbridge', 'other']]);
+                this.modelDropdown.setCategories([{
+                    key: 'other', label: '其他',
+                    items: [this._webBridgeItem()]
+                }], 'web||webbridge');
                 this.updateToolbarForModel();
                 return;
             }
 
-            // pi 编码智能体（画布代理）：置顶入口；底层模型在 设置→通用 选择
-            models.unshift({
-                key: 'pi||pi-agent',
-                provider: 'pi',
-                id: 'pi-agent',
-                displayName: 'agent模式',
-                type: 'agent'
-            });
+            // 按发送分发同款口径归类：video → image → 其余全部归对话（agent）。
+            // 手动标记优先、auto 关键词识别的细节都在两个 is*Model 里
+            const chatItems = [], imageItems = [], videoItems = [];
+            this._modelCatMap = new Map();
+            for (const m of models) {
+                const item = {
+                    value: m.key,
+                    label: showProvider ? `${m.displayName || m.id} · ${m.provider}` : (m.displayName || m.id),
+                    sublabel: m.provider,
+                    icon: LLM_DD_ICONS.box
+                };
+                if (this.isVideoModel(m.key)) {
+                    videoItems.push(item);
+                    this._modelCatMap.set(m.key, 'video');
+                } else if (this.isImageModel(m.key)) {
+                    imageItems.push(item);
+                    this._modelCatMap.set(m.key, 'image');
+                } else {
+                    chatItems.push(item);
+                    this._modelCatMap.set(m.key, 'agent');
+                }
+            }
 
-            // 网页桥接（豆包等站点网页直连）：消息经后端专用浏览器驱动进
-            // 网页，回复与产物自动回流画布；桥接站点在 设置 → 网页桥接 选择
-            models.push({
-                key: 'web||webbridge',
-                provider: 'web',
-                id: 'webbridge',
-                displayName: '网页桥接',
-                type: 'web'
-            });
+            const webItem = this._webBridgeItem();
+            this._modelCatMap.set(webItem.value, 'other');
+            const categories = [
+                {
+                    key: 'agent', label: 'Agent',
+                    items: chatItems,
+                    emptyText: '暂无对话模型（设置 → API 添加，类型标记 chat 或 auto）'
+                },
+                {
+                    key: 'image', label: '图片生成',
+                    items: imageItems,
+                    emptyText: '暂无生图模型（设置 → API 添加，类型标记 image）'
+                },
+                {
+                    key: 'video', label: '视频生成',
+                    items: videoItems,
+                    emptyText: '暂无视频模型（设置 → API 添加，类型标记 video）'
+                },
+                { key: 'other', label: '其他', items: [webItem] }
+            ];
 
-            // 尽量保持之前的选择；无有效选择时取第一项（与原生 select 行为一致）。
-            // 下拉框 value 为"厂商||模型ID"复合键，不同厂商的同名模型可共存
-            const current = previousValue && models.some((m) => m.key === previousValue)
-                ? previousValue
-                : models[0].key;
-            this.modelDropdown.setOptions(models.map((model) => {
-                const label = showProvider
-                    ? `${model.displayName || model.id} · ${model.provider}`
-                    : (model.displayName || model.id);
-                return { value: model.key, label, icon: LLM_DD_ICONS.box };
-            }), current);
+            // 选中值优先级：会话内上次选择 > pi 底层模型（piModelKey，Agent
+            // 分类的对话模型）> 第一个对话模型 > 第一项
+            const allKeys = new Set(this._modelCatMap.keys());
+            const piKey = localStorage.getItem('piModelKey') || '';
+            const current =
+                (previousValue && allKeys.has(previousValue)) ? previousValue :
+                (piKey && allKeys.has(piKey)) ? piKey :
+                (chatItems[0] && chatItems[0].value) || webItem.value;
+            this.modelDropdown.setCategories(categories, current);
 
             // 根据当前模型刷新工具栏（尺寸/质量显隐、发送按钮文案）
             this.updateToolbarForModel();
         } catch (error) {
             console.error('加载模型列表失败:', error);
         }
+    }
+
+    /** 网页桥接入口条目（"其他"分类，点选即网页桥接模式） */
+    _webBridgeItem() {
+        return {
+            value: 'web||webbridge',
+            label: '网页桥接',
+            sublabel: '站点在 设置 → 网页桥接 配置',
+            icon: LLM_DD_ICONS.box
+        };
     }
 
     // ==================== 消息渲染 ====================
@@ -571,365 +629,50 @@ class LlmChat {
         return { wrap, textEl };
     }
 
-    // ==================== 发送消息 ====================
+    // ==================== 发送消息（编排已拆至 LlmApiSender） ====================
+    // 发送路由、图像生成全流程、生图停止内核（GenStopControl 集合）与
+    // "重新生成"的实现见 js/components/LlmApiSender.js（第二刀拆分）；
+    // 本类只留同名薄代理，调用点零改动（stopBtn 回调、LlmHistoryController
+    // 恢复重绑等仍经本类同名方法访问）。
 
-    /**
-     * 发送当前输入内容到模型
-     * 根据选中的模型自动判断是聊天对话还是图像生成。
-     */
-    async send() {
-        // pi 流式中：发送按钮即"停止"
-        if (this.piAgent?.isStreaming()) {
-            this.piAgent.abort();
-            return;
-        }
-        // 网页桥接捕获回复中：发送按钮即"停止"（中止捕获并尽力停掉网页侧生成）
-        if (this.webBridge?.isStreaming()) {
-            this.webBridge.abort();
-            return;
-        }
-        // 聊天/视频仍走 isSending 串行锁；生图任务彼此独立（API 并发），
-        // 选中绘图模型时不拦，允许不等上一张完成就发下一张
-        if (this.isSending && !this.isImageModel(this.modelDropdown?.value)) return;
-
-        const text = this.inputEl.value.trim();
-        if (!text && !this.attachments.hasAttachments()) return;
-        // 文档仍在解析中时拦住，避免未解析完的附件被静默漏发
-        if (this.attachments.isParsing()) {
-            alert('文件正在解析中，请稍候再发送');
-            return;
-        }
-
-        const model = this.modelDropdown?.value;
-        if (!model) {
-            alert('请先选择模型（模型在设置 → API 中配置）');
-            return;
-        }
-
-        if (this.isAgentModel(model)) {
-            // pi 编码智能体路径：文档文本直接拼进提示词（不走 /chat 后端拼接）
-            await this.piAgent.send(this.buildAgentText(text), this.attachments.getAll());
-        } else if (this.isWebBridgeModel(model)) {
-            // 网页桥接路径：消息由后端专用浏览器驱动进站点网页，
-            // 流式回复与产物经 webbridgeEvent / WS 回流，不走 /api/llm
-            await this.webBridge.send(text, this.attachments.getAll());
-        } else if (this.isVideoModel(model)) {
-            await this.videoGen.generate(text, model, this.attachments.getAll());
-        } else if (this.isImageModel(model)) {
-            await this.sendImageGeneration(text, model);
-        } else {
-            await this.sendChat(text, model);
-        }
+    /** 发送路由：按选中模型分流到 pi agent / 网页桥接 / 视频 / 图像生成 */
+    send(...args) {
+        return this._sender.send(...args);
     }
 
-    /**
-     * 为 pi 智能体拼接提示词：将已解析的文档文本附在用户正文之后
-     * （生图/视频模型不读文档，故仅智能体路径做此拼接）
-     * @param {string} text - 用户输入文本
-     * @returns {string} 拼接文档后的文本
-     */
-    buildAgentText(text) {
-        const files = this.attachments.getFiles();
-        if (!files.length) return text;
-        const block = files
-            .map((f) => `【附件 ${f.name}${f.truncated ? '（内容过长已截断）' : ''}】\n${f.text}`)
-            .join('\n\n');
-        return text ? `${text}\n\n${block}` : block;
+    /** 为 pi 智能体拼接提示词（已解析文档附在用户正文后） */
+    buildAgentText(...args) {
+        return this._sender.buildAgentText(...args);
     }
 
-    /**
-     * 发送聊天请求
-     * @param {string} text - 用户输入文本
-     * @param {string} model - 选中的模型 ID
-     */
-    async sendChat(text, model) {
-        // 记录本次发送的内容，清空输入区
-        const images = this.attachments.getAll();
-        const files = this.attachments.getFiles();
-        this.inputEl.value = '';
-        this.attachments.clear();
-
-        // 渲染用户消息并加入历史（纯附件时气泡显示占位符，但重新编辑要拿到原始文本）
-        this.appendMessage('user', text || (images.length ? '（图片）' : '（文件）'), images, { rawPrompt: text, files });
-        this.history.push({ role: 'user', content: text });
-
-        // 渲染“思考中”占位气泡
-        const thinkingEl = this.appendMessage('assistant', '正在思考…');
-        thinkingEl.parentElement.classList.add('thinking');
-
-        // 锁定发送状态
-        this.isSending = true;
-        if (this.sendBtn) {
-            this.sendBtn.disabled = true;
-            this.sendBtn.textContent = '回复中…';
-        }
-
-        try {
-            // 聊天模型：注入启用的系统提示词（system 角色，每轮请求都携带）
-            const systemPrompt = window.llmSystemPrompt?.getActiveContent('chat');
-            const messages = systemPrompt
-                ? [{ role: 'system', content: systemPrompt }, ...this.history]
-                : this.history;
-
-            // 下拉 value 为"厂商||模型ID"复合键：拆开后显式指定厂商，
-            // 后端直接路由（同名模型在多个中转站共存时可区分）
-            const selection = LumenLight.parseModelKey(model);
-            const response = await fetch('/api/llm/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: selection.id, provider: selection.provider, messages, images, files })
-            });
-
-            const result = await response.json();
-
-            thinkingEl.parentElement.classList.remove('thinking');
-
-            if (response.ok && result.status === 'ok') {
-                thinkingEl.textContent = result.reply || '（模型未返回内容）';
-                this.history.push({ role: 'assistant', content: result.reply || '' });
-            } else {
-                // 失败时显示错误，不把错误内容加入历史
-                thinkingEl.textContent = '❌ ' + (result.message || '请求失败');
-                thinkingEl.parentElement.classList.add('error');
-            }
-        } catch (error) {
-            thinkingEl.parentElement.classList.remove('thinking');
-            thinkingEl.textContent = '❌ 连接失败：' + error.message;
-            thinkingEl.parentElement.classList.add('error');
-            console.error('聊天请求失败:', error);
-        } finally {
-            this.isSending = false;
-            if (this.sendBtn) {
-                this.sendBtn.disabled = false;
-                // 根据当前模型恢复按钮文案（聊天=发送，绘图=生成图片）
-                this.updateToolbarForModel();
-            }
-            this.followBottom();   // 仅在跟随态贴底：用户上滑阅读时不拽回
-        }
+    /** 图像生成全流程：分辨率降级、风格拼接、I2I、请求与落图块（opts 供重新生成） */
+    async sendImageGeneration(...args) {
+        return this._sender.sendImageGeneration(...args);
     }
 
-    /**
-     * 发送图像生成请求
-     * 待发送图片会作为参考图一并发送（图生图 I2I，豆包 Seedream 等支持）
-     * @param {string} prompt - 图像生成提示词
-     * @param {string} model - 选中的图像生成模型 ID
-     * @param {Object} [opts] - 由"重新生成"传入的原始请求参数（正常发送不传）
-     * @param {string[]} [opts.images] - 原始参考图列表（图生图时复用）
-     * @param {string} [opts.ratio] - 原始比例选择
-     * @param {string} [opts.tier] - 原始分辨率档位
-     * @param {string} [opts.quality] - 原始质量选择
-     */
-    async sendImageGeneration(prompt, model, opts = {}) {
-        // 重新生成时复用原始请求的参考图；正常发送从输入区状态读取
-        const isRegen = opts.ratio !== undefined;
-        const images = isRegen ? [...opts.images] : this.attachments.getAll();
-
-        // 仅正常发送时清空输入区；重新生成不动输入框与待发送图片
-        if (!isRegen) {
-            this.inputEl.value = '';
-            this.attachments.clear();
-        }
-
-        // 渲染用户提示词消息（附带参考图缩略图）
-        this.appendMessage('user', prompt || '（图片）', images, { rawPrompt: prompt });
-
-        // 读取当前比例与档位（重新生成时优先沿用原请求）
-        const ratio = isRegen ? opts.ratio : this.sizePicker.getRatio();
-        const tier = isRegen ? (opts.tier || '2K') : this.sizePicker.getTier();
-        const quality = opts.quality || this.qualityDropdown?.value || '';
-        const isI2I = images.length > 0;
-        const sizeText = ratio === 'auto' ? '自动比例' : `${ratio} / ${tier}`;
-        const thinkingEl = this.appendMessage('assistant', isI2I ? `正在生成 ${sizeText} 图片（图生图）…` : `正在生成 ${sizeText} 图片…`);
-        thinkingEl.parentElement.classList.add('thinking');
-
-        // 生图不走 isSending 串行锁（聊天/视频专用）：API 支持并发，
-        // 连续发送互不阻塞；每个任务持独立 AbortController 供停止按钮中止，
-        // 前端 abort 后后端监听断连同步掐断对上游厂商的请求（不再继续计费）
-        const abortController = new AbortController();
-        this._imageGenTasks.add(abortController);
-        this._updateStopBtn();
-
-        try {
-            // 根据模型、比例、档位计算实际像素，模型不支持时自动降级
-            let effectiveSize = null;
-            if (ratio === 'auto' && isI2I) {
-                const dim = await this.getImageSize(images[0]);
-                if (dim) {
-                    const adaptive = LlmResolution.computeAdaptiveSize(dim.width, dim.height, tier);
-                    const constrained = LlmResolution.applyModelResolutionConstraints(
-                        model,
-                        adaptive.width,
-                        adaptive.height,
-                        LlmResolution.simplifyRatio(dim.width, dim.height)
-                    );
-                    effectiveSize = `${constrained.width}x${constrained.height}`;
-                }
-            } else if (ratio !== 'auto') {
-                const res = LlmResolution.getResolutionForModel(model, ratio, tier);
-                effectiveSize = res ? `${res.width}x${res.height}` : null;
-            }
-
-            // 生图模型没有 system 角色：启用的风格模板拼接在提示词前部
-            // （重新生成时传入的是原始提示词，模板按当前启用状态重新拼入）
-            const stylePrompt = window.llmSystemPrompt?.getActiveContent('image');
-            const finalPrompt = stylePrompt ? `${stylePrompt}\n\n${prompt}` : prompt;
-
-            // 下拉 value 为"厂商||模型ID"复合键：拆开后显式指定厂商，
-            // 后端直接路由（同名模型在多个中转站共存时可区分）
-            const selection = LumenLight.parseModelKey(model);
-            const requestBody = { model: selection.id, provider: selection.provider, prompt: finalPrompt, images };
-            if (effectiveSize && effectiveSize !== 'auto') {
-                requestBody.size = effectiveSize;
-            }
-            // quality 为空字符串表示"自动"，请求时不传，由模型默认决定
-            if (quality) {
-                requestBody.quality = quality;
-            }
-
-            const response = await fetch('/api/llm/generate-image', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody),
-                signal: abortController.signal
-            });
-
-            const result = await response.json();
-
-            thinkingEl.parentElement.classList.remove('thinking');
-
-            if (response.ok && result.status === 'ok' && result.imageUrl) {
-                const img = document.createElement('img');
-                img.className = 'llm-msg-image';
-                img.src = result.imageUrl;
-                img.alt = '生成的图片';
-                img.onclick = () => this.lightbox.open(result.imageUrl);
-                LlmImageDrag.attach(img, { prompt });
-                // 用"图片 + 操作栏"块整体替换占位气泡，不残留空文本气泡
-                const block = this.buildGeneratedImageBlock(img, { prompt, images, ratio, tier, quality });
-                thinkingEl.parentElement.replaceWith(block);
-
-                // 不加入历史，因为图像生成不支持多轮对话
-            } else {
-                thinkingEl.textContent = '❌ ' + (result.message || '图片生成失败');
-                thinkingEl.parentElement.classList.add('error');
-            }
-        } catch (error) {
-            thinkingEl.parentElement.classList.remove('thinking');
-            if (error?.name === 'AbortError') {
-                // 用户点停止按钮主动中止：中性提示，不算错误
-                thinkingEl.textContent = '⛔ 已停止生成';
-            } else {
-                thinkingEl.textContent = '❌ 连接失败：' + error.message;
-                thinkingEl.parentElement.classList.add('error');
-                console.error('图像生成请求失败:', error);
-            }
-        } finally {
-            this._imageGenTasks.delete(abortController);
-            this._updateStopBtn();
-            this.followBottom();   // 仅在跟随态贴底：用户上滑阅读时不拽回
-        }
+    /** 中止面板全部在飞生图任务（停止按钮回调） */
+    abortImageGenerations(...args) {
+        return this._sender.abortImageGenerations(...args);
     }
 
-    /**
-     * 中止面板全部在飞生图任务（停止按钮回调）
-     * 逐个 abort 会触发各任务自己的 catch：气泡改为"已停止生成"并落盘快照；
-     * 后端经断连监听同步中止对上游厂商的请求
-     */
-    abortImageGenerations() {
-        if (this._imageGenTasks.size === 0) return;
-        const count = this._imageGenTasks.size;
-        for (const ac of [...this._imageGenTasks]) ac.abort();
-        window.socket?.showNotification?.(`已停止 ${count} 张生图`);
+    /** 按在飞生图任务数与当前模型刷新停止按钮显隐与两态 */
+    _updateStopBtn(...args) {
+        return this._sender._updateStopBtn(...args);
     }
 
-    /**
-     * 按在飞生图任务数与当前模型刷新停止按钮：
-     *   - 显隐：仅绘图模型显示（agent/聊天/视频/网页桥接无生图可停）；
-     *     有在飞任务时即使切走了模型也保持可见，避免任务失管无法取消
-     *   - 两态：无任务暗红灭置禁用，有任务亮红可点
-     */
-    _updateStopBtn() {
-        if (!this.stopBtn) return;
-        const modelId = this.modelDropdown?.value;
-        const isImage = !this.isVideoModel(modelId) && this.isImageModel(modelId);
-        const active = this._imageGenTasks.size > 0;
-        this.stopBtn.style.display = (isImage || active) ? '' : 'none';
-        this.stopBtn.classList.toggle('active', active);
-        this.stopBtn.disabled = !active;
+    /** 构造生成图片展示块（图片 + 操作栏；_genParams 仍归本类供恢复重绑） */
+    buildGeneratedImageBlock(...args) {
+        return this._sender.buildGeneratedImageBlock(...args);
     }
 
-    /**
-     * 构造生成图片的完整展示块：图片（含悬停删除）+ 底部操作栏
-     * @param {HTMLImageElement} imgEl - 已绑定灯箱/拖拽事件的图片元素
-     * @param {Object} requestParams - 原始请求参数 { prompt, images, ratio, tier, quality }，供重新生成复用
-     * @returns {HTMLDivElement} 展示块容器
-     */
-    buildGeneratedImageBlock(imgEl, requestParams) {
-        const block = document.createElement('div');
-        block.className = 'llm-gen-block';
-        // 块 id → 原始请求参数：重新生成与 F5 恢复后的重绑都按它索引
-        // （参考图为 data URL，随快照一起进 IndexedDB）
-        block.dataset.genId = LumenLight.generateId();
-        this._genParams.set(block.dataset.genId, requestParams);
-
-        // 图片容器（悬停显示删除按钮，复用现有逻辑）
-        block.appendChild(this.wrapRemovableImage(imgEl));
-
-        // 底部操作栏：白色线条风格按钮，后续新按钮追加在此栏即可
-        const actions = document.createElement('div');
-        actions.className = 'llm-gen-actions';
-
-        const regenBtn = document.createElement('button');
-        regenBtn.type = 'button';
-        regenBtn.className = 'llm-gen-btn';
-        regenBtn.title = '使用同一套提示词与参考图，按当前选中模型重新生成';
-        regenBtn.innerHTML = `
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
-                <polyline points="21 3 21 9 15 9"></polyline>
-            </svg>
-            <span>重新生成</span>
-        `;
-        regenBtn.addEventListener('click', () => this.regenerate(requestParams));
-
-        actions.appendChild(regenBtn);
-        block.appendChild(actions);
-        return block;
+    /** 重新生成：复用原始请求参数按当前选中的绘图模型再次生成 */
+    async regenerate(...args) {
+        return this._sender.regenerate(...args);
     }
 
-    /**
-     * 重新生成：复用原始请求的提示词、参考图、比例、档位与质量，
-     * 按当前选中的绘图模型再次生成（新图作为新消息追加在底部）
-     * @param {Object} params - 原始请求参数 { prompt, images, ratio, tier, quality }
-     */
-    async regenerate({ prompt, images, ratio, tier, quality }) {
-        // 与正常发送一致：生图任务不查 isSending 串行锁，允许在飞时再次发起
-
-        const model = this.modelDropdown?.value;
-        if (!model) {
-            alert('请先在聊天窗口选择模型');
-            return;
-        }
-        if (!this.isImageModel(model)) {
-            alert('当前选中的模型不是绘图模型，请切换后再重新生成');
-            return;
-        }
-
-        await this.sendImageGeneration(prompt, model, { images: images || [], ratio, tier, quality });
-    }
-
-    /**
-     * 获取图片的原始像素尺寸
-     * @param {string} src - 图片的 data URL 或网址
-     * @returns {Promise<{width: number, height: number}|null>} 失败时返回 null
-     */
-    getImageSize(src) {
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-            img.onerror = () => resolve(null);
-            img.src = src;
-        });
+    /** 获取图片的原始像素尺寸 */
+    getImageSize(...args) {
+        return this._sender.getImageSize(...args);
     }
 
     /**
@@ -994,8 +737,14 @@ class LlmChat {
         }
     }
 
-    /** 统一处理模型切换：工具栏刷新 + 网页桥接模式的聊天记录互换 */
+    /** 统一处理模型切换：工具栏刷新 + 网页桥接模式的聊天记录互换。
+     *  Agent 分类（对话模型）选中时顺带写 piModelKey——它就是 pi 底层
+     *  模型，与 设置 → 通用 的选择器写同一个键（LlmPiAgent 消费） */
     _onModelChanged() {
+        const value = this.modelDropdown?.value || '';
+        if (this._modelCatMap && this._modelCatMap.get(value) === 'agent') {
+            localStorage.setItem('piModelKey', value);
+        }
         this.updateToolbarForModel();
         this._swapHistorySnapshot();
     }

@@ -1,17 +1,25 @@
 /**
  * ==========================================================================
- * LumenLight pi 技能库管理器
+ * LumenLight pi 工具与技能管理器
  * ==========================================================================
- * 作用：LLM 面板头部的技能库入口，包含两部分：
- *   1. 面板头部的入口按钮（双四角星图标，与系统提示词按钮同款 32px 正圆）
- *   2. 居中弹窗：查阅 data/pi/skills/ 技能库（pi agent 的 skill_list/
+ * 作用：LLM 面板头部的「工具与技能」入口（原技能库升格），双 tab：
+ *   1. 「技能」tab：查阅 data/pi/skills/ 技能库（pi agent 的 skill_list/
  *      skill_load 数据源），勾选控制启停——取消勾选 = agent 在 skill_list
  *      里看不到、skill_load 拒绝加载；勾选恢复可见可加载。状态存
  *      data/pi/settings.json 的 disabledSkills，扩展每次调用现读，即时生效。
- * 数据接口：routes/piSkills.js（GET /api/pi-skills、PUT /api/pi-skills/:id/enabled、
- *   POST /api/pi-skills/upload 上传单 .md / Agent Skills 文件夹）。
- * 点击行可展开技能正文（只读查阅）；无效技能文件（frontmatter 不合法）
- * 以灰条显示不隐藏——否则用户放了格式错的文件会以为功能坏了。
+ *      数据接口：routes/piSkills.js（GET /api/pi-skills、PUT /api/pi-skills/:id/enabled、
+ *      POST /api/pi-skills/upload 上传单 .md / Agent Skills 文件夹）。
+ *      点击行可展开技能正文（只读查阅）；无效技能文件（frontmatter 不合法）
+ *      以灰条显示不隐藏——否则用户放了格式错的文件会以为功能坏了。
+ *   2. 「工具」tab：pi 扩展注册的全部工具（画布/Comfy/联网/技能四族）逐个
+ *      勾选启停。清单由 lumen-canvas 扩展在 pi 会话启动时经 getAllTools()
+ *      上报到后端注册表（data/pi/tools-registry.json 快照，pi 未运行也有
+ *      旧清单可显示）；禁用状态存 data/pi/settings.json 的 disabledTools，
+ *      扩展在启动与每回合开始经 setActiveTools 把禁用工具从模型可见清单
+ *      移除（连同 schema 不占上下文），改动从下一轮消息起生效、无需重启。
+ *      数据接口：routes/piAgent.js（GET/POST /api/pi/disabled-tools、
+ *      GET /api/pi/extension-tools）。MCP 工具不在此管理（设置 → MCP 已有
+ *      逐工具启停）。
  * ==========================================================================
  */
 
@@ -37,6 +45,9 @@ class LlmSkillManager {
         this.invalid = [];         // 无效技能文件 [{file}]
         this.isOpen = false;
         this.expandedId = null;    // 当前展开正文的技能 id
+        this.tab = 'skills';       // 'skills' | 'tools' 当前 tab
+        this.toolRegistry = {};    // 扩展上报的工具清单快照 { ext: { tools: [{name, description}] } }
+        this.disabledTools = [];   // 禁用工具清单（data/pi/settings.json 的 disabledTools）
 
         this.buildButton();
     }
@@ -54,7 +65,7 @@ class LlmSkillManager {
         this.btn = document.createElement('button');
         this.btn.className = 'llm-system-prompt-btn';   // 复用头部 32px 正圆线稿按钮样式
         this.btn.type = 'button';
-        this.btn.title = '技能库';
+        this.btn.title = '工具与技能';
         // 图标：双四角星（sparkles，AI 技能语义）。四角星线稿在 18px 下太细，
         // 用实心填充（fill=currentColor），与项目头部纯白图标风格保持统一
         this.btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M10 2 L12 8 L18 10 L12 12 L10 18 L8 12 L2 10 L8 8 Z"/><path d="M18 12 L19.5 15.5 L23 17 L19.5 18.5 L18 22 L16.5 18.5 L13 17 L16.5 15.5 Z"/></svg>';
@@ -121,6 +132,77 @@ class LlmSkillManager {
         } catch (error) {
             window.socket?.showNotification?.('技能启停失败: ' + error.message);
             await this.loadSkills();
+            this.renderPopup();
+        }
+    }
+
+    // ==================== 工具启停（「工具」tab） ====================
+
+    /** 工具族分组（按工具名前缀，与 pi/工具清单.md 的分族一致） */
+    static TOOL_GROUPS = [
+        { prefix: 'canvas_', title: '画布桥接' },
+        { prefix: 'comfy_mcp_', title: 'Comfy 原生' },
+        { prefix: 'web_', title: '联网' },
+        { prefix: 'skill_', title: '技能工具' }
+    ];
+
+    /**
+     * 拉取工具清单注册表与禁用清单（pi 未运行时显示上次上报的快照）
+     */
+    async loadTools() {
+        try {
+            const [regRes, disRes] = await Promise.all([
+                fetch('/api/pi/extension-tools'),
+                fetch('/api/pi/disabled-tools')
+            ]);
+            const reg = await regRes.json();
+            const dis = await disRes.json();
+            if (reg.status === 'ok') this.toolRegistry = reg.registry || {};
+            if (dis.status === 'ok') {
+                this.disabledTools = Array.isArray(dis.disabledTools) ? dis.disabledTools : [];
+            }
+        } catch (error) {
+            console.error('工具清单加载失败:', error);
+        }
+    }
+
+    /**
+     * 汇总全部上报的工具（跨扩展去重，按名字排序）
+     */
+    collectTools() {
+        const seen = new Map();
+        for (const ext of Object.values(this.toolRegistry || {})) {
+            for (const t of (ext?.tools || [])) {
+                if (t.name && !seen.has(t.name)) {
+                    seen.set(t.name, { name: t.name, description: t.description || '' });
+                }
+            }
+        }
+        return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /**
+     * 勾选/取消勾选一个工具（写全量禁用清单，差量由后端归一）
+     * @param {string} name - 工具名
+     * @param {boolean} enabled - true = agent 可见可用
+     */
+    async setToolEnabled(name, enabled) {
+        const next = enabled
+            ? this.disabledTools.filter((n) => n !== name)
+            : [...new Set([...this.disabledTools, name])];
+        try {
+            const response = await fetch('/api/pi/disabled-tools', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ disabledTools: next })
+            });
+            const result = await response.json();
+            if (result.status !== 'ok') throw new Error(result.message || '未知错误');
+            this.disabledTools = result.disabledTools || next;
+            this.renderPopup();
+        } catch (error) {
+            window.socket?.showNotification?.('工具启停失败: ' + error.message);
+            await this.loadTools();
             this.renderPopup();
         }
     }
@@ -203,8 +285,12 @@ class LlmSkillManager {
         if (!this._popupEl) this.buildPopupDom();
         this.isOpen = true;
         this._overlay.style.display = 'flex';
-        // 每次打开都重取：pi 自己可能沉淀过新技能（目录在写门禁白名单内）
+        // 每次打开都重取：pi 自己可能沉淀过新技能（目录在写门禁白名单内），
+        // 工具清单也可能被扩展重新上报过
         this.loadSkills().then(() => this.renderPopup());
+        this.loadTools().then(() => {
+            if (this.tab === 'tools') this.renderPopup();
+        });
     }
 
     closePopup() {
@@ -221,22 +307,38 @@ class LlmSkillManager {
         overlay.innerHTML = `
             <div class="llm-sk-dialog">
                 <div class="llm-sk-header">
-                    <span class="llm-sk-title">技能库</span>
+                    <span class="llm-sk-title">工具与技能</span>
                     <span class="llm-sk-count"></span>
                     <button type="button" class="llm-sk-upload" data-kind="md" title="上传单个 .md 技能文件（可多选）">上传 .md</button>
                     <button type="button" class="llm-sk-upload" data-kind="folder" title="上传 Agent Skills 文件夹（含 SKILL.md，辅助文件一并存储）">上传文件夹</button>
                     <button type="button" class="llm-sk-close" title="关闭"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
-                <div class="llm-sk-hint">勾选 = agent 可见可加载（skill_list 列出、skill_load 放行）；取消勾选 = agent 完全感知不到。改动即时生效，无需重启。支持单 .md 文件（frontmatter 必填 id/name/description）与 Agent Skills 文件夹（&lt;id&gt;/SKILL.md，id=文件夹名）。</div>
+                <div class="llm-sk-tabs">
+                    <button type="button" class="llm-sk-tab" data-tab="skills">技能</button>
+                    <button type="button" class="llm-sk-tab" data-tab="tools">工具</button>
+                </div>
+                <div class="llm-sk-hint"></div>
                 <div class="llm-sk-list"></div>
                 <div class="llm-sk-footer">
-                    <span class="llm-sk-footer-hint">点击行可展开技能全文（只读查阅）</span>
+                    <span class="llm-sk-footer-hint"></span>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
         this._overlay = overlay;
         this._listEl = overlay.querySelector('.llm-sk-list');
+        this._hintEl = overlay.querySelector('.llm-sk-hint');
+        this._footerHintEl = overlay.querySelector('.llm-sk-footer-hint');
+        this._uploadBtns = [...overlay.querySelectorAll('.llm-sk-upload')];
+
+        // tab 切换（重渲染整弹窗，hint/列表/上传按钮显隐随 tab 走）
+        overlay.querySelectorAll('.llm-sk-tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                this.tab = tab.dataset.tab;
+                this.renderPopup();
+                if (this.tab === 'tools') this.loadTools().then(() => this.renderPopup());
+            });
+        });
 
         // 关闭：按钮 / 点击遮罩空白 / ESC
         overlay.querySelector('.llm-sk-close').addEventListener('click', () => this.closePopup());
@@ -270,12 +372,34 @@ class LlmSkillManager {
         });
     }
 
+    /** 各 tab 的说明文案（innerHTML，含换行控制） */
+    static HINTS = {
+        skills: '勾选 = agent 可见可加载（skill_list 列出、skill_load 放行）；取消勾选 = agent 完全感知不到。改动即时生效，无需重启。支持单 .md 文件（frontmatter 必填 id/name/description）与 Agent Skills 文件夹（&lt;id&gt;/SKILL.md，id=文件夹名）。',
+        tools: '取消勾选 = 把工具从 agent 的可见工具清单移除（连同参数说明不再占用上下文），从下一轮消息开始生效，无需重启 pi；重新勾选即恢复。权限分级独立生效——分级拦下的工具即使勾选也不可用。MCP 工具在 设置 → MCP 管理，不在此列。'
+    };
+
     /**
-     * 按当前状态刷新弹窗（技能行 + 无效文件灰条 + 计数）
+     * 按当前 tab 刷新弹窗（tab 高亮 / 说明 / 上传按钮显隐 / 列表）
      */
     renderPopup() {
         if (!this._overlay) return;
         const list = this._listEl;
+        const esc = (t) => LumenLight.escapeHtml(String(t ?? ''));
+
+        this._overlay.querySelectorAll('.llm-sk-tab').forEach((tab) => {
+            tab.classList.toggle('active', tab.dataset.tab === this.tab);
+        });
+        this._uploadBtns.forEach((b) => { b.style.display = this.tab === 'skills' ? '' : 'none'; });
+        this._hintEl.innerHTML = LlmSkillManager.HINTS[this.tab];
+        this._footerHintEl.textContent = this.tab === 'skills'
+            ? '点击行可展开技能全文（只读查阅）'
+            : '工具清单由 pi 扩展在会话启动时上报（快照），扩展更新后自动刷新';
+
+        if (this.tab === 'tools') {
+            this.renderTools(list, esc);
+            return;
+        }
+
         const enabledCount = this.skills.filter((s) => s.enabled).length;
 
         this._overlay.querySelector('.llm-sk-count').textContent =
@@ -288,7 +412,6 @@ class LlmSkillManager {
             return;
         }
 
-        const esc = (t) => LumenLight.escapeHtml(String(t ?? ''));
         list.innerHTML = this.skills.map((s) => `
             <div class="llm-sk-item${s.enabled ? '' : ' disabled'}${this.expandedId === s.id ? ' expanded' : ''}" data-id="${esc(s.id)}">
                 <div class="llm-sk-row">
@@ -329,6 +452,54 @@ class LlmSkillManager {
                 const id = item.dataset.id;
                 this.expandedId = this.expandedId === id ? null : id;
                 this.renderPopup();
+            });
+        });
+    }
+
+    /**
+     * 渲染「工具」tab：按工具族分组 + 逐工具勾选启停
+     */
+    renderTools(list, esc) {
+        const tools = this.collectTools();
+        const disabledCount = tools.filter((t) => this.disabledTools.includes(t.name)).length;
+        this._overlay.querySelector('.llm-sk-count').textContent =
+            tools.length ? `共 ${tools.length} 个 · 禁用 ${disabledCount} 个` : '';
+
+        if (!tools.length) {
+            list.innerHTML = '<div class="llm-sk-empty">暂无工具清单——pi 启动并完成一次对话后由扩展自动上报</div>';
+            return;
+        }
+
+        const groups = LlmSkillManager.TOOL_GROUPS
+            .map((g) => ({ ...g, tools: tools.filter((t) => t.name.startsWith(g.prefix)) }))
+            .filter((g) => g.tools.length);
+        const other = tools.filter((t) => !LlmSkillManager.TOOL_GROUPS.some((g) => t.name.startsWith(g.prefix)));
+        if (other.length) groups.push({ title: '其他', tools: other });
+
+        list.innerHTML = groups.map((g) => `
+            <div class="llm-sk-group">
+                <div class="llm-sk-group-title">${esc(g.title)}（${g.tools.length}）</div>
+                ${g.tools.map((t) => {
+                    const disabled = this.disabledTools.includes(t.name);
+                    return `
+                    <div class="llm-sk-item tool${disabled ? ' disabled' : ''}" data-name="${esc(t.name)}">
+                        <div class="llm-sk-row">
+                            <input type="checkbox" class="llm-sk-check tool-check" ${disabled ? '' : 'checked'} title="勾选启用，取消勾选禁用">
+                            <div class="llm-sk-main">
+                                <div class="llm-sk-line"><span class="llm-sk-name tool-name">${esc(t.name)}</span></div>
+                                <div class="llm-sk-desc" title="${esc(t.description)}">${esc(t.description.split('\n')[0])}</div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+        `).join('');
+
+        // 勾选：切换启停（写全量禁用清单）
+        list.querySelectorAll('.tool-check').forEach((check) => {
+            check.addEventListener('change', (e) => {
+                const name = e.target.closest('.llm-sk-item').dataset.name;
+                this.setToolEnabled(name, e.target.checked);
             });
         });
     }

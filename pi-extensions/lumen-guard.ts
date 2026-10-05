@@ -18,7 +18,8 @@
  * 结构性保护（硬编码于本文件，任何分级、任何 guard.json 配置都不可写）：
  *   项目源代码与配置——根级带扩展名的文件（server.js、package.json、
  *   index.html 等）、程序目录（js/css/routes/utils/tools/test/pi/
- *   pi-extensions/mcp/lumen_nodes/workflows/models/runtime/image 等）、
+ *   pi-extensions/mcp/lumen_nodes/models/runtime/image 等；workflows/
+ *   为工作流模板库，已加入 guard.json 白名单由 pi 直写）、
  *   data/settings.json、data/prompts.json、data/pi/（workspace 与
  *   skills 两个白名单区除外）。
  *   权限分级回答"agent 行动多自主"，不扩大行动范围：宿主代码不在任何
@@ -239,7 +240,7 @@ const CONTENT_DIRS = ["save", "tag", "temp_upscale", "data/videos"];
 const PROTECTED_DIRS = [
     "js", "css", "routes", "utils", "tools", "test",
     "pi", "pi-extensions", "mcp", "lumen_nodes",
-    "workflows", "models", "runtime", "image",
+    "models", "runtime", "image",
     "real-esrgan", "node_modules", ".git", ".vscode", ".trae",
 ];
 

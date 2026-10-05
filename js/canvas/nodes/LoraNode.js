@@ -192,6 +192,21 @@ class LoraNode extends BaseCanvasNode {
     }
 
     /**
+     * 追加一条已指定文件的条目（LoRA 管理器「发送到节点」投递用；
+     * 文件不在清单里时 renderEntries 会自动补一条隐藏 option 正常回显）
+     * @param {string} file - lora 相对路径（与 Comfy lora_name 同源）
+     */
+    addLoraFile(file) {
+        this.entries.push({
+            id: LumenLight.generateId(),
+            file: file || '',
+            strengthModel: 1,
+            strengthClip: 1
+        });
+        this.renderEntries();
+    }
+
+    /**
      * 重建条目列表 DOM（条目数量/增删时全量重建；输入修改走事件直改不重建）。
      * 结构与 Comfy 生图节点同款节奏：标签在上、控件在下——
      * 「lora」+ 文件下拉（可选空 = 此条不生效，故无需启用开关），

@@ -279,6 +279,7 @@ class SaveManager {
             viewport: this.getViewport(),
             connections: this.getConnectionsData(),
             nodes: this.collectNodes(),
+            nodeSeq: this.serializer.canvas.nodeSeq,   // 节点编号计数器（删除不复用）
             groups: this.serializer.collectGroups()
         });
         const token = init.token;

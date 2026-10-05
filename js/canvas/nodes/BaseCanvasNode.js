@@ -54,6 +54,13 @@ class BaseCanvasNode {
         // 自定义标题（null = 显示类默认标题 DEFAULT_TITLE；双击标题可改）
         this.title = null;
         this.titleEl = null;  // 标题元素（initTitleEditor 时缓存）
+
+        // 画布级递增编号（#001 起，随存档持久化，删除不复用防顶替）。
+        // 构造即分配——右键菜单/桥接创建/存档恢复/撤销重建全走构造器，
+        // 恢复路径随后以存档记录值回填覆盖
+        this.seqId = (canvas && typeof canvas.allocNodeSeq === 'function')
+            ? canvas.allocNodeSeq()
+            : null;
     }
 
     /**
@@ -174,11 +181,18 @@ class BaseCanvasNode {
     // ==================== 标题（双击行内重命名，六类节点共用） ====================
 
     /**
-     * 当前显示标题：自定义标题为空时回退类默认标题（子类 DEFAULT_TITLE 常量）
+     * 当前显示标题：自定义标题为空时回退类默认标题（子类 DEFAULT_TITLE 常量），
+     * 尾部拼 #NNN 编号标签（seqId 为空 = 旧数据未分配，不显示）
      * @returns {string}
      */
     getTitle() {
-        return this.title || this.constructor.DEFAULT_TITLE;
+        const base = this.title || this.constructor.DEFAULT_TITLE;
+        return this.seqId ? `${base} #${String(this.seqId).padStart(3, '0')}` : base;
+    }
+
+    /** 编号标签（#001 格式；无编号返回空串）——LoRA 管理器投递目标列表用 */
+    getSeqTag() {
+        return this.seqId ? `#${String(this.seqId).padStart(3, '0')}` : '';
     }
 
     /**
@@ -224,7 +238,9 @@ class BaseCanvasNode {
         // 已在编辑状态（输入框存在）则忽略
         if (!this.titleEl || this.titleEl.querySelector('.node-title-input')) return;
 
-        const original = this.getTitle();
+        // 编辑框只显原始标题（getTitle 会拼 #NNN 显示标签，不能进编辑框——
+        // 否则提交时标签被固化进 title，下次渲染出现双重编号）
+        const original = this.title || this.constructor.DEFAULT_TITLE;
         const input = document.createElement('input');
         input.className = 'node-title-input';
         input.type = 'text';
