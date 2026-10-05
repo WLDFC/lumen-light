@@ -92,6 +92,98 @@
     height: 18px;
 }
 
+/* ==================== 编组标题栏颜色下拉 ==================== */
+
+/* 触发器（GroupToolbar 左侧第一按钮）：样图形态 = 圆形色块 + 展开箭头，
+   选项文案层隐藏——当前选中由色块本身表达，悬停 title 有全文。
+   按钮形态重置/悬停叠加来自 button.lumen-dd-trigger（lumen-dropdown.css），
+   这里只调尺寸与圆角（胶囊形，与工具栏容器圆角同语言） */
+.group-color-btn {
+    height: 34px;
+    padding: 0 9px;
+    gap: 4px;
+    border-radius: 17px;
+}
+
+/* 色块圆点：触发器上 20px，比线条图标按钮（18px）大一号——
+   线条图标框内留白多，实色圆要撑到同观感得靠更大外框；
+   选项 icon 由 GroupToolbar 内联 fill 上色。
+   选择器带 .image-toolbar 提权：lumen-dropdown.css 在本文件之后加载，
+   同优先级的 .lumen-dd-trigger .lumen-dd-icon(15px) 会后来居上 */
+.image-toolbar .group-color-btn .lumen-dd-icon {
+    width: 20px;
+    height: 20px;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+/* 文案层隐藏：触发器只保留色块 + 箭头 */
+.image-toolbar .group-color-btn .lumen-dd-label {
+    display: none;
+}
+
+.image-toolbar .group-color-btn .lumen-dd-caret {
+    width: 14px;
+    height: 14px;
+}
+
+/* 菜单里的色块：20px 外框 + r=10 圆（GroupToolbar 内联），
+   实际圆直径约 17px，与 13px 菜单文字同量级偏大，色相一眼可辨 */
+.group-color-menu .lumen-dropdown-option .lumen-dd-icon {
+    width: 20px;
+    height: 20px;
+}
+
+/* ==================== 编组布局下拉 ==================== */
+
+/* 触发器（颜色按钮旁）：图标 + "布局"文字 + 箭头，文案层可见
+   （区别于颜色按钮的纯图形形态）；动作型下拉，选中后文案恢复。
+   按钮形态重置/悬停叠加来自 button.lumen-dd-trigger（lumen-dropdown.css），
+   选择器带 .image-toolbar 提权（原因同 .group-color-btn） */
+.image-toolbar .group-layout-btn {
+    height: 34px;
+    padding: 0 10px;
+    gap: 6px;
+    border-radius: 17px;
+    font-size: 13px;
+}
+
+.image-toolbar .group-layout-btn .lumen-dd-icon {
+    width: 16px;
+    height: 16px;
+}
+
+/* ==================== 编组解组按钮 ==================== */
+
+/* 触发器（右分区）：图标 + "解组"文字。纯按钮（非下拉），悬停叠加
+   与下拉触发器同语言（半透明白，不换底色） */
+.image-toolbar .group-ungroup-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 10px;
+    gap: 6px;
+    border: none;
+    border-radius: 17px;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.image-toolbar .group-ungroup-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.image-toolbar .group-ungroup-btn svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+}
+
+.image-toolbar .group-ungroup-btn .btn-text {
+    font-weight: 500;
+}
+
 /* ==================== 添加到内容按钮 ==================== */
 
 /* "添加到内容"按钮 */
@@ -138,9 +230,11 @@
 /* 图片名称标签：显示在工具栏和图片之间 */
 /* z-index 997：低于顶栏(998)与右侧面板(999)，
    保证标签作为画布的附属注记被界面框架遮住，不会显示到顶栏或面板上 */
+/* z-index 996：比工具栏(997)低一级——"编辑"下拉菜单随工具栏层叠，
+   必须能盖住图片名字标签；仍高于画布与节点注记，低于顶栏(998)/面板(999) */
 .image-name-label {
     position: fixed;
-    z-index: 997;
+    z-index: 996;
     font-size: 12px;
     color: #ffffff;
     background: transparent;
@@ -173,10 +267,11 @@
 
 /* ==================== 高清放大菜单样式 ==================== */
 
-/* 高清放大、去除背景、保存提示词按钮（图标 + 文字的组合样式一致） */
+/* 高清放大、去除背景、保存提示词、添加到资产按钮（图标 + 文字的组合样式一致） */
 .upscale-btn,
 .rembg-btn,
-.save-tag-btn {
+.save-tag-btn,
+.add-asset-btn {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -185,7 +280,8 @@
 /* 组合按钮内图标 */
 .upscale-btn svg,
 .rembg-btn svg,
-.save-tag-btn svg {
+.save-tag-btn svg,
+.add-asset-btn svg {
     width: 16px;
     height: 16px;
 }
@@ -194,11 +290,12 @@
 
 /* 二级/三级菜单通用样式 */
 .upscale-submenu {
-    background: rgba(40, 40, 40, 0.98);
+    background: var(--icon-bg, #1b1c21);              /* 浮起层（与"编辑"子菜单一致） */
+    border: 1px solid rgba(128, 128, 128, 0.3);       /* 通用边框 */
     border-radius: 8px;
     padding: 4px;
     min-width: 100px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(10px);
     z-index: 1001;
     display: flex;
@@ -295,4 +392,68 @@
 /* 错误状态（红色） */
 .upscale-toast.error {
     background: rgba(239, 68, 68, 0.95);
+}
+
+/* ==================== 编辑下拉（编辑 ∨ → 画笔） ====================
+   复刻提示词技能栏的"按钮 + caret + 菜单层"下拉模式；
+   菜单面板按配色规范：浮起层底色 + 通用边框 + 阴影 */
+
+/* 下拉按钮与菜单的定位基准 */
+.toolbar-edit-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+/* 按钮右侧的下拉箭头（参考技能栏"优化提示词 ∨"），与文字留 5px 间距 */
+.toolbar-btn .btn-caret {
+    width: 12px;
+    height: 12px;
+    margin-left: 5px;
+    opacity: 0.7;
+}
+
+.edit-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 120px;
+    padding: 4px;
+    background: var(--icon-bg, #1b1c21);              /* 浮起层 */
+    border: 1px solid rgba(128, 128, 128, 0.3);       /* 通用边框 */
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+}
+
+.edit-menu[hidden] {
+    display: none;
+}
+
+/* 菜单项：图标 + 文字，叠加式悬停 */
+.edit-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.edit-menu-item svg {
+    width: 14px;
+    height: 14px;
+    flex: none;
+}
+
+.edit-menu-item:hover {
+    background: rgba(255, 255, 255, 0.1);
 }

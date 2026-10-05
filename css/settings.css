@@ -218,7 +218,7 @@
     gap: 12px;              /* 内部元素间距 */
     padding: 16px;          /* 内边距 */
     border-radius: 8px;     /* 圆角 */
-    background: #25262b;     /* 模型配置区背景色 */
+    background: #1b1c21;     /* 分区卡片背景色（浮起层，与侧边栏同色；输入框回落 #0f0f12 呈凹陷） */
 }
 
 .settings-models-header {
@@ -375,14 +375,126 @@
     color: #6b7280;         /* 提示文字颜色（深灰） */
 }
 
+/* ==================== RunningHub 工作流登记卡 ==================== */
+/* 登记卡容器：纵向卡片列表（同 rembg 卡片风格），卡片 = 名称/ID 行 + 参数 JSON */
+.settings-rh-workflows {
+    display: flex;              /* 纵向堆叠 */
+    flex-direction: column;
+    gap: 8px;                   /* 卡片间距 */
+    margin-top: 8px;
+}
+
+.settings-rh-workflow {
+    display: flex;              /* 主信息行 + 参数 JSON 纵向排列 */
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;              /* 内边距 */
+    /* 无独立底色：与所在分区卡片（#1b1c21）融为一体，避免嵌套色块
+       （同 rembg 卡片处理；MCP 服务器卡片复用本类） */
+}
+
+.settings-rh-workflow-main {
+    display: grid;              /* 名称、工作流 ID、删除按钮三列 */
+    grid-template-columns: 1fr 1fr 32px;
+    gap: 10px;
+    align-items: center;
+}
+
+/* MCP 全局条（标题 + 添加按钮 + 警告文案）：不做卡片底，与服务器卡片区分层级。
+   添加按钮与大字标题顶部对齐（基线居中会显得按钮下坠） */
+.mcp-topbar {
+    margin-bottom: 0;
+}
+.mcp-topbar .settings-models-header {
+    align-items: flex-start;
+}
+/* MCP 面板是"全局条 + 多张独立卡片"结构，表单默认 18px 项间距过大，收紧 */
+.settings-form:has(.mcp-topbar) {
+    gap: 10px;
+}
+
+/* 每台服务器独立成卡，卡片之间留间距 */
+.mcp-server-card {
+    margin-bottom: 12px;
+}
+
+/* 卡头：名称输入占满左侧，「保存并应用 + 垃圾桶」靠右；
+   gap 保证名称框与按钮之间始终留出间距（space-between 在名称
+   拉伸占满时不会产生任何间隙） */
+.mcp-card-header {
+    gap: 10px;
+}
+.mcp-card-header .mcp-name {
+    flex: 1;
+    min-width: 0;
+}
+
+/* 卡片主行：传输类型拉伸占满，启用开关靠右 */
+.settings-rh-workflow-main.mcp-main-row {
+    grid-template-columns: 1fr auto;
+}
+
+/* MCP ComfyUI 根目录行：路径框占满剩余宽度，文件夹按钮窄身（仅图标） */
+.mcp-comfyrow {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+}
+
+/* 文件夹选择按钮：去边框、白色线条 Feather 图标（与画布图标同风格），
+   悬停按配色规范用半透明白叠加，不换底色 */
+.settings-models-btn.mcp-pick {
+    padding: 5px 6px;
+    border: none;
+    color: #ffffff;
+    justify-content: center;
+}
+.settings-models-btn.mcp-pick:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* 工具清单/资源/提示词模板折叠条：浏览器默认 summary 文字为黑色系，
+   深色底上不可读，按色板用次要文字色；悬停提亮为主文字 */
+.mcp-tools > summary,
+.mcp-resources > summary,
+.mcp-prompts > summary {
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0;
+}
+.mcp-tools > summary:hover,
+.mcp-resources > summary:hover,
+.mcp-prompts > summary:hover {
+    color: #ffffff;
+}
+
+/* 导入操作行：导入按钮 + 隐藏文件框的容器（按钮靠左、小尺寸） */
+.settings-rh-workflow-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 参数映射 JSON 编辑域：等宽字体便于对齐 nodeId/fieldName，可纵向拉伸 */
+.settings-rh-params {
+    width: 100%;
+    box-sizing: border-box;     /* 含 padding 计宽，撑满卡片 */
+    min-height: 60px;
+    resize: vertical;           /* 只允许纵向拉伸 */
+    font-family: Consolas, monospace; /* JSON 编辑用等宽 */
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 /* ==================== 抠图模型管理 ==================== */
 .settings-rembg-item {
     display: flex;              /* 弹性布局 */
     flex-direction: column;     /* 主信息行与进度行纵向排列 */
     gap: 10px;                  /* 行间距 */
     padding: 12px;              /* 内边距 */
-    border-radius: 6px;         /* 圆角 */
-    background: rgba(255, 255, 255, 0.03); /* 卡片浅色背景 */
+    /* 无独立底色：与所在分区卡片（#1b1c21）融为一体，避免嵌套色块 */
 }
 
 .settings-rembg-item + .settings-rembg-item {
@@ -473,6 +585,11 @@
 .settings-switch-desc {
     font-size: 12px;        /* 描述字号 */
     color: #9ca3af;         /* 描述文字灰色 */
+}
+
+/* 网页桥接面板状态行：页面 URL 是无空格长串，放不下时按字符断行防止撑破弹窗 */
+#webBridgeStatus {
+    overflow-wrap: anywhere;
 }
 
 /* 开关外壳：包裹隐藏的原生 checkbox 与可视轨道 */

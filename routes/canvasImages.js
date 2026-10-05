@@ -37,11 +37,23 @@ function createCanvasImagesRouter(options) {
         }
 
         const { image } = req.body;
-        if (!image) {
+        if (image === undefined) {
             console.log(`  ❌ 缺少图片数据`);
             return res.status(400).json({
                 status: 'error',
                 message: '缺少图片数据'
+            });
+        }
+
+        // 显式传 null = 清空槽位（如本次运行无遮罩时清掉上次残留的遮罩槽）
+        if (image === null) {
+            canvasImages[slot] = null;
+            canvasImagesTimestamp[slot] = 0;
+            console.log(`  🧹 槽位 ${slot} 已清空`);
+            return res.json({
+                status: 'ok',
+                message: `槽位 ${slot} 已清空`,
+                timestamp: 0
             });
         }
 

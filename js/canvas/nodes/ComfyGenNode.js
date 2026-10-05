@@ -148,6 +148,9 @@ class ComfyGenNode extends BaseCanvasNode {
         this.countInputEl = this.el.querySelector('.comfy-count-stepper-input');
         this.portInEl = this.el.querySelector('.text-node-port-in');
 
+        // 标题双击重命名（基类共用实现，六类节点同一套交互）
+        this.initTitleEditor();
+
         // 挂到画布容器（canvas 元素的父级，即 body），跟随视口变换
         document.body.appendChild(this.el);
     }
@@ -316,6 +319,16 @@ class ComfyGenNode extends BaseCanvasNode {
     }
 
     /**
+     * 收集槽位载荷（详见 ImagePipeline.collectImageEntries）：每张图
+     * { image, mask } 按位对齐——mask 是黑白遮罩 PNG（白=重绘区），
+     * 无遮罩为 null。提交端据此写/清遮罩槽位
+     * @returns {Promise<Array<{image: string|null, mask: string|null}>>}
+     */
+    collectSlotPayloads() {
+        return this._pipeline().collectImageEntries(this.id);
+    }
+
+    /**
      * 收集链路上游 LoRA 节点的堆栈（详见 ImagePipeline.collectLoras）
      * @returns {Array<{file: string, strengthModel: number, strengthClip: number}>}
      */
@@ -358,8 +371,12 @@ class ComfyGenNode extends BaseCanvasNode {
         const negative = window.promptPanel?.promptInputManager?.getPrompts()?.negative || '';
 
         // 连线的画布图片随请求上传到后端槽位（Edit 工作流经
-        // LumenReceiveImageFromCanvas 拉取；纯文生图工作流由后端跳过）
-        const images = await this.collectImages();
+        // LumenReceiveImageFromCanvas 拉取；纯文生图工作流由后端跳过）。
+        // masks 与 images 按位对齐：带遮罩的图为黑白遮罩 PNG（白=重绘区），
+        // 后端写入遮罩槽位供 From Canvas 的 mask 输出读取
+        const payloads = await this.collectSlotPayloads();
+        const images = payloads.map((p) => p.image);
+        const masks = payloads.map((p) => p.mask);
 
         // 链路上游 LoRA 节点堆栈（提交时由后端 injectLoraChain 图拼接注入，
         // 追加在模板内嵌 lora 之后——模板 lora 由本节点的 LoRA 行管理）
@@ -420,7 +437,8 @@ class ComfyGenNode extends BaseCanvasNode {
                         overrides: this.params.getOverrides(1),
                         loras,
                         target: this.id,
-                        images
+                        images,
+                        masks
                     })
                 });
                 const result = await response.json();
@@ -631,7 +649,8 @@ class ComfyGenNode extends BaseCanvasNode {
             width: this.width,
             height: this.height,
             workflowId: this.workflowId,
-            ...this.params.getState()
+            ...this.params.getState(),
+            ...(this.title ? { title: this.title } : {})
         };
     }
 }
@@ -642,6 +661,7 @@ class ComfyGenNode extends BaseCanvasNode {
 ComfyGenNode.LAYOUT_MODE = 'design';  // 固定设计基准布局 + 整体缩放（见 BaseCanvasNode 类头）
 ComfyGenNode.DEFAULT_WIDTH = 2048;    // 默认宽度（px，与提示词节点同量级）
 ComfyGenNode.DEFAULT_HEIGHT = 2600;   // 默认高度（行数比 LLM 生图节点多，留足纵向空间）
+ComfyGenNode.DEFAULT_TITLE = 'Comfy Generate'; // 默认标题（双击标题可自定义）
 ComfyGenNode.PLACEHOLDER_GAP = 300;   // 占位图与节点右缘的间距（px）
 ComfyGenNode.PLACEHOLDER_CASCADE = 160; // 多张占位图的对角线级联间距（px）
 // LOADER_TYPES 与参数扫描/覆盖表编译已迁至 js/utils/ComfyParamScanner.js，

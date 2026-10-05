@@ -2,8 +2,8 @@
  * ==========================================================================
  * LumenLight 存档序列化器（从 SaveManager.js 拆出）
  * 作用：画布状态 <-> 存档数据（project.json 结构）的双向转换。
- *   - 收集（保存方向）：图片 / 提示词节点 / 连线 / 提示词 / 视口 -> 存档数据
- *   - 恢复（打开方向）：存档数据 -> 重建画布对象（图片、节点、连线）
+ *   - 收集（保存方向）：图片 / 提示词节点 / 连线 / 编组 / 提示词 / 视口 -> 存档数据
+ *   - 恢复（打开方向）：存档数据 -> 重建画布对象（图片、节点、连线、编组）
  *   - 保存成功后的文件名映射回写（applySavedMappings）
  * 不含任何 DOM 模态框逻辑（见 SaveModal.js）和 HTTP 通信（留在 SaveManager.js）。
  * 依赖：window.canvas（Canvas 实例）、全局 PromptNode 类
@@ -128,6 +128,12 @@ class ProjectSerializer {
                 source: img.source,
                 prompt: img.prompt || '',
                 negativePrompt: img.negativePrompt || '',
+                // 编辑笔迹层（非破坏性图层，data URL；无笔迹时不写字段）
+                ...(img.editStrokes ? { editStrokes: img.editStrokes } : {}),
+                ...(img.editStrokesOpacity !== undefined
+                    ? { editStrokesOpacity: img.editStrokesOpacity } : {}),
+                // 遮罩层（局部重绘元数据，非破坏性图层，data URL）
+                ...(img.mask ? { mask: img.mask } : {}),
                 // 视频对象额外保存视频地址（恢复时重建 videoEl）
                 ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
             }));
@@ -170,6 +176,12 @@ class ProjectSerializer {
                 source: img.source,
                 prompt: img.prompt || '',
                 negativePrompt: img.negativePrompt || '',
+                // 编辑笔迹层（非破坏性图层，data URL 内嵌 project.json）
+                ...(img.editStrokes ? { editStrokes: img.editStrokes } : {}),
+                ...(img.editStrokesOpacity !== undefined
+                    ? { editStrokesOpacity: img.editStrokesOpacity } : {}),
+                // 遮罩层（局部重绘元数据，非破坏性图层，data URL 内嵌 project.json）
+                ...(img.mask ? { mask: img.mask } : {}),
                 // 视频对象额外保存视频地址（恢复时重建 videoEl）
                 ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
             };
@@ -237,6 +249,28 @@ class ProjectSerializer {
         return this.canvas.images.images
             .filter(img => NodeTypes.isPanelNode(img.source))
             .map(node => node.toJSON());
+    }
+
+    /**
+     * 收集当前画布上所有编组的存档数据（顶层 groups 字段）
+     * 组是纯几何对象（不持有成员清单，成员按几何包含实时判定），
+     * 只需序列化几何、标题、标题栏颜色（COLOR_PRESETS 键）与标题栏
+     * 缩放系数 titleNS（创建时定格，恢复后调整宽高不改变标题栏大小），
+     * 恢复无需 id 换算。
+     * @returns {Array} 组数据数组 [{id, title, color, titleNS, x, y, width, height}]
+     */
+    collectGroups() {
+        const groups = this.canvas.groups ? this.canvas.groups.groups : [];
+        return groups.map(g => ({
+            id: g.id,
+            title: g.title,
+            color: g.color || '',
+            titleNS: g.titleNS,
+            x: g.x,
+            y: g.y,
+            width: g.width,
+            height: g.height
+        }));
     }
 
     /**
@@ -329,6 +363,30 @@ class ProjectSerializer {
                         negativePrompt: imgData.negativePrompt || '',
                         created: Date.now()
                     };
+                    // 编辑笔迹层（非破坏性图层）：恢复字段并异步加载位图，
+                    // 就位后补一次重绘（渲染器把笔迹层叠画在原图上）
+                    if (imgData.editStrokes) {
+                        imageObj.editStrokes = imgData.editStrokes;
+                        imageObj.editStrokesOpacity = imgData.editStrokesOpacity ?? 1;
+                        const layer = new Image();
+                        layer.onload = () => {
+                            imageObj.editStrokesImg = layer;
+                            this.canvas.draw();
+                        };
+                        layer.src = imgData.editStrokes;
+                    }
+                    // 遮罩层（局部重绘元数据）：恢复字段并异步加载位图。
+                    // 遮罩以半透明红叠画在画布上（渲染器处理），位图就位后
+                    // 补一次重绘，同时供遮罩灯箱重入与 Comfy 提交时烘焙 alpha
+                    if (imgData.mask) {
+                        imageObj.mask = imgData.mask;
+                        const maskLayer = new Image();
+                        maskLayer.onload = () => {
+                            imageObj.maskImg = maskLayer;
+                            this.canvas.draw();
+                        };
+                        maskLayer.src = imgData.mask;
+                    }
                     // 视频对象：恢复播放地址。优先用存档内归档副本（读取接口已把
                     // videoUrl 重写为 save/<名>/videos/）；旧存档的元数据没有
                     // videoUrl 字段，按原始文件名回退到 data/videos/（生成时的
@@ -363,8 +421,46 @@ class ProjectSerializer {
         // 恢复连线：按映射换算 id 后重建，指向已不存在图片的连线直接丢弃
         this.restoreConnections(data.connections, idMap);
 
+        // 恢复编组（纯几何对象，无引用换算；在图片/节点之后恢复仅为顺序直观）
+        this.restoreGroups(data.groups);
+
         // 重绘画布
         this.canvas.draw();
+    }
+
+    /**
+     * 按存档数据重建画布编组（restoreProject 的辅助方法）
+     * 组不引用成员（几何包含实时判定），直接按存档几何重建即可；
+     * 字段异常的条目跳过，几何钳制到最小尺寸。
+     * @param {Array} groups - 存档组数据 [{id, title, color, x, y, width, height}]
+     */
+    restoreGroups(groups) {
+        const manager = this.canvas.groups;
+        manager.groups = [];
+        manager.selectedIds.clear();
+        if (!Array.isArray(groups)) return;
+        for (const g of groups) {
+            if (!g || typeof g.x !== 'number' || typeof g.y !== 'number' ||
+                typeof g.width !== 'number' || typeof g.height !== 'number') {
+                continue;
+            }
+            manager.groups.push({
+                id: g.id || LumenLight.generateId(),
+                type: 'group',
+                title: g.title || GroupManager.DEFAULT_TITLE,
+                // 颜色键不在预设表内（异常/旧版脏数据）时回退无色
+                color: GroupManager.COLOR_PRESETS[g.color] ? g.color : '',
+                // 标题栏 ns：旧存档无此字段时按恢复尺寸计算（与旧版行为一致）
+                titleNS: (typeof g.titleNS === 'number' && g.titleNS > 0)
+                    ? g.titleNS
+                    : Math.max(Math.min(g.width, g.height) / GroupManager.DESIGN_BASE, 0.01),
+                x: g.x,
+                y: g.y,
+                width: Math.max(g.width, GroupManager.MIN_WIDTH),
+                height: Math.max(g.height, GroupManager.MIN_HEIGHT),
+                selected: false
+            });
+        }
     }
 
     /**
@@ -438,6 +534,16 @@ class ProjectSerializer {
                     denoise: n.denoise,
                     count: n.count
                 });
+            } else if (n.type === NodeTypes.SOURCE.RUNHUB_GEN_NODE) {
+                // RunningHub 云端工作流节点：恢复几何、工作流选择与参数值
+                // （登记卡下拉清单由节点构造后自行异步加载并回填）
+                node = new RunningHubGenNode(this.canvas, n.x, n.y, {
+                    width: n.width,
+                    height: n.height,
+                    workflowId: n.workflowId,
+                    values: n.values,
+                    count: n.count
+                });
             } else if (n.type === NodeTypes.SOURCE.LORA_NODE) {
                 // LoRA 节点：恢复几何与条目列表（文件清单由节点自行异步加载）
                 node = new LoraNode(this.canvas, n.x, n.y, {
@@ -448,6 +554,9 @@ class ProjectSerializer {
             } else {
                 continue;  // 未来扩展其他节点类型在这里分发
             }
+            // 自定义标题回填（旧存档无 title 字段 → 保持类默认标题；
+            // 恢复流程的写入由 RealtimeSaveManager 的 restoring 标志抑制）
+            if (n.title) node.setTitle(n.title);
             this.canvas.images.images.push(node);
             idMap.set(n.id, node.id);
         }

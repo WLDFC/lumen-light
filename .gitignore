@@ -11,6 +11,15 @@ Real-ESRGAN/
 # 实时保存恢复数据（画布变更自动写入的本地恢复槽位）
 data/autosave/
 
+# 网页桥接专用浏览器数据（profile/ 登录态与缓存、server.log，首次桥接自动生成）
+data/webbridge/
+
+# 用户资产库图片（图片工具栏「添加到资产」的运行时数据，内容哈希命名）
+data/assets/
+
+# 工作流编辑器节点布局 sidecar（运行时状态，按 workflow id 分键）
+data/workflow-layouts.json
+
 # 视频生成缓存（临时下载的视频文件，不属于代码）
 data/videos/
 
@@ -22,3 +31,7 @@ data/pi/
 
 # pi 编码智能体完整包（421MB，开源发行时随 release 包分发，不进 git）
 pi/
+
+# MCP 服务器运行时（用户自挂的 MCP 虚拟环境，300MB 级，万级小文件；
+# 随发行包分发、不入 git——与 pi/ 同策略）
+/mcp/

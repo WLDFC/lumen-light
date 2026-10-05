@@ -122,6 +122,8 @@ class SettingsManager {
         this.categories = [
             { id: 'general', label: '通用' },
             { id: 'api', label: 'API' },
+            { id: 'mcp', label: 'MCP' },
+            { id: 'webbridge', label: '网页桥接' },
             { id: 'rembg', label: '抠图模型' }
         ];
 
@@ -141,6 +143,8 @@ class SettingsManager {
         this.panels = {
             general: new SettingsGeneralPanel(this),
             api: new SettingsApiPanel(this),
+            mcp: new SettingsMcpPanel(this),
+            webbridge: new SettingsWebBridgePanel(this),
             rembg: new SettingsRembgPanel(this)
         };
 

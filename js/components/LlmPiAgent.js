@@ -104,7 +104,7 @@ class LlmPiAgent {
         // 思考块正文直接一个 pre；工具块正文按"调用参数/执行结果"分段懒加载
         if (type === 'thinking') block.content = this._addSectionContent(body);
         this._blocks.push(block);
-        this.chat.scrollToBottom();
+        this.chat.followBottom();
         return block;
     }
 
@@ -201,7 +201,7 @@ class LlmPiAgent {
         this._wrap.appendChild(el);
         const block = { type: 'text', el, content };
         this._blocks.push(block);
-        this.chat.scrollToBottom();
+        this.chat.followBottom();
         return block;
     }
 
@@ -333,7 +333,7 @@ class LlmPiAgent {
         this.chat.messagesEl.appendChild(el);
         this._runningEl = el;
         this._runningTextEl = t;
-        this.chat.scrollToBottom();
+        this.chat.followBottom();
     }
 
     /** 改写执行中指示器文本（排队/轮询异常等场景） */
@@ -359,7 +359,7 @@ class LlmPiAgent {
         });
         b.el.appendChild(btn);
         this._finish();
-        this.chat.scrollToBottom();
+        this.chat.followBottom();
     }
 
     // ==================== 发送与事件 ====================
@@ -377,10 +377,9 @@ class LlmPiAgent {
         chat.attachments.clear();
         chat.appendMessage('user', text || '（图片）', images);
 
-        // 建一个空的 assistant 消息容器作为块序列父节点（移除默认文本节点）
-        const seedEl = chat.appendMessage('assistant', '');
-        const wrap = seedEl.parentElement;
-        seedEl.remove();
+        // 建一个空的 assistant 消息容器作为块序列父节点
+        // （气泡创建收敛到 LlmChat.createAssistantBubble 公共接口）
+        const { wrap } = chat.createAssistantBubble();
         wrap.classList.add('thinking', 'pi-turn');
         this._wrap = wrap;
         this._blocks = [];
@@ -397,7 +396,7 @@ class LlmPiAgent {
         // 先放一个带光标的空文本块，表示"已开始、等待输出"
         this._ensureTextBlock().content.textContent = '▍';
         if (chat.sendBtn) chat.sendBtn.textContent = '■ 停止';
-        this._showRunning('pi 执行中…');
+        this._showRunning('执行中…');
         chat.scrollToBottom();
 
         // 附件（dataURL 字符串）→ pi 图片格式
@@ -460,7 +459,7 @@ class LlmPiAgent {
             if (ev.type === 'text_delta') {
                 this._textBuf += ev.delta || '';
                 this._ensureTextBlock().content.textContent = this._textBuf + ' ▍';
-                this.chat.scrollToBottom();
+                this.chat.followBottom();
             } else if (ev.type === 'text_end' && ev.content !== undefined) {
                 this._textBuf = ev.content;
                 this._ensureTextBlock().content.textContent = this._stripCursor(ev.content);
@@ -469,7 +468,7 @@ class LlmPiAgent {
                 const b = this._ensureThinkingBlock();
                 b.el.classList.add('open');   // 流式期间临时展开便于观察，结束再折回
                 b.content.textContent += ev.delta || '';
-                this.chat.scrollToBottom();
+                this.chat.followBottom();
             } else if (ev.type === 'thinking_end' && ev.content !== undefined) {
                 const b = this._ensureThinkingBlock();
                 b.content.textContent = ev.content;
@@ -603,7 +602,7 @@ class LlmPiAgent {
                 }
             }
             this._finish();
-            this.chat.scrollToBottom();
+            this.chat.followBottom();
         } else if (event.type === 'pi_process_exit') {
             // pi 子进程退出（后端广播）：流式中止并明示原因 + 重新继续按钮
             if (this._streaming) {
@@ -646,7 +645,7 @@ class LlmPiAgent {
         });
         bar.append(btnRestart, btnWait);
         block.el.appendChild(bar);
-        this.chat.scrollToBottom();
+        this.chat.followBottom();
     }
 
     /** 回合外说明块（流式外收到上报时没有 _wrap，直接挂消息区） */

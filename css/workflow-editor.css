@@ -1,0 +1,474 @@
+/**
+ * ==========================================================================
+ * 工作流编辑器样式（WorkflowEditor 组件专用）
+ * 复用全局主题变量（--canvas-bg / --icon-bg / --icon-color / --accent）
+ * ==========================================================================
+ */
+
+/* ==================== 遮罩与窗口 ==================== */
+
+.wf-editor-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;    /* 与收藏页弹窗同级：压过画布节点(997)/顶栏(998)/右侧面板(999)，
+                         低于灯箱(2000)，灯箱等后续弹层仍可覆盖本编辑器 */
+    display: none;
+    padding: 24px;    /* 与收藏页弹窗一致：四周留边，主体近乎全屏 */
+    box-sizing: border-box;
+    background: rgba(15, 15, 18, 0.92);
+}
+
+.wf-editor-overlay.open {
+    display: flex;
+}
+
+/* 窗口主体：铺满遮罩内容区（即视口减 24px 四边），与提示词收藏页同尺寸 */
+.wf-editor-window {
+    flex: 1;
+    min-width: 0;
+    background: var(--icon-bg);
+    color: var(--icon-color);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ==================== 头部 ==================== */
+
+.wf-editor-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex: 0 0 auto;
+}
+
+.wf-editor-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.wf-editor-name {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wf-editor-dirty {
+    font-size: 12px;
+    color: #f59e0b;
+}
+
+.wf-editor-flex {
+    flex: 1;
+}
+
+.wf-editor-header button {
+    border: none;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--icon-color);
+}
+
+.wf-editor-header button:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.wf-editor-save {
+    background: var(--accent) !important;
+    color: #fff !important;
+}
+
+.wf-editor-save:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* ==================== 主体：列表 + 图 ==================== */
+
+.wf-editor-body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.wf-editor-list {
+    width: 220px;
+    flex: 0 0 auto;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    overflow-y: auto;
+    padding: 6px;
+}
+
+.wf-editor-list-tip {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 10px;
+}
+
+.wf-editor-item {
+    padding: 7px 9px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+}
+
+.wf-editor-item:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.wf-editor-item.active {
+    background: var(--accent);
+}
+
+.wf-editor-item-name {
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wf-editor-item-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    margin-top: 2px;
+}
+
+.wf-editor-item.active .wf-editor-item-meta {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+/* ==================== 图视口与世界 ==================== */
+/* 画布区配色遵循 .trae/skills/配色美学 色板：底色与画布一致（#0f0f12），
+   节点=浮起层面板 #1b1c21、控件行=凹陷层 #0f0f12、边框统一
+   rgba(128,128,128,0.3)；socket 类型色保留 ComfyUI 规格值（功能色） */
+
+.wf-editor-viewport {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    /* 节点设计 token（端口点/连线配色复用） */
+    --wf-canvas-bg: var(--canvas-bg);               /* #0f0f12，与画布同色 */
+    --wf-node-bg: var(--icon-bg);                   /* #1b1c21 浮起层面板 */
+    --wf-node-header-bg: rgba(255, 255, 255, 0.03); /* 标题栏内层浮起（节点规范同款） */
+    --wf-node-border: rgba(128, 128, 128, 0.3);     /* 通用边框 */
+    --wf-node-text: rgba(255, 255, 255, 0.85);      /* 次要文字 */
+    --wf-widget-bg: var(--canvas-bg);               /* #0f0f12 凹陷层 */
+    --wf-widget-border: rgba(128, 128, 128, 0.3);
+    --wf-widget-text: #fff;                         /* 主文字 */
+    background:
+        radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 22px 22px,
+        var(--wf-canvas-bg);
+    cursor: grab;
+}
+
+.wf-editor-world {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+}
+
+.wf-editor-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.wf-edge {
+    fill: none;
+    stroke: rgba(128, 128, 128, 0.3);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+}
+
+.wf-editor-hint {
+    position: absolute;
+    left: 10px;
+    bottom: 8px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    pointer-events: none;
+}
+
+/* 左键框选橡皮筋（屏幕坐标，覆盖在视口上）：与画布选中框同色 #6cebff */
+.wf-editor-marquee {
+    position: absolute;
+    border: 1px solid #6cebff;
+    background: rgba(108, 235, 255, 0.12);
+    pointer-events: none;
+    z-index: 20;
+}
+
+/* ==================== 节点（ComfyUI 风格：标题栏 + 内嵌控件行） ==================== */
+/* 视觉对齐 ComfyUI 0.37 暗色节点：深灰标题栏 + 状态圆点、
+   控件行 = 整行深底圆角条（标签左、值右），选中态保留项目 accent */
+
+.wf-node {
+    position: absolute;
+    background: var(--wf-node-bg);
+    border: 1px solid var(--wf-node-border);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    user-select: none;
+    cursor: grab;
+}
+
+/* 选中/拖拽只描青色边框提示（与画布选中框 #6cebff 同色），不改阴影；
+   画布选中框为 1.7px，这里 1px border + 1px outline 叠加出 2px 视觉粗细，
+   outline 不占布局，选中时节点不跳动 */
+.wf-node.selected {
+    border-color: #6cebff;
+    outline: 1px solid #6cebff;
+}
+
+.wf-node.dragging {
+    border-color: #6cebff;
+    cursor: grabbing;
+}
+
+/* 忽略（bypass）节点：ComfyUI 同款紫色功能语义色 + 轻微半透明 */
+.wf-node.bypassed {
+    border-color: rgba(167, 139, 250, 0.6);
+    opacity: 0.72;
+}
+
+.wf-node.bypassed .wf-node-head {
+    background: rgba(139, 92, 246, 0.28);
+    color: #d8ccff;
+}
+
+.wf-node.bypassed .wf-node-head::before {
+    background: #a78bfa;
+}
+
+/* 节点右键菜单（忽略/恢复） */
+.wf-node-menu {
+    position: absolute;
+    z-index: 30;
+    min-width: 116px;
+    padding: 4px;
+    background: var(--icon-bg);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.wf-node-menu-item {
+    display: block;
+    width: 100%;
+    border: none;
+    background: none;
+    color: #fff;
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.wf-node-menu-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.wf-node-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 8px 8px 0 0;
+    background: var(--wf-node-header-bg);
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    color: #fff;
+    cursor: grab;
+}
+
+/* 标题栏左侧状态圆点（Comfy 同款视觉；执行态配色留给二期） */
+.wf-node-head::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #8a8a8a;
+}
+
+.wf-node.dragging .wf-node-head {
+    cursor: grabbing;
+}
+
+.wf-node-cls {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wf-node-id {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.5);
+    flex: 0 0 auto;
+}
+
+.wf-node-body {
+    padding: 6px 8px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+/* ==================== 端口行（Comfy 同款：输入点+名居左，输出点+名居右） ==================== */
+/* 容器负外边距抵消 body 内边距，让圆点贴近节点左右边缘 */
+
+.wf-node-ports {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin: 2px -8px 0;
+}
+
+.wf-port-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 24px;
+    padding: 0 6px;
+}
+
+.wf-port {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.wf-port.out {
+    justify-content: flex-end;
+}
+
+.wf-port-dot {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.4);
+    box-sizing: border-box;
+}
+
+.wf-port-name {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.85);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wf-port.out .wf-port-name {
+    text-align: right;
+}
+
+.wf-port-spacer {
+    flex: 1;
+}
+
+/* 控件行 = Comfy 的控件条：整行深底圆角，标签居左、值居右 */
+.wf-node-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    padding: 2px 8px;
+    background: var(--wf-widget-bg);
+    border: 1px solid var(--wf-widget-border);
+    border-radius: 6px;
+}
+
+.wf-node-row:focus-within {
+    border-color: var(--accent);
+}
+
+/* 步进箭头（数值/枚举控件两端，Comfy 控件条形态） */
+.wf-step-btn {
+    flex: 0 0 auto;
+    border: none;
+    background: none;
+    padding: 2px 2px;
+    font-size: 10px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.38);
+    cursor: pointer;
+    user-select: none;
+}
+
+.wf-step-btn:hover {
+    color: #fff;
+}
+
+.wf-node-label {
+    flex: 0 0 88px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.wf-widget {
+    flex: 1;
+    min-width: 0;
+    font-size: 11.5px;
+    padding: 3px 4px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--wf-widget-text);
+    outline: none;
+    font-family: inherit;
+}
+
+textarea.wf-widget {
+    resize: vertical;
+    min-height: 40px;
+    line-height: 1.4;
+}
+
+select.wf-widget {
+    appearance: auto;
+    cursor: pointer;
+    color-scheme: dark;   /* 原生下拉弹层按深色渲染（箭头/边框跟随） */
+}
+
+/* 下拉选项配色与画布节点/面板同款：深底白字（option 弹层是浏览器
+   原生渲染，必须在 option 上显式声明，否则白底白字） */
+select.wf-widget option {
+    background: #0f0f12;
+    color: #ffffff;
+}
+
+/* 数字输入的原生 spinner 在深色主题下过亮，与面板 comfy-num-input
+   同款处理：隐藏后用键盘/滚轮调值 */
+input[type='number'].wf-widget::-webkit-outer-spin-button,
+input[type='number'].wf-widget::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type='checkbox'].wf-widget {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+}

@@ -18,6 +18,7 @@ const router = express.Router();        // 创建路由实例
 const path = require('path');           // 路径处理模块
 const fs = require('fs');               // 文件系统模块
 const { exec } = require('child_process'); // 子进程执行模块，用于调用 Real-ESRGAN
+const sharp = require('sharp');         // 图像预处理：压平 alpha 通道（见下方说明）
 
 /**
  * POST /api/upscale
@@ -60,7 +61,16 @@ router.post('/', async (req, res) => {
         // ==================== 保存 base64 图片到临时文件 ====================
         // 移除 base64 字符串中的 data URL 前缀，只保留纯 base64 数据
         const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
-        fs.writeFileSync(inputPath, Buffer.from(base64Data, 'base64'));
+
+        // 压平 alpha 通道后再落盘：带 alpha 的 PNG 超过约 1 百万像素时，
+        // Real-ESRGAN（ncnn v0.2.0）在本机驱动上全部 tile 提交失败
+        // （vkQueueSubmit failed -4），且退出码仍为 0、照常写出全黑输出。
+        // 统一合成到白底并转为 3 通道 PNG 再喂给 exe（LLM 生成图几乎都是 RGBA）
+        const flatBuffer = await sharp(Buffer.from(base64Data, 'base64'))
+            .flatten({ background: '#ffffff' })   // 透明区域合成白底
+            .png()
+            .toBuffer();
+        fs.writeFileSync(inputPath, flatBuffer);
 
         // ==================== 确定 Real-ESRGAN 模型参数 ====================
         // 根据类型和倍数选择模型：
@@ -118,6 +128,20 @@ router.post('/', async (req, res) => {
                 return res.status(500).json({
                     status: 'error',
                     message: '放大处理失败: ' + error.message
+                });
+            }
+
+            // 纵深防御：exe 内部 Vulkan 提交失败时不返回非零退出码，
+            // 只在 stdout/stderr 打印 vk* failed 并照常写出全黑图片——
+            // 按失败处理，绝不把黑图当成功返回给前端
+            if (/vk\w+ failed/i.test(`${stdout}\n${stderr}`)) {
+                try {
+                    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+                } catch (e) { /* 清理失败不影响应答 */ }
+                console.error('Real-ESRGAN GPU 提交失败（vk* failed）');
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'GPU 提交失败：显存不足或驱动繁忙，请关闭占用显存的程序（如 ComfyUI）后重试'
                 });
             }
 

@@ -34,6 +34,9 @@ class LumenDropdown {
      *        静态线条图标（不显示选项文案），当前选中在菜单里以对勾标记
      * @param {string} [options.triggerIcon] - 图标按钮模式的线条图标路径
      *        （Feather 风格 inner SVG，由组件统一包 svg 壳）
+     * @param {boolean} [options.actionMenu] - 动作型菜单：选项是随时可
+     *        重复执行的动作而非互斥状态，菜单里不打选中对勾（配合
+     *        setLabel 让触发器文案保持动作名不变）
      */
     constructor(trigger, options = {}) {
         this.trigger = trigger;
@@ -42,6 +45,7 @@ class LumenDropdown {
         this.menuClass = options.menuClass || '';
         this.iconButton = !!options.iconButton;
         this.triggerIcon = options.triggerIcon || '';
+        this.actionMenu = !!options.actionMenu;
 
         this.value = '';              // 当前选中值
         this.options = [];            // [{ value, label }]
@@ -144,10 +148,33 @@ class LumenDropdown {
         this._value = v;
     }
 
+    /**
+     * 改写触发器文案（不改当前值与菜单对勾状态）。
+     * 供「动作型」下拉使用：菜单项是动作而非状态（如编组工具栏"布局"），
+     * 选中执行后由调用方把触发器文案恢复为动作名，避免触发器
+     * 变成"宫格布局"与菜单项文案重复
+     * @param {string} text - 触发器文案
+     */
+    setLabel(text) {
+        if (this._labelEl) this._labelEl.textContent = text;
+        this._setTriggerTitle(text);
+    }
+
     /** 隐藏/显示触发器（等价于原 select 的 display 切换） */
     setVisible(visible) {
         this.trigger.style.display = visible ? '' : 'none';
         if (!visible && this._open) this.close();
+    }
+
+    /**
+     * 重定位展开中的菜单（未展开时无操作）。
+     * 触发器被外部力量移动时由调用方在移动时机调用，让 fixed 菜单
+     * 跟随而不脱节——画布视口缩放/平移不是 scroll/resize，组件自带的
+     * 两种自动收起路径都覆盖不到，照 UpscaleManager 子菜单的
+     * reposition 惯例由宿主在 canvasViewportChanged 时机调用
+     */
+    reposition() {
+        if (this._open) this._positionMenu();
     }
 
     /** 下拉是否展开 */
@@ -187,16 +214,19 @@ class LumenDropdown {
             label.className = 'dd-label';
             label.textContent = opt.label;
             item.appendChild(label);
-            const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            check.setAttribute('class', 'dd-check');
-            check.setAttribute('viewBox', '0 0 24 24');
-            check.setAttribute('fill', 'none');
-            check.setAttribute('stroke', 'currentColor');
-            check.setAttribute('stroke-width', '2.4');
-            check.setAttribute('stroke-linecap', 'round');
-            check.setAttribute('stroke-linejoin', 'round');
-            check.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
-            item.appendChild(check);
+            // 选中对勾：动作型菜单不渲染（动作无"当前选中"语义）
+            if (!this.actionMenu) {
+                const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                check.setAttribute('class', 'dd-check');
+                check.setAttribute('viewBox', '0 0 24 24');
+                check.setAttribute('fill', 'none');
+                check.setAttribute('stroke', 'currentColor');
+                check.setAttribute('stroke-width', '2.4');
+                check.setAttribute('stroke-linecap', 'round');
+                check.setAttribute('stroke-linejoin', 'round');
+                check.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+                item.appendChild(check);
+            }
             item.addEventListener('click', () => {
                 this._selectByIndex(i);
             });
@@ -272,7 +302,9 @@ class LumenDropdown {
         }
         this.close();
         this._refreshSelectionUI();
-        if (changed && this.onChange) this.onChange(opt.value);
+        // 动作型菜单每次都触发（重复执行同一动作是正常使用）；
+        // 状态型菜单仅值变化时触发
+        if ((changed || this.actionMenu) && this.onChange) this.onChange(opt.value);
     }
 
     /** 绑定触发器与全局事件（destroy 时成对移除） */

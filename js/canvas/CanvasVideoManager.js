@@ -57,7 +57,16 @@ class CanvasVideoManager {
             probeEl.muted = true;
             probeEl.preload = 'auto';
 
+            // 加载兜底超时：loadeddata/error 都不触发时（后台标签节流、
+            // 编解码异常等）明确失败并提示，不再静默挂起（曾致"视频
+            // 既不上画布也无任何报错"的排查困局）
+            const failTimer = setTimeout(
+                () => reject(new Error('视频加载超时（15s 无响应）: ' + videoUrl)),
+                15000
+            );
+
             probeEl.addEventListener('loadeddata', () => {
+                clearTimeout(failTimer);
                 try {
                     // 从首帧提取封面图（画布上静态显示）
                     const coverCanvas = document.createElement('canvas');
@@ -96,6 +105,7 @@ class CanvasVideoManager {
             }, { once: true });
 
             probeEl.addEventListener('error', () => {
+                clearTimeout(failTimer);
                 reject(new Error('视频加载失败: ' + videoUrl));
             }, { once: true });
 

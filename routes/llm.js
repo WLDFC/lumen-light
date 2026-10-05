@@ -250,6 +250,15 @@ function createLlmRouter({ dataDir }) {
      * （如未来的视频模型）= 新增适配器文件并注册，本路由零改动。
      */
     router.post('/generate-image', async (req, res) => {
+        // 客户端断连监听：前端「停止生图」abort fetch 时同步中止对上游
+        // 厂商的请求（signal 一路穿到 requestJson），避免任务在厂商侧
+        // 继续跑完计费。注意 res 'close' 在正常结束后也会触发，
+        // 须以 writableEnded 区分真断连
+        const abortController = new AbortController();
+        res.on('close', () => {
+            if (!res.writableEnded) abortController.abort();
+        });
+
         try {
             const { model, prompt, size, quality, images, provider } = req.body || {};
 
@@ -296,11 +305,17 @@ function createLlmRouter({ dataDir }) {
                 size,
                 quality,
                 images: imageList,
-                provider: { name: providerName, config }
+                provider: { name: providerName, config },
+                signal: abortController.signal
             });
 
             res.json({ status: 'ok', imageUrl: result.imageSrc, ...(result.reply ? { reply: result.reply } : {}) });
         } catch (error) {
+            // 客户端已断开（停止生图）：上游请求已中止，socket 已失效无法也无需回包
+            if (abortController.signal.aborted) {
+                console.log(`🛑 [${new Date().toLocaleTimeString()}] 客户端取消生图，已中止上游请求`);
+                return;
+            }
             console.error('图像生成请求失败:', error);
             res.status(500).json({
                 status: 'error',

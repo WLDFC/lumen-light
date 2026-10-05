@@ -126,6 +126,8 @@ class NewCanvasManager {
         }
         this.canvas.images.images = [];
         this.canvas.images.selectedIds.clear();
+        this.canvas.groups.clearSelection(); // 同步清空编组选中
+        this.canvas.groups.groups = [];      // 编组是纯几何对象，清数组即可
         this.canvas.connections.clear(); // 同步清空连线，避免残留指向已清空图片的连线
         this.saveManager.setPrompts('', '');
         // 视口复位到 15%：默认视角下用户可见范围更大，上传图片/新建节点后不易只见局部

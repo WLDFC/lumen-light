@@ -1,0 +1,243 @@
+/* ==========================================================================
+   LumenLight pi 技能库弹窗样式
+   对应组件：js/components/LlmSkillManager.js
+   色板遵循项目配色美学规范：底层 #0f0f12、面板 #1b1c21、强调 #3b82f6/#60a5fa
+   遮罩/对话框骨架与系统提示词弹窗（llm-system-prompt.css）同款；
+   入口按钮复用 .llm-system-prompt-btn（32px 正圆线稿），不在此重复定义
+   ========================================================================== */
+
+/* ---------- 弹窗遮罩与对话框 ----------
+   宽度与系统提示词弹窗一致（620px）；技能清单是只读列表，
+   高度上限放宽到 80vh，列表区独立滚动 */
+.llm-sk-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.llm-sk-dialog {
+    width: 620px;
+    max-width: 92vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 18px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- 头部：标题 + 计数 + 关闭 ---------- */
+.llm-sk-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.llm-sk-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.llm-sk-count {
+    flex: 1;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* ---------- 头部上传按钮（与关闭按钮同排） ---------- */
+.llm-sk-upload {
+    flex-shrink: 0;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.llm-sk-upload:hover {
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.5);
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.llm-sk-close {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+}
+
+.llm-sk-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+/* ---------- 语义提示行 ---------- */
+.llm-sk-hint {
+    padding: 8px 10px;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 6px;
+    background: rgba(59, 130, 246, 0.08);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+/* ---------- 技能清单 ---------- */
+.llm-sk-list {
+    flex: 1;
+    min-height: 120px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-right: 4px;   /* 滚动条不压内容 */
+}
+
+.llm-sk-empty {
+    padding: 24px 0;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+}
+
+.llm-sk-item {
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 8px;
+    background: #0f0f12;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.llm-sk-item:hover {
+    border-color: rgba(59, 130, 246, 0.45);
+}
+
+/* 取消勾选（agent 不可见）的技能整行弱化 */
+.llm-sk-item.disabled .llm-sk-name,
+.llm-sk-item.disabled .llm-sk-desc {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.llm-sk-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+}
+
+.llm-sk-check {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+    margin-top: 2px;
+    accent-color: #3b82f6;
+    cursor: pointer;
+}
+
+.llm-sk-main {
+    flex: 1;
+    min-width: 0;        /* 让描述文字可截断而非撑破容器 */
+}
+
+.llm-sk-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.llm-sk-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.llm-sk-id {
+    font-family: monospace;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.llm-sk-desc {
+    margin-top: 3px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;      /* 两行截断，展开正文后行高亮不受影响 */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* AGENTS.md 硬规则技能的禁用后果提示 */
+.llm-sk-warn {
+    margin-top: 4px;
+    color: #fbbf24;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+/* 无效技能文件灰条（不隐藏——格式错的文件要可见才有得修） */
+.llm-sk-item.invalid {
+    cursor: default;
+    border-style: dashed;
+    opacity: 0.65;
+}
+
+/* ---------- 技能全文（点击行展开，只读） ---------- */
+.llm-sk-body {
+    display: none;
+    margin: 0 12px 10px;
+    padding: 10px 12px;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+    color: rgba(255, 255, 255, 0.75);
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.llm-sk-item.expanded {
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.llm-sk-item.expanded .llm-sk-body {
+    display: block;
+}
+
+/* ---------- 底部 ---------- */
+.llm-sk-footer {
+    display: flex;
+    align-items: center;
+}
+
+.llm-sk-footer-hint {
+    flex: 1;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+}

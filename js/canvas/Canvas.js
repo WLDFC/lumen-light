@@ -43,6 +43,17 @@ class Canvas {
         this.connectingHoverTarget = null; // 拖线过程中鼠标悬停的目标图片（用于高亮反馈）
         this.hoverConnection = null;     // 鼠标悬停的连线（用于红色高亮与点击断开）
 
+        // 编组（Group）手势状态（由 CanvasInteraction 读写，数据在 this.groups 管理）
+        this.isDraggingGroup = false;    // 是否正在拖动组（标题栏拖动，成员联动）
+        this.dragGroup = null;           // 当前拖动的组对象
+        this.groupDragOrigin = null;     // 拖动开始的鼠标画布坐标 {x, y}
+        this.groupDragStartRect = null;  // 拖动开始的组矩形快照 {x, y}
+        this.groupDragMembers = null;    // 拖动开始时的成员快照 [{obj, ox, oy}]
+        this.isResizingGroup = false;    // 是否正在拖组边缘手柄缩放
+        this.resizeGroupTarget = null;   // 当前缩放的组对象
+        this.resizeGroupHandle = null;   // 手柄方位 'n'|'s'|'w'|'e'
+        this.resizeGroupStartRect = null;// 缩放开始的组矩形快照 {x, y, width, height}
+
         this.init();
     }
 
@@ -54,7 +65,8 @@ class Canvas {
         this.applyDprSize();
         window.addEventListener('resize', () => this.resize()); // 窗口大小变化时重设尺寸
 
-        // 创建并协调各子模块
+        // 创建并协调各子模块（groups 先于 renderer 创建：渲染器绘制组体时读取）
+        this.groups = new GroupManager(this);           // 编组管理器
         this.renderer = new CanvasRenderer(this);       // 渲染器
         this.interaction = new CanvasInteraction(this); // 交互管理器
         this.videoManager = new CanvasVideoManager(this); // 视频播放管理器

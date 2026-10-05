@@ -63,6 +63,26 @@
     letter-spacing: 0.3px;
 }
 
+/* 标题行内重命名输入框：双击 .text-node-title 进入，替换其文字显示。
+   字号/内边距/圆角随 --ns 缩放与标题文字观感一致；user-select: text
+   覆盖父级 .text-node 的 none（否则输入框内无法选中文字） */
+.node-title-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-right: calc(12px * var(--ns));
+    font-family: inherit;
+    font-size: calc(18px * var(--ns));
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.3px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(108, 235, 255, 0.45);
+    border-radius: calc(4px * var(--ns));
+    padding: calc(1px * var(--ns)) calc(6px * var(--ns));
+    outline: none;
+    user-select: text;
+}
+
 /* 右上角类型徽标：次要说明文字 */
 .text-node-badge {
     font-size: calc(13px * var(--ns));
@@ -249,7 +269,6 @@
     position: relative;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: calc(8px * var(--ns));
     padding: 0 calc(15px * var(--ns)) calc(12px * var(--ns));
     flex-shrink: 0;
@@ -294,8 +313,29 @@
     opacity: 0.6;
 }
 
-/* 圆形执行按钮：白底深色箭头（参考对话输入框的发送按钮） */
+/* 模型下拉：技能栏第二个下拉（同款样式）。触发按钮与菜单包在定位
+   容器里——菜单锚定按钮而非整条技能栏，弹出位置紧贴模型按钮 */
+.prompt-skill-model-wrap {
+    position: relative;
+    display: inline-flex;
+    min-width: 0;
+}
+
+.prompt-skill-model-trigger {
+    max-width: calc(120px * var(--ns));
+}
+
+.prompt-skill-model-trigger .skill-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.85;
+}
+
+/* 圆形执行按钮：白底深色箭头（参考对话输入框的发送按钮）；
+   靠右放置（技能+模型下拉在左侧成组） */
 .prompt-skill-run {
+    margin-left: auto;
     width: calc(32px * var(--ns));
     height: calc(32px * var(--ns));
     border-radius: 50%;
@@ -344,11 +384,12 @@
     to { transform: rotate(360deg); }
 }
 
-/* 技能下拉面板：向上弹出（技能栏贴着节点底缘），随 --ns 缩放 */
+/* 技能下拉面板：向下弹出（不遮挡上方提示词文本域），随 --ns 缩放。
+   模型下拉复用本类，锚定各自的定位父级 */
 .prompt-skill-menu {
     position: absolute;
     left: 0;
-    bottom: calc(100% + 4px * var(--ns));
+    top: calc(100% + 4px * var(--ns));
     z-index: 5;                       /* 盖住上方文本域的镜像层（z-index:1） */
     min-width: calc(190px * var(--ns));
     padding: calc(5px * var(--ns));
@@ -363,6 +404,22 @@
 
 .prompt-skill-menu[hidden] {
     display: none;
+}
+
+/* 模型下拉面板：定位父级是 .prompt-skill-model-wrap（left:0 继承自
+   .prompt-skill-menu，即紧贴模型按钮左缘），限高滚动 */
+.prompt-skill-model-menu {
+    min-width: calc(180px * var(--ns));
+    max-height: calc(300px * var(--ns));
+    overflow-y: auto;
+}
+
+/* 菜单内的提示行（加载中 / 暂无可用模型） */
+.prompt-skill-hint {
+    padding: calc(8px * var(--ns)) calc(10px * var(--ns));
+    color: rgba(255, 255, 255, 0.45);
+    font-size: calc(13px * var(--ns));
+    white-space: nowrap;
 }
 
 .prompt-skill-option {
@@ -875,6 +932,21 @@
 }
 
 
+/* ==================== 编组标题改名浮动输入框 ==================== */
+/* GroupManager.startRename 创建（双击组标题栏），fixed 定位；
+   位置与尺寸由 syncRenameTransform 每帧按视口缩放写入（覆盖标题栏），
+   这里只提供外观基线（与 .node-title-input 同语言） */
+.group-title-input {
+    position: fixed;
+    z-index: 1400;                    /* 高于顶栏 998 / 右侧面板 999，低于模态弹窗 ≥1500 */
+    background: rgba(0, 0, 0, 0.35);  /* 与节点标题输入框同底 */
+    border: 1px solid rgba(108, 235, 255, 0.45);
+    color: #fff;
+    outline: none;
+    user-select: text;
+}
+
+
 /* ==================== Comfy 生图节点：数量步进器（生成按钮左侧） ==================== */
 /* 与面板运行按钮旁的步进器同一交互（CountStepper 行为层共用），
    外观走节点 --ns 体系；数值框为凹陷层 #0f0f12，光标青色增强 */
@@ -962,3 +1034,10 @@
 .comfy-gen-node .comfy-count-stepper-arrow:active {
     background: rgba(255, 255, 255, 0.18);
 }
+
+/* ==================== RunningHub 云端工作流节点（RunningHubGenNode） ==================== */
+/* 完整复用 .text-node / .image-gen-node / .comfy-gen-node 全套样式：
+   工作流下拉走 .llm-model-select，参数行走 .comfy-param-row +
+   .comfy-num-input / .llm-count-select，生成按钮走 .comfy-generate-row。
+   本段暂无覆盖规则，作为新节点类型的样式锚点——后续若有节点专属
+   差异化需求（如徽标强调色）从这里扩展，不修改共享 comfy 规则 */

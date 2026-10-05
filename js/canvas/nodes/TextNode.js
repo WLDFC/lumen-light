@@ -81,6 +81,9 @@ class TextNode extends BaseCanvasNode {
         // 文本镜像层（通用模块）：自绘粗光标（无 tokenPattern，不做标记高亮）
         this.mirrorLayer = new NodeTextMirror(this.inputEl, this.mirrorEl);
 
+        // 标题双击重命名（基类共用实现，六类节点同一套交互）
+        this.initTitleEditor();
+
         // 挂到画布容器（canvas 元素的父级，即 body），跟随视口变换
         document.body.appendChild(this.el);
     }
@@ -181,7 +184,8 @@ class TextNode extends BaseCanvasNode {
             y: this.y,
             width: this.width,
             height: this.height,
-            text: this.text
+            text: this.text,
+            ...(this.title ? { title: this.title } : {})
         };
     }
 }
@@ -191,6 +195,7 @@ class TextNode extends BaseCanvasNode {
 // 已上收到基类 BaseCanvasNode（静态继承，this.constructor.X 直接可见）
 TextNode.DEFAULT_WIDTH = 2048;    // 默认宽度（与提示词/生图节点同量级）
 TextNode.DEFAULT_HEIGHT = 2048;   // 默认高度
+TextNode.DEFAULT_TITLE = 'Note';  // 默认标题（双击标题可自定义）
 
 // 将 TextNode 类暴露到全局作用域
 window.TextNode = TextNode;

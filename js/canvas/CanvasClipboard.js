@@ -236,6 +236,8 @@ class CanvasClipboard {
                     source: obj.source,
                     prompt: obj.prompt || '',
                     negativePrompt: obj.negativePrompt || '',
+                    // 编辑笔迹层随图复制（粘贴出的副本带笔迹图层）
+                    ...(obj.editStrokes ? { editStrokes: obj.editStrokes } : {}),
                     // 视频对象保留播放地址：剪切会跳过文件清理
                     // （delete 的 skipFileCleanup 选项），粘贴出的副本
                     // 依赖它继续可播放
@@ -321,6 +323,16 @@ class CanvasClipboard {
                         count: data.count
                     });
                     c.images.images.push(node);
+                } else if (entry.type === NodeTypes.SOURCE.RUNHUB_GEN_NODE) {
+                    // RunningHub 云端工作流节点：恢复几何、工作流选择与参数值
+                    node = new RunningHubGenNode(c, data.x + offset, data.y + offset, {
+                        width: data.width,
+                        height: data.height,
+                        workflowId: data.workflowId,
+                        values: data.values,
+                        count: data.count
+                    });
+                    c.images.images.push(node);
                 } else if (entry.type === NodeTypes.SOURCE.LORA_NODE) {
                     node = new LoraNode(c, data.x + offset, data.y + offset, {
                         width: data.width,
@@ -355,10 +367,21 @@ class CanvasClipboard {
                     source: d.source,
                     prompt: d.prompt,
                     negativePrompt: d.negativePrompt,
+                    // 编辑笔迹层随图恢复（副本共享同一笔迹 data URL，
+                    // 首次渲染时各自加载 editStrokesImg）
+                    ...(d.editStrokes ? { editStrokes: d.editStrokes } : {}),
                     // 视频对象恢复播放地址（复制时保留，见 copySelection）
                     ...(d.videoUrl ? { videoUrl: d.videoUrl } : {}),
                     created: Date.now()
                 };
+                if (obj.editStrokes) {
+                    const layer = new Image();
+                    layer.onload = () => {
+                        obj.editStrokesImg = layer;
+                        c.draw();
+                    };
+                    layer.src = obj.editStrokes;
+                }
                 c.images.images.push(obj);
                 newObjects.push(obj);
             }

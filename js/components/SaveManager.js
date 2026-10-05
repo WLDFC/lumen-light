@@ -278,7 +278,8 @@ class SaveManager {
             negativePrompt: prompts.negative,
             viewport: this.getViewport(),
             connections: this.getConnectionsData(),
-            nodes: this.collectNodes()
+            nodes: this.collectNodes(),
+            groups: this.serializer.collectGroups()
         });
         const token = init.token;
 

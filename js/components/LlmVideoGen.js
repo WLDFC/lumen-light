@@ -267,6 +267,9 @@ class LlmVideoGen {
             </svg>
         `;
         dragBtn.addEventListener('click', () => this._addVideoToCanvas(videoPath, prompt));
+        // 路径/提示词存 data 属性：F5 恢复后重绑按钮时从 DOM 取回
+        dragBtn.dataset.videoPath = videoPath;
+        dragBtn.dataset.prompt = prompt || '';
         videoWrap.appendChild(dragBtn);
 
         block.appendChild(videoWrap);
@@ -286,6 +289,7 @@ class LlmVideoGen {
             </svg>
             <span>下载视频</span>
         `;
+        downloadBtn.dataset.videoPath = videoPath;   // F5 恢复后重绑下载用
         downloadBtn.addEventListener('click', () => {
             const a = document.createElement('a');
             a.href = '/' + videoPath;

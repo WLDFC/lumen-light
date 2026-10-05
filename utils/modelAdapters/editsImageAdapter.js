@@ -39,7 +39,7 @@ module.exports = {
      * @returns {Promise<{imageSrc: string}>} 图片源（URL 或 base64 data URL）
      */
     async run(request) {
-        const { model, prompt, size, quality, images, provider } = request;
+        const { model, prompt, size, quality, images, provider, signal } = request;
         const editUrl = buildImageEditUrl(provider.config.endpoint);
 
         // 优先透传前端选择的原始尺寸；若接口报尺寸不支持，
@@ -50,12 +50,12 @@ module.exports = {
         let editResult;
         try {
             console.log(`🖌️ [${provider.name}] 图像编辑(/images/edits): 模型=${model}, 参考图数量=${images.length}, 尺寸=${requestedSize || '自动'}, 质量=${quality || '自动'}`);
-            editResult = await requestImageEdit(editUrl, provider.config.apiKey, { ...editParams, size: requestedSize });
+            editResult = await requestImageEdit(editUrl, provider.config.apiKey, { ...editParams, size: requestedSize, signal });
         } catch (error) {
             if (!requestedSize || !/size|尺寸|dimension/i.test(error.message)) throw error;
             const fallbackSize = mapSizeForEditsModel(requestedSize);
             console.warn(`尺寸 ${requestedSize} 不被支持，回退官方档位 ${fallbackSize || 'auto'}: ${error.message}`);
-            editResult = await requestImageEdit(editUrl, provider.config.apiKey, { ...editParams, size: fallbackSize });
+            editResult = await requestImageEdit(editUrl, provider.config.apiKey, { ...editParams, size: fallbackSize, signal });
         }
 
         const editFirst = editResult.data?.[0];

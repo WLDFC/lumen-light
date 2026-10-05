@@ -15,7 +15,9 @@
  *           是否命中本适配器；context: { model, imageList }
  *   run(request) → Promise<{ imageSrc: string, reply?: string }>
  *           执行生成并提取结果；request: { model, prompt, size, quality,
- *           images, provider: { name, config } }
+ *           images, provider: { name, config }, signal }
+ *           signal 为可选 AbortSignal（客户端取消生图时中止上游请求），
+ *           适配器必须透传给底层请求函数。
  *           失败时抛出带可读 message 的 Error（路由层原样回传前端）。
  *
  * 注册顺序即匹配优先级，兜底适配器（generations-image）必须放最后。

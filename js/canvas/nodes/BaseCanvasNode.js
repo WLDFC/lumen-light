@@ -50,6 +50,10 @@ class BaseCanvasNode {
         this.name = null;     // 无文件名
         this.prompt = '';
         this.negativePrompt = '';
+
+        // 自定义标题（null = 显示类默认标题 DEFAULT_TITLE；双击标题可改）
+        this.title = null;
+        this.titleEl = null;  // 标题元素（initTitleEditor 时缓存）
     }
 
     /**
@@ -167,6 +171,106 @@ class BaseCanvasNode {
         this.el.classList.toggle('selected', selected);
     }
 
+    // ==================== 标题（双击行内重命名，六类节点共用） ====================
+
+    /**
+     * 当前显示标题：自定义标题为空时回退类默认标题（子类 DEFAULT_TITLE 常量）
+     * @returns {string}
+     */
+    getTitle() {
+        return this.title || this.constructor.DEFAULT_TITLE;
+    }
+
+    /**
+     * 初始化标题编辑（子类 buildDom 构建 DOM 后调用）：
+     * 缓存标题元素并按当前标题设置文字，绑定双击进入行内重命名。
+     * 六类节点标题栏 DOM 同构（.text-node-title），故收口在基类实现
+     */
+    initTitleEditor() {
+        this.titleEl = this.el.querySelector('.text-node-title');
+        if (!this.titleEl) return;
+        this.refreshTitle();
+        this.titleEl.addEventListener('dblclick', () => this.startTitleRename());
+    }
+
+    /** 刷新标题栏文字显示（恢复存档/程序化改名后调用） */
+    refreshTitle() {
+        if (this.titleEl) this.titleEl.textContent = this.getTitle();
+    }
+
+    /**
+     * 设置自定义标题：空值视为清除（回退类默认标题）。
+     * 改名后补发一次 input 事件——CanvasChangeWatcher 靠 input/change
+     * 委托捕获节点变更，回车提交时输入框已被移除、不再有原生事件，
+     * 不补发会在防抖窗口外丢保存
+     * @param {string} value - 新标题（自动去首尾空白）
+     */
+    setTitle(value) {
+        const next = (value || '').trim() || null;
+        if (next === this.title) return;
+        this.title = next;
+        this.refreshTitle();
+        this.el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    /**
+     * 双击标题进入行内重命名：标题替换为输入框（自动全选），回车/失焦提交、
+     * Esc 取消，输入法组合中的回车忽略（交互模式同 RecipeManager.startRename）。
+     * 提交空名回退类默认标题；与当前标题相同视为取消不触发保存。
+     * 编辑期间拦截 mousedown/keydown 冒泡——节点不可拖动，按键也不外泄
+     * 到其他全局快捷键（CanvasInteraction 对 INPUT 目标本就放行原生行为）
+     */
+    startTitleRename() {
+        // 已在编辑状态（输入框存在）则忽略
+        if (!this.titleEl || this.titleEl.querySelector('.node-title-input')) return;
+
+        const original = this.getTitle();
+        const input = document.createElement('input');
+        input.className = 'node-title-input';
+        input.type = 'text';
+        input.maxLength = 40;
+        input.value = original;
+
+        let done = false;      // 编辑已结束（提交或取消）
+        let composing = false; // 输入法组合进行中（组合回车是选字，不是提交）
+
+        /** 结束编辑：移除输入框恢复显示；newTitle 为 undefined 表示取消 */
+        const finish = (newTitle) => {
+            if (done) return;
+            done = true;
+            input.remove();
+            if (newTitle !== undefined) this.setTitle(newTitle);
+            // 同名提交时 setTitle 会早退，必须兜底刷新（输入框移除后文字为空）
+            this.refreshTitle();
+        };
+
+        /** 提交：trim 后交给 setTitle（空名回退默认标题） */
+        const commit = () => {
+            if (done) return;
+            finish(input.value.trim());
+        };
+
+        input.addEventListener('compositionstart', () => { composing = true; });
+        input.addEventListener('compositionend', () => { composing = false; });
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter' && !composing) {
+                e.preventDefault();
+                commit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                finish();   // 取消：不调 setTitle，恢复原名
+            }
+        });
+        input.addEventListener('blur', () => commit());
+        input.addEventListener('mousedown', (e) => e.stopPropagation());
+
+        this.titleEl.textContent = '';
+        this.titleEl.appendChild(input);
+        input.focus();
+        input.select();
+    }
+
     /**
      * 从 DOM 移除节点（删除时调用）。
      * 子类覆写时先做专属清理（占位图/镜像层/看门狗等）再调用 super.destroy()
@@ -214,6 +318,7 @@ class BaseCanvasNode {
 //   this.constructor.X 在子类中直接可见）
 BaseCanvasNode.DESIGN_BASE = 512;       // 设计基准（ns = 1 时的内容尺寸）
 BaseCanvasNode.LAYOUT_MODE = 'world';   // 布局模式：world | design（见类头）
+BaseCanvasNode.DEFAULT_TITLE = 'Node';  // 默认标题（子类各自覆写）
 BaseCanvasNode.MIN_WIDTH = 1024;        // 最小宽度
 BaseCanvasNode.MIN_HEIGHT = 1024;       // 最小高度
 BaseCanvasNode.RESIZE_HANDLE_SIZE = 16; // 缩放手柄边长（屏幕像素）

@@ -6,6 +6,8 @@
  * 包含以下功能按钮：
  *   - 添加到内容：LLM 模式下加入聊天待发送图片区，Comfy 模式下加入内容缩略图列表
  *   - 高清放大：调用 UpscaleManager 对图片进行高清放大处理
+ *   - 添加到资产：POST /api/assets 存入后端 data/assets/（内容哈希去重），
+ *     资产库随之出现内置标签「我的资产」（见 AssetLibrary.onAssetsSaved）
  *   - 下载：将当前选中的图片保存到本地
  *
  * 同时，工具栏还会显示：
@@ -60,7 +62,11 @@ class ImageToolbar {
 
     /**
      * 创建工具栏 DOM 结构
-     * 工具栏从左到右包含三个区域：添加到内容、高清放大 / 抠图、下载
+     * 工具栏从左到右三个功能区：左=添加到内容；中=高清放大 / 去除背景 /
+     * 编辑（画笔·扩图·遮罩下拉）/ 保存提示词 / 添加到资产；右=下载（仅图标）。
+     * 结构与行为分离：整体 innerHTML 模板一次成型（全貌一屏可见），
+     * 事件绑定集中在 bindToolbarActions——加新按钮 = 模板加一段 HTML +
+     * 绑定区加一段监听，不再写 createElement 样板
      */
     createToolbar() {
         // 创建工具栏根节点，初始状态为隐藏
@@ -68,138 +74,193 @@ class ImageToolbar {
         this.toolbar.className = 'image-toolbar';
         this.toolbar.style.display = 'none';
 
-        // 工具栏内容容器，用于布局三个功能区域
-        const content = document.createElement('div');
-        content.className = 'image-toolbar-content';
-
-        // ==================== 左侧功能区：添加到内容 ====================
-        const leftSection = document.createElement('div');
-        leftSection.className = 'toolbar-section left';
-
-        // 创建"添加到内容"按钮
-        const addToContentBtn = document.createElement('button');
-        addToContentBtn.className = 'toolbar-btn add-to-content-btn';
-        addToContentBtn.title = '添加到内容';
-        // 按钮图标：方框内带十字加号，配合文字"添加到内容"
-        addToContentBtn.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                <line x1="12" y1="8" x2="12" y2="16"></line>
-                <line x1="8" y1="12" x2="16" y2="12"></line>
-            </svg>
-            <span class="btn-text">添加到内容</span>
-        `;
-        // 点击时阻止事件冒泡，避免触发画布取消选中
-        addToContentBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.addToContent();
-        });
-
-        leftSection.appendChild(addToContentBtn);
-
-        // ==================== 中间功能区：高清放大 ====================
-        const centerSection = document.createElement('div');
-        centerSection.className = 'toolbar-section center';
-
-        // 初始化高清放大管理器，用于显示放大倍数菜单
+        // 高清放大管理器（倍数菜单 DOM 由 UpscaleManager 自建，点击按钮时弹出）
         this.upscaleManager = new UpscaleManager();
 
-        // 创建"高清放大"按钮
-        const upscaleBtn = document.createElement('button');
-        upscaleBtn.className = 'toolbar-btn upscale-btn';
-        upscaleBtn.title = '高清放大';
-        // 按钮图标：方框内带网格线，配合文字"高清放大"
-        upscaleBtn.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                <path d="M9 3v18"></path>
-                <path d="M15 3v18"></path>
-                <path d="M3 9h18"></path>
-                <path d="M3 15h18"></path>
-            </svg>
-            <span class="btn-text">高清放大</span>
-        `;
-        // 点击时阻止事件冒泡并弹出高清放大选项菜单
-        upscaleBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.showUpscaleMenu(upscaleBtn);
-        });
-
-        centerSection.appendChild(upscaleBtn);
-
-        // 创建“去除背景”按钮
-        const rembgBtn = document.createElement('button');
-        rembgBtn.className = 'toolbar-btn rembg-btn';
-        rembgBtn.title = '去除背景';
-        // 按钮图标：图片与橡皮擦，表示擦除图片背景
-        rembgBtn.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="12" height="16" rx="2"></rect>
-                <circle cx="7.5" cy="9" r="1.5"></circle>
-                <path d="m5 17 3.5-3.5 2.5 2.5 2-2"></path>
-                <path d="m15 14 3.5-3.5 3 3-5.5 5.5H13v-3z"></path>
-                <path d="m17 12 2 2"></path>
-            </svg>
-            <span class="btn-text">去除背景</span>
-        `;
-        // 点击时阻止事件冒泡并执行抠图
-        rembgBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.removeBackground();
-        });
-
-        centerSection.appendChild(rembgBtn);
-
-        // ==================== 右侧功能区：下载 ====================
-        const rightSection = document.createElement('div');
-        rightSection.className = 'toolbar-section right';
-
-        // 创建"下载"按钮（仅图标，无文字）
-        const downloadBtn = document.createElement('button');
-        downloadBtn.className = 'toolbar-btn download-btn';
-        downloadBtn.title = '下载图片';
-        // 按钮图标：向下箭头指向底板，表示下载
-        downloadBtn.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-        `;
-        // 点击时阻止事件冒泡并执行下载
-        downloadBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.downloadImage();
-        });
-
-        rightSection.appendChild(downloadBtn);
-
-        const saveTagBtn = document.createElement('button');
-        saveTagBtn.className = 'toolbar-btn save-tag-btn';
-        saveTagBtn.title = '保存提示词';
-        saveTagBtn.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 3h12a2 2 0 0 1 2 2v16l-8-4-8 4V5a2 2 0 0 1 2-2z"></path>
-                <line x1="12" y1="7" x2="12" y2="13"></line>
-                <line x1="9" y1="10" x2="15" y2="10"></line>
-            </svg>
-            <span class="btn-text">保存提示词</span>
-        `;
-        saveTagBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.savePromptTag();
-        });
-        centerSection.appendChild(saveTagBtn);
-
-        // 将三个功能区组装到内容容器中
-        content.appendChild(leftSection);
-        content.appendChild(centerSection);
-        content.appendChild(rightSection);
-        this.toolbar.appendChild(content);
+        // ==================== 结构模板（所见即工具栏全貌） ====================
+        this.toolbar.innerHTML = `
+            <div class="image-toolbar-content">
+                <!-- 左侧功能区：添加到内容（LLM 模式进附件区，Comfy 模式进内容列表） -->
+                <div class="toolbar-section left">
+                    <button type="button" class="toolbar-btn add-to-content-btn" title="添加到内容">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="12" y1="8" x2="12" y2="16"></line>
+                            <line x1="8" y1="12" x2="16" y2="12"></line>
+                        </svg>
+                        <span class="btn-text">添加到内容</span>
+                    </button>
+                </div>
+                <!-- 中间功能区：高清放大 / 去除背景 / 编辑下拉 / 保存提示词 / 添加到资产 -->
+                <div class="toolbar-section center">
+                    <button type="button" class="toolbar-btn upscale-btn" title="高清放大">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <path d="M9 3v18"></path>
+                            <path d="M15 3v18"></path>
+                            <path d="M3 9h18"></path>
+                            <path d="M3 15h18"></path>
+                        </svg>
+                        <span class="btn-text">高清放大</span>
+                        <svg class="btn-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </button>
+                    <button type="button" class="toolbar-btn rembg-btn" title="去除背景">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="4" width="12" height="16" rx="2"></rect>
+                            <circle cx="7.5" cy="9" r="1.5"></circle>
+                            <path d="m5 17 3.5-3.5 2.5 2.5 2-2"></path>
+                            <path d="m15 14 3.5-3.5 3 3-5.5 5.5H13v-3z"></path>
+                            <path d="m17 12 2 2"></path>
+                        </svg>
+                        <span class="btn-text">去除背景</span>
+                    </button>
+                    <!-- 编辑下拉：按钮 + caret + 菜单层（复刻提示词技能栏的下拉模式） -->
+                    <div class="toolbar-edit-wrap">
+                        <button type="button" class="toolbar-btn edit-btn" title="编辑图片">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                            </svg>
+                            <span class="btn-text">编辑</span>
+                            <svg class="btn-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </button>
+                        <div class="edit-menu" hidden>
+                            <button type="button" class="edit-menu-item" title="用画笔在图片上涂画">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                                </svg>
+                                <span>画笔</span>
+                            </button>
+                            <button type="button" class="edit-menu-item" title="扩展或裁剪图像画幅（白色填充扩展区）">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                                <span>扩图</span>
+                            </button>
+                            <button type="button" class="edit-menu-item" title="涂抹局部重绘遮罩（重绘区域随图自动传给 Comfy 工作流）">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9c0-.55-.45-1-1-1h-4a2 2 0 0 1-2-2V5c0-.55-.45-1-1-1z"></path><path d="M6.5 6.5h.01"></path><path d="M5.5 10.5h.01"></path><path d="M8.5 9.5h.01"></path></svg>
+                                <span>遮罩</span>
+                            </button>
+                        </div>
+                    </div>
+                    <button type="button" class="toolbar-btn save-tag-btn" title="保存提示词">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 3h12a2 2 0 0 1 2 2v16l-8-4-8 4V5a2 2 0 0 1 2-2z"></path>
+                            <line x1="12" y1="7" x2="12" y2="13"></line>
+                            <line x1="9" y1="10" x2="15" y2="10"></line>
+                        </svg>
+                        <span class="btn-text">保存提示词</span>
+                    </button>
+                    <!-- 添加到资产：保存到后端 data/assets/（内容哈希去重），
+                         左侧资产库出现内置标签「我的资产」——与「下载」互补 -->
+                    <button type="button" class="toolbar-btn add-asset-btn" title="添加到资产（保存到「我的资产」，左侧资产库可见）">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            <line x1="12" y1="11" x2="12" y2="17"></line>
+                            <line x1="9" y1="14" x2="15" y2="14"></line>
+                        </svg>
+                        <span class="btn-text">添加到资产</span>
+                    </button>
+                </div>
+                <!-- 右侧功能区：下载（仅图标，无文字） -->
+                <div class="toolbar-section right">
+                    <button type="button" class="toolbar-btn download-btn" title="下载图片">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>`;
 
         // 将工具栏追加到 body，使其能够绝对定位悬浮在画布之上
         document.body.appendChild(this.toolbar);
 
+        this.bindToolbarActions();
+    }
+
+    /**
+     * 绑定工具栏各按钮的点击事件（按钮结构见 createToolbar 的模板）。
+     * 每个监听都 stopPropagation：点击落在工具栏上不应传给画布取消选中，
+     * 也不应触发 document 级「点击外部收起菜单」的监听
+     */
+    bindToolbarActions() {
+        // ---- 左侧：添加到内容 ----
+        this.toolbar.querySelector('.add-to-content-btn')
+            .addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.addToContent();
+            });
+
+        // ---- 中间：高清放大（弹出倍数菜单）----
+        const upscaleBtn = this.toolbar.querySelector('.upscale-btn');
+        upscaleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // 先收起"编辑"子菜单——两个下拉互斥，不允许同时展开
+            this.closeEditMenu();
+            this.showUpscaleMenu(upscaleBtn);
+        });
+
+        // ---- 中间：去除背景（本地 RMBG 抠图）----
+        this.toolbar.querySelector('.rembg-btn')
+            .addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.removeBackground();
+            });
+
+        // ---- 中间：编辑（下拉：画笔 / 扩图 / 遮罩）----
+        // editWrap 引用被下方 document 级「点击外部收起」监听使用，不可丢；
+        // editMenu 挂实例属性：toggleEditMenu / closeEditMenu / show 系读写
+        const editWrap = this.toolbar.querySelector('.toolbar-edit-wrap');
+        this.editMenu = this.toolbar.querySelector('.edit-menu');
+        this.toolbar.querySelector('.edit-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            // 先收起高清放大菜单——两个下拉互斥，不允许同时展开
+            this.upscaleManager?.removeMenu();
+            this.toggleEditMenu();
+        });
+        // 菜单项按模板顺序取用：画笔 / 扩图 / 遮罩（新增菜单项时模板与
+        // 此处的解构顺序必须同步）
+        const [brushItem, outpaintItem, maskItem] =
+            this.toolbar.querySelectorAll('.edit-menu-item');
+        brushItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.closeEditMenu();
+            this.openImageEditor();
+        });
+        outpaintItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.closeEditMenu();
+            this.openOutpaint();
+        });
+        maskItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.closeEditMenu();
+            this.openMaskEditor();
+        });
+        // 点击工具栏与菜单以外区域时收起编辑子菜单
+        document.addEventListener('click', (e) => {
+            if (!editWrap.contains(e.target)) this.closeEditMenu();
+        });
+
+        // ---- 中间：保存提示词（SaveTagDialog 弹窗）----
+        this.toolbar.querySelector('.save-tag-btn')
+            .addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.savePromptTag();
+            });
+
+        // ---- 中间：添加到资产（POST /api/assets 存 data/assets/）----
+        this.toolbar.querySelector('.add-asset-btn')
+            .addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.addToAssets();
+            });
+
+        // ---- 右侧：下载 ----
+        this.toolbar.querySelector('.download-btn')
+            .addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.downloadImage();
+            });
     }
 
     /**
@@ -253,6 +314,15 @@ class ImageToolbar {
         document.addEventListener('mousedown', (e) => {
             if (this.isVisible && !this.toolbar.contains(e.target) &&
                 !this.nameLabel.contains(e.target) && !this.sizeLabel.contains(e.target)) {
+                // 高清放大的二级/三级菜单挂在 body 上而非工具栏内：点它
+                // 不算"点外部"——hide() 会连带 removeMenu() 把菜单拆掉，
+                // mousedown 又先于 click，倍数选项就永远点不到了
+                const um = this.upscaleManager;
+                const inUpscaleMenu = !!(um && ((um.menuContainer &&
+                        um.menuContainer.contains(e.target)) ||
+                    (um.activeScaleMenu && um.activeScaleMenu.contains(e.target))));
+                if (inUpscaleMenu) return;
+
                 const isCanvasClick = e.target.tagName === 'CANVAS';
                 const hasSelectedImages = this.canvas.images.selectedIds.size > 0;
 
@@ -327,6 +397,9 @@ class ImageToolbar {
         }
         this.updateThrottleTimer = requestAnimationFrame(() => {
             this.updatePosition();
+            // 工具栏就位后放大子菜单跟随按钮重定位——必须在其后执行，
+            // 否则读到的是移动前的旧按钮位置，菜单会慢一拍
+            this.upscaleManager?.reposition();
         });
     }
 
@@ -386,6 +459,11 @@ class ImageToolbar {
         this.nameLabel.style.display = 'none';
         this.sizeLabel.style.display = 'none';
         this.selectedImages = [];
+
+        // 两个下拉子菜单一并收起（编辑菜单挂工具栏内随隐藏；
+        // 放大菜单挂在 body 上，必须显式移除）
+        this.closeEditMenu();
+        this.upscaleManager?.removeMenu();
 
         // 清理 requestAnimationFrame 定时器，避免内存泄漏
         if (this.updateThrottleTimer) {
@@ -530,7 +608,8 @@ class ImageToolbar {
             body: JSON.stringify({
                 prompt: image.prompt,
                 negativePrompt: image.negativePrompt || '',
-                imageUrl: image.img.src,
+                // 所见即所得：有编辑笔迹时收藏合成图
+                imageUrl: this.canvas.images.getCompositeSrc(image),
                 source: image.source || 'unknown',
                 name,
                 model
@@ -548,6 +627,107 @@ class ImageToolbar {
         window.socket?.showNotification(result.duplicated ? '该图片已保存，已更新名字和模型' : '图片和提示词已保存');
     }
 
+    /** 切换"编辑"下拉菜单显隐 */
+    toggleEditMenu() {
+        if (this.editMenu) this.editMenu.hidden = !this.editMenu.hidden;
+    }
+
+    /** 收起"编辑"下拉菜单 */
+    closeEditMenu() {
+        if (this.editMenu) this.editMenu.hidden = true;
+    }
+
+    /**
+     * 打开图片编辑灯箱（编辑 → 画笔）
+     * 与其他按钮一致只取第一张选中图片；编辑器懒创建（打开过才有实例）
+     */
+    openImageEditor() {
+        const image = this.selectedImages[0];
+        if (!image) {
+            console.warn('⚠️ 没有可编辑的图片');
+            return;
+        }
+        if (!this.imageEditor) this.imageEditor = new ImageEditor(this.canvas);
+        this.imageEditor.open(image);
+    }
+
+    /**
+     * 打开扩图灯箱（编辑 → 扩图）
+     * 与画笔编辑同口径：只取第一张选中图片；灯箱懒创建
+     */
+    openOutpaint() {
+        const image = this.selectedImages[0];
+        if (!image) {
+            console.warn('⚠️ 没有可扩图的图片');
+            return;
+        }
+        if (!this.imageOutpaint) this.imageOutpaint = new ImageOutpaint(this.canvas);
+        this.imageOutpaint.open(image);
+    }
+
+    /**
+     * 打开遮罩灯箱（编辑 → 遮罩）
+     * 与画笔/扩图同口径：只取第一张选中图片；灯箱懒创建。
+     * 遮罩图层挂在图片对象上，Comfy 生图节点提交时自动随图传递
+     */
+    openMaskEditor() {
+        const image = this.selectedImages[0];
+        if (!image) {
+            console.warn('⚠️ 没有可涂遮罩的图片');
+            return;
+        }
+        if (!this.imageMaskEditor) this.imageMaskEditor = new ImageMaskEditor(this.canvas);
+        this.imageMaskEditor.open(image);
+    }
+
+    /**
+     * 添加到资产：把选中图片 POST 到 /api/assets（后端按内容哈希存入
+     * data/assets/，重复保存自动去重），并让资产库出现内置标签「我的资产」。
+     * 多张选中时逐张保存，结束后一次性汇总提示（成功与失败分开报）
+     */
+    async addToAssets() {
+        if (!this.selectedImages.length) return;
+
+        let saved = 0;
+        let deduped = 0;
+        const errors = [];
+        for (const imgObj of this.selectedImages) {
+            try {
+                // 所见即所得：有编辑笔迹时保存合成图（与下载同策略）
+                const src = this.canvas.images.getCompositeSrc(imgObj);
+                if (!src) throw new Error('图片没有可用的图像源');
+                // 图片源统一转 data URL（fetch/代理/嗅探/兜底见 ImageExport）
+                const dataUrl = await ImageExport.toDataUrl(imgObj.img, src);
+                const filename = imgObj.name ||
+                    `lumen-image-${(imgObj.id || '').substring(0, 6) || Date.now()}.png`;
+                const response = await fetch('/api/assets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ src: dataUrl, name: filename })
+                });
+                const result = await response.json();
+                if (result.status !== 'ok') throw new Error(result.message || '保存失败');
+                if (result.existed) deduped++;
+                saved++;
+            } catch (err) {
+                console.error('添加到资产失败:', err);
+                errors.push(err.message || '保存失败');
+            }
+        }
+
+        if (saved > 0) {
+            const parts = [`已添加 ${saved} 张到「我的资产」`];
+            if (deduped > 0) parts.push(`${deduped} 张与已有资产相同，未重复写入`);
+            window.socket?.showNotification?.(parts.join('，'), 3000);
+            // 让资产库立即出现/刷新内置标签（窗口未开时下次打开生效）
+            window.assetLibrary?.onAssetsSaved?.();
+        }
+        if (errors.length > 0) {
+            window.socket?.showNotification?.(
+                `${errors.length} 张添加失败：${errors[0]}`, 4000);
+        }
+    }
+
     /**
      * 下载选中的图片方法
      * 多张选中时依次下载所有图片。
@@ -555,16 +735,17 @@ class ImageToolbar {
      * 对于本地或内嵌图片，直接下载保持原格式；
      * 兜底方案使用 canvas 转 blob 下载。
      */
-    downloadImage() {
+    async downloadImage() {
         if (!this.selectedImages.length) {
             console.warn('⚠️ 没有可下载的图片');
             return;
         }
 
         for (const imgObj of this.selectedImages) {
+            // 所见即所得：有编辑笔迹时下载合成图（含图层透明度）
+            const src = this.canvas.images.getCompositeSrc(imgObj);
             const img = imgObj.img;
             const filename = imgObj.name || `lumen-image-${imgObj.id.substring(0, 6)}-${Date.now()}.png`;
-            const src = img?.src;
 
             try {
                 // 远程 URL：通过后端代理下载，避免 CORS 导致文件名/格式异常
@@ -599,25 +780,17 @@ class ImageToolbar {
                 const canvas = document.createElement('canvas');
                 canvas.width = img.naturalWidth || img.width;
                 canvas.height = img.naturalHeight || img.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
+                canvas.getContext('2d').drawImage(img, 0, 0);
 
-                canvas.toBlob((blob) => {
-                    if (!blob) {
-                        console.error('❌ 无法创建图片blob');
-                        return;
-                    }
-
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-
-                }, 'image/png');
+                const blob = await ImageExport.canvasToBlob(canvas, 'image/png');
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
 
             } catch (error) {
                 console.error('❌ 下载图片失败:', error);
@@ -649,7 +822,8 @@ class ImageToolbar {
                 detail: {
                     image: {
                         id: img.id,
-                        src: img.img.src,
+                        // 所见即所得：有编辑笔迹时取合成图（含图层透明度）
+                        src: this.canvas.images.getCompositeSrc(img),
                         width: img.width,
                         height: img.height
                     }
@@ -669,7 +843,8 @@ class ImageToolbar {
             return;
         }
 
-        // 组装所有选中图片的数据数组
+        // 组装所有选中图片的数据数组（src 取原图——放大/抠图等再加工
+        // 操作的对象是作品本身，编辑笔迹是标注层，不烘焙进再加工结果）
         const imagesData = this.selectedImages.map(img => ({
             id: img.id,
             src: img.img.src,

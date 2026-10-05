@@ -11,14 +11,14 @@
  * 加一个常量 + 把它归入对应的谓词集合。
  *
  * 类型语义速查：
- *   - 面板节点 isPanelNode：提示词/文本/LoRA/两类生图节点。DOM 元素浮在画布上，
+ *   - 面板节点 isPanelNode：提示词/文本/LoRA/三类生图节点。DOM 元素浮在画布上，
  *     统一走 updateTransform + setSelected 同步、contains 命中、toJSON 存档、
  *     自由宽高缩放；canvas 层跳过绘制
- *   - 端口节点 hasDomPorts：提示词/LoRA/两类生图节点。状态栏有 DOM 端口圆点，
+ *   - 端口节点 hasDomPorts：提示词/LoRA/三类生图节点。状态栏有 DOM 端口圆点，
  *     连线锚点与端口坐标取自节点的 getPortPoint()（文本节点无端口）
  *   - LoRA 节点 isLoraNode：可堆叠的 LoRA 组合，左右双端口（文本透传），
  *     右端口只能连向 LoRA/生图节点（作用范围传递）
- *   - 生图节点 isGenNode：两类生图节点。无输出端口、左端口只收提示词、
+ *   - 生图节点 isGenNode：三类生图节点。无输出端口、左端口只收提示词、
  *     单入替换规则
  *   - 真实画布图片 isRealCanvasImage：有图像数据的非节点、非占位图对象，
  *     可作为内容/参考图参与连线、显示缩放控制点、入存档
@@ -33,6 +33,7 @@ const NodeTypes = {
         LORA_NODE: 'lora-node',
         IMAGE_GEN_NODE: 'image-gen-node',
         COMFY_GEN_NODE: 'comfy-gen-node',
+        RUNHUB_GEN_NODE: 'runhub-gen-node',
         GENERATION_PLACEHOLDER: 'generation-placeholder',
         VIDEO: 'video'
     },
@@ -62,9 +63,16 @@ const NodeTypes = {
         return source === NodeTypes.SOURCE.COMFY_GEN_NODE;
     },
 
-    /** 生图节点集合（两类）：无输出端口，左端口单入替换 */
+    /** RunningHub 云端工作流生成节点（工作流本体在平台云端） */
+    isRunHubGenNode(source) {
+        return source === NodeTypes.SOURCE.RUNHUB_GEN_NODE;
+    },
+
+    /** 生图节点集合（三类）：无输出端口，左端口单入替换 */
     isGenNode(source) {
-        return NodeTypes.isImageGenNode(source) || NodeTypes.isComfyGenNode(source);
+        return NodeTypes.isImageGenNode(source) ||
+               NodeTypes.isComfyGenNode(source) ||
+               NodeTypes.isRunHubGenNode(source);
     },
 
     /** 面板节点集合：DOM 元素，跳过 canvas 绘制，走节点专属交互/存档链路 */

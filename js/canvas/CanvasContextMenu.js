@@ -101,6 +101,12 @@ class CanvasContextMenu {
 
         const items = [
             {
+                label: '新建组',
+                // 四角括号框（表达"把元素框进一个组"的语义）
+                icon: svgIcon('<path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>'),
+                action: () => this.addGroup(this.targetCanvasPos)
+            },
+            {
                 label: '提示词节点',
                 // 对话气泡（与顶栏"提示词面板"按钮同图标）
                 icon: svgIcon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
@@ -118,6 +124,13 @@ class CanvasContextMenu {
                 // 表达"走本地 ComfyUI 工作流"的语义）
                 icon: svgIcon('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>'),
                 action: () => this.addComfyGenNode(this.targetCanvasPos)
+            },
+            {
+                label: 'RunningHub 节点',
+                // 云朵（Feather cloud，表达"走云端托管工作流"的语义，
+                // 与本地 Comfy 生图节点的芯片图标区分）
+                icon: svgIcon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>'),
+                action: () => this.addRunHubGenNode(this.targetCanvasPos)
             },
             {
                 label: 'LoRA 节点',
@@ -185,6 +198,62 @@ class CanvasContextMenu {
     }
 
     /**
+     * 在指定画布坐标新建一个编组（智能默认）：
+     *   - 当前有选中元素（图片/节点）时，组边界自动扩到刚好包住全部选中元素
+     *     （四边外扩 ENCLOSURE_PADDING）；
+     *   - 没有选中元素时，默认尺寸自适应画布内容量级：取现有对象的
+     *     最大宽/高上浮 20%——画布对象的世界尺寸动辄两三千（2K 图片、
+     *     2048 宽节点），固定默认值会显得比图片还小；再以当前可视世界
+     *     范围的 80% 封顶，画布为空时回退到节点量级常量。
+     * 新建后组处于选中状态，可直接拖标题栏移动、拉四边手柄调整。
+     * @param {{x: number, y: number}} pos - 画布坐标（空组以该点为中心）
+     */
+    addGroup(pos) {
+        const c = this.canvas;
+        const selected = c.images.getSelected()
+            .filter(obj => !NodeTypes.isPlaceholder(obj.source));
+
+        let x, y, width, height;
+        if (selected.length > 0) {
+            // 求所有选中对象的包围盒，四边外扩后钳制最小尺寸
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const obj of selected) {
+                minX = Math.min(minX, obj.x);
+                minY = Math.min(minY, obj.y);
+                maxX = Math.max(maxX, obj.x + obj.width);
+                maxY = Math.max(maxY, obj.y + obj.height);
+            }
+            const pad = GroupManager.ENCLOSURE_PADDING;
+            x = minX - pad;
+            y = minY - pad;
+            width = Math.max(maxX - minX + pad * 2, GroupManager.MIN_WIDTH);
+            height = Math.max(maxY - minY + pad * 2, GroupManager.MIN_HEIGHT);
+        } else {
+            // 自适应默认尺寸：内容最大宽/高 × 1.2，可视世界范围 80% 封顶
+            const scale = c.viewport.scale;
+            const viewW = c.cssWidth / scale;
+            const viewH = c.cssHeight / scale;
+            const objects = c.images.images.filter(o => !NodeTypes.isPlaceholder(o.source));
+            let baseW = 0, baseH = 0;
+            for (const obj of objects) {
+                baseW = Math.max(baseW, obj.width);
+                baseH = Math.max(baseH, obj.height);
+            }
+            width = Math.max(GroupManager.DEFAULT_WIDTH, Math.round(baseW * 1.2));
+            height = Math.max(GroupManager.DEFAULT_HEIGHT, Math.round(baseH * 1.2));
+            width = Math.min(width, Math.round(viewW * 0.8));
+            height = Math.min(height, Math.round(viewH * 0.8));
+            x = pos.x - width / 2;
+            y = pos.y - height / 2;
+        }
+
+        const group = c.groups.add(x, y, width, height);
+        c.groups.select(group.id);
+        c.images.select(null);
+        c.draw();
+    }
+
+    /**
      * 在指定画布坐标添加一个提示词节点（新节点居中于鼠标位置）
      * @param {{x: number, y: number}} pos - 画布坐标
      */
@@ -228,6 +297,22 @@ class CanvasContextMenu {
             this.canvas,
             pos.x - ComfyGenNode.DEFAULT_WIDTH / 2,
             pos.y - ComfyGenNode.DEFAULT_HEIGHT / 2
+        );
+        this.canvas.images.images.push(node);
+        // 新节点默认选中，便于立即拖动定位
+        this.canvas.images.select(node.id);
+        this.canvas.draw();
+    }
+
+    /**
+     * 在指定画布坐标添加一个 RunningHub 云端工作流节点（新节点居中于鼠标位置）
+     * @param {{x: number, y: number}} pos - 画布坐标
+     */
+    addRunHubGenNode(pos) {
+        const node = new RunningHubGenNode(
+            this.canvas,
+            pos.x - RunningHubGenNode.DEFAULT_WIDTH / 2,
+            pos.y - RunningHubGenNode.DEFAULT_HEIGHT / 2
         );
         this.canvas.images.images.push(node);
         // 新节点默认选中，便于立即拖动定位

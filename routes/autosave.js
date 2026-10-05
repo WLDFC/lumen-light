@@ -81,13 +81,18 @@ function createAutosaveRouter({ dir }) {
     function collectReferencedAssets(data) {
         const referenced = new Set();
         for (const img of (data && Array.isArray(data.images) ? data.images : [])) {
-            const src = typeof img?.src === 'string' ? img.src : '';
-            const marker = '/assets/';
-            const idx = src.lastIndexOf(marker);
-            if (idx === -1) continue;
-            const filename = src.slice(idx + marker.length);
-            // 只认纯文件名（不含再往下的路径），防止误把别的路径当资产
-            if (filename && !filename.includes('/')) referenced.add(filename);
+            // 图片本体（src）与编辑笔迹层（editStrokes，非破坏性图层）都会
+            // 以资产形式被引用，两条字段都要计入，否则笔迹资产会被当成
+            // 孤儿在每次元数据写入后被回收，F5 恢复时笔迹全部丢失
+            for (const key of ['src', 'editStrokes']) {
+                const src = typeof img?.[key] === 'string' ? img[key] : '';
+                const marker = '/assets/';
+                const idx = src.lastIndexOf(marker);
+                if (idx === -1) continue;
+                const filename = src.slice(idx + marker.length);
+                // 只认纯文件名（不含再往下的路径），防止误把别的路径当资产
+                if (filename && !filename.includes('/')) referenced.add(filename);
+            }
         }
         return referenced;
     }

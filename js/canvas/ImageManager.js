@@ -112,6 +112,21 @@ class ImageManager {
     }
 
     /**
+     * 获取图片的"有效内容"源（所见即所得出口统一走这里）：
+     * 无编辑笔迹时返回原 src（零开销）；有笔迹图层时返回
+     * 原图 + 笔迹（按图层透明度 editStrokesOpacity）合成的 data URL。
+     * 添加到内容 / 下载 / 保存提示词等交付类出口都应使用本方法，
+     * 保证发出去的图与画布上看到的一致。跨域污染画布等异常时回退原 src。
+     * 实现在 ImagePipeline.compositeSrc（单一实现，画布连线参考图
+     * 收集也走它），此处仅保留实例方法入口
+     * @param {Object} imageObj - 画布图片对象
+     * @returns {string} 图片 src（可能是合成 data URL）
+     */
+    getCompositeSrc(imageObj) {
+        return ImagePipeline.compositeSrc(imageObj);
+    }
+
+    /**
      * 单选模式：选中指定图片，取消其他选中
      * @param {string|null} id - 要选中图片的ID，null 表示取消所有选中
      */

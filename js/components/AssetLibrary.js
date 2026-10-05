@@ -4,14 +4,19 @@
  * ==========================================================================
  * 作用：左侧工具栏的文件夹图标按钮（"本地上传"按钮下方），点击打开一个
  *       300 宽、贴顶栏到底部控件区之间自适应高度的资产窗口（左侧弹出）：
- *   - 标签栏：新建标签（+）并绑定本地文件夹，标签可切换/删除/重新绑定，
- *     首行放不下自动换行；
+ *   - 标签栏：标签下拉框（LumenDropdown，一行容纳任意多标签）+ 新建
+ *     （文件夹图标，选目录即建标签）+ 删除当前标签（×）；
  *   - 资产网格：展示绑定文件夹内的图片/视频缩略图（滚动懒加载），
  *     网格按标签缓存——重开窗口/切回标签图片零重新加载，后台静默
  *     重扫目录，外部文件增删自动反映；
  *   - 交互：资产可拖拽到画布（DataTransfer 自定义标记 + 实例登记 File，
  *     本组件的画布 drop 监听按标记取回）；双击资产打开灯箱预览大图/视频，
  *     单击无操作——进入画布只走拖拽。
+ *
+ * 内置标签「我的资产」：图片工具栏「添加到资产」的落图处（后端
+ * data/assets/ 目录，经 /api/assets 列出与读取，不经 File System
+ * Access API——无授权环节）。首次保存资产后自动出现在下拉框；用户
+ * 可随意删除（仅隐藏视图，不动磁盘文件），再次保存即恢复显示。
  *
  * 文件夹访问基于 File System Access API（Chrome/Edge），不支持的环境
  * 自动降级为传统 webkitdirectory 选择框（仅会话内有效，刷新后重新选择）：
@@ -83,14 +88,6 @@ class AssetLibrary {
             <div class="asset-library-header">
                 <span class="asset-library-title">本地资产库</span>
                 <span class="asset-library-header-spacer"></span>
-                <button type="button" class="asset-library-icon-btn asset-library-bind-btn"
-                        title="为当前标签重新绑定文件夹">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                         stroke="currentColor" stroke-width="2"
-                         stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                    </svg>
-                </button>
                 <button type="button" class="asset-library-icon-btn asset-library-close-btn"
                         title="关闭">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
@@ -100,18 +97,39 @@ class AssetLibrary {
                     </svg>
                 </button>
             </div>
-            <div class="asset-library-tagbar"></div>
+            <div class="asset-library-tagbar">
+                <button type="button" class="asset-library-tag-select"
+                        title="选择标签"></button>
+                <div class="asset-library-tag-add" title="新建标签并绑定文件夹">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                </div>
+                <button type="button" class="asset-library-tag-del"
+                        title="删除当前标签" disabled>×</button>
+            </div>
             <div class="asset-library-body"></div>
         `;
         document.body.appendChild(this.el);
 
-        this.tagBarEl = this.el.querySelector('.asset-library-tagbar');
         this.bodyEl = this.el.querySelector('.asset-library-body');
 
         this.el.querySelector('.asset-library-close-btn')
             .addEventListener('click', () => this.hide());
-        this.el.querySelector('.asset-library-bind-btn')
-            .addEventListener('click', () => this.rebindFolder());
+
+        // 标签下拉（LumenDropdown）：一行容纳全部标签，选中即切换资产网格；
+        // '' = 未选择（下拉首项占位）。+ 新建 / × 删除当前标签
+        this.tagSelectEl = this.el.querySelector('.asset-library-tag-select');
+        this.tagDelBtn = this.el.querySelector('.asset-library-tag-del');
+        this.tagDropdown = new LumenDropdown(this.tagSelectEl, {
+            placeholder: '-- 选择标签 --',
+            onChange: (value) => this.selectTag(value || null)
+        });
+        this.el.querySelector('.asset-library-tag-add')
+            .addEventListener('click', () => this.createTag());
+        this.tagDelBtn.addEventListener('click', () => this.deleteCurrentTag());
     }
 
     /** 打开/关闭窗口 */
@@ -139,6 +157,16 @@ class AssetLibrary {
     /** 重新读取标签并按当前选中项渲染（选中与否由用户决定，不自动选中） */
     async refreshTags() {
         this.tags = await this.store.getAllTags();
+        // 内置标签「我的资产」：后端 data/assets 目录已建立即显示（首次
+        // 「添加到资产」后自动出现）；用户删除只是隐藏视图，再保存即恢复
+        try {
+            const response = await fetch('/api/assets');
+            const data = await response.json();
+            const hidden = localStorage.getItem(AssetLibrary.BUILTIN_HIDDEN_KEY) === '1';
+            if (data.status === 'ok' && data.exists && !hidden) {
+                this.tags = [AssetLibrary.BUILTIN_TAG, ...this.tags];
+            }
+        } catch { /* 后端不可用时不显示内置标签 */ }
         // 上一次选中的标签已被删除时清空选中状态
         if (this.activeTag && !this.tags.some((t) => t.name === this.activeTag)) {
             this.activeTag = null;
@@ -147,43 +175,20 @@ class AssetLibrary {
         await this.loadAssets();
     }
 
+    /**
+     * 同步标签下拉框：全部标签作为选项，当前选中项带对勾标记；
+     * 无选中时显示占位文案。删除按钮仅在选中标签时可用
+     */
     renderTagBar() {
-        this.tagBarEl.innerHTML = '';
-
-        for (const tag of this.tags) {
-            const chip = document.createElement('div');
-            chip.className = 'asset-library-tag' +
-                (tag.name === this.activeTag ? ' active' : '');
-            const label = document.createElement('span');
-            label.className = 'asset-library-tag-name';
-            label.textContent = tag.name;
-            label.title = tag.name;
-            chip.appendChild(label);
-
-            // 激活标签提供删除入口（仅删除绑定关系，不动本地文件夹）
-            if (tag.name === this.activeTag) {
-                const del = document.createElement('span');
-                del.className = 'asset-library-tag-del';
-                del.title = '删除此标签';
-                del.textContent = '×';
-                del.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.deleteTag(tag.name);
-                });
-                chip.appendChild(del);
-            }
-
-            chip.addEventListener('click', () => this.selectTag(tag.name));
-            this.tagBarEl.appendChild(chip);
-        }
-
-        // "+" 新建标签：显示内联输入框，回车/对焦丢失确认
-        const add = document.createElement('div');
-        add.className = 'asset-library-tag-add';
-        add.title = '新建标签并绑定文件夹';
-        add.textContent = '+';
-        add.addEventListener('click', () => this.createTag());
-        this.tagBarEl.appendChild(add);
+        this.tagDropdown.setOptions(
+            [{ value: '', label: '-- 选择标签 --' }]
+                .concat(this.tags.map((t) => ({
+                    value: t.name,
+                    label: t.builtin ? t.label : t.name
+                }))),
+            this.activeTag || ''
+        );
+        this.tagDelBtn.disabled = !this.activeTag;
     }
 
     /**
@@ -295,15 +300,23 @@ class AssetLibrary {
 
     /**
      * 删除标签：先在窗口内显示确认（window.confirm 在部分内嵌环境被
-     * 抑制，不可依赖）。仅删除绑定关系，不影响本地文件夹
+     * 抑制，不可依赖）。仅删除绑定关系，不影响本地文件夹；
+     * 内置标签「我的资产」特殊：删除只是 localStorage 隐藏视图，
+     * 磁盘资产文件不动，再次「添加到资产」即恢复
      * @param {string} name - 标签名
      */
     async deleteTag(name) {
+        const isBuiltin = name === AssetLibrary.BUILTIN_TAG.name;
+        const tip = isBuiltin
+            ? '仅隐藏该标签，已保存的资产文件不受影响<br>再次点击「添加到资产」即可恢复显示'
+            : '仅删除绑定关系，不影响本地文件夹';
         this.bodyEl.innerHTML = `
             <div class="asset-library-permission">
                 <div class="asset-library-permission-text">
-                    确认删除标签「${LumenLight.escapeHtml(name)}」？<br>
-                    仅删除绑定关系，不影响本地文件夹
+                    确认删除标签「${LumenLight.escapeHtml(
+                        isBuiltin ? AssetLibrary.BUILTIN_TAG.label : name
+                    )}」？<br>
+                    ${tip}
                 </div>
                 <div class="asset-library-confirm-row">
                     <button type="button" class="asset-library-confirm-btn danger" data-act="ok">删除</button>
@@ -311,7 +324,11 @@ class AssetLibrary {
                 </div>
             </div>`;
         this.bodyEl.querySelector('[data-act="ok"]').addEventListener('click', async () => {
-            await this.store.deleteTag(name);
+            if (isBuiltin) {
+                localStorage.setItem(AssetLibrary.BUILTIN_HIDDEN_KEY, '1');
+            } else {
+                await this.store.deleteTag(name);
+            }
             this._revokeGrid(name);            // 释放该标签网格与 blob URL
             this._sessionFiles?.delete(name);  // 会话文件列表一并清除
             if (this.activeTag === name) this.activeTag = null;
@@ -327,25 +344,13 @@ class AssetLibrary {
         await this.loadAssets();
     }
 
-    /** 头部文件夹按钮：选中标签时更换其绑定文件夹；未选中则提示 */
-    async rebindFolder() {
+    /** 删除当前选中标签（无选中时提示）；确认流程走 deleteTag 的内联确认 */
+    async deleteCurrentTag() {
         if (!this.activeTag) {
-            window.socket?.showNotification?.('没有选择标签，无法更替路径', 3000);
-            this.bodyEl.innerHTML =
-                '<div class="asset-library-empty">请选择上方标签，或点击 + 新建标签</div>';
+            window.socket?.showNotification?.('没有选择标签，无法删除', 3000);
             return;
         }
-        await this.pickFolder(async (picked) => {
-            if (picked.handle) {
-                await this.store.saveTag(this.activeTag, picked.handle);
-            } else {
-                this._sessionFiles = this._sessionFiles || new Map();
-                this._sessionFiles.set(this.activeTag, picked.files);
-                await this.store.saveTag(this.activeTag, null);
-            }
-            this._revokeGrid(this.activeTag);  // 文件夹已更换，旧网格作废
-            await this.loadAssets();
-        });
+        await this.deleteTag(this.activeTag);
     }
 
     // ==================== 资产加载与展示 ====================
@@ -374,14 +379,42 @@ class AssetLibrary {
         const tag = this.tags.find((t) => t.name === this.activeTag);
         if (!tag) {
             this.bodyEl.innerHTML =
-                '<div class="asset-library-empty">请选择上方标签，或点击 + 新建标签</div>';
+                '<div class="asset-library-empty">请选择标签，或点击 + 新建标签</div>';
+            return;
+        }
+
+        const cached = this._gridCache.get(tag.name);
+
+        // 内置标签「我的资产」：文件列表走后端 /api/assets（data/assets/
+        // 目录），不经 File System Access API——无授权环节，列表即磁盘内容
+        if (tag.builtin) {
+            if (cached && !force) {
+                this.bodyEl.appendChild(cached.gridEl);
+                this._fillVisibleCards();
+                return;
+            }
+            if (cached) this._revokeGrid(tag.name);
+            try {
+                const response = await fetch('/api/assets');
+                const data = await response.json();
+                if (data.status !== 'ok') throw new Error(data.message || '列表失败');
+                if (!data.exists || data.items.length === 0) {
+                    this.bodyEl.innerHTML =
+                        '<div class="asset-library-empty">还没有资产——选中画布图片后点「添加到资产」保存</div>';
+                    return;
+                }
+                this._renderGrid(data.items.map((it) => AssetLibrary.makeBuiltinAsset(it)));
+            } catch (err) {
+                console.error('读取资产列表失败:', err);
+                this.bodyEl.innerHTML =
+                    '<div class="asset-library-empty">读取资产列表失败，请确认后端已启动</div>';
+            }
             return;
         }
 
         // 缓存命中：直接复用已渲染的网格（瞬时，图片不重新加载）。
         // FSA 标签需权限仍有效；失效（如系统里撤销了权限）则删除缓存
         // 重建并显示授权覆盖层
-        const cached = this._gridCache.get(tag.name);
         if (cached && !force) {
             if (tag.handle) {
                 let permission = 'granted';
@@ -420,8 +453,8 @@ class AssetLibrary {
         }
 
         // 权限检查与恢复。句柄失效导致 queryPermission 抛异常时保持
-        // 'granted' 继续尝试扫描——扫描同样会失败，落入"读取文件夹失败，
-        // 请重新绑定"的错误提示，比直接弹授权层更能反映真实问题
+        // 'granted' 继续尝试扫描——扫描同样会失败，落入"读取文件夹失败"
+        // 的错误提示，比直接弹授权层更能反映真实问题
         let permission = 'granted';
         try {
             permission = await tag.handle.queryPermission({ mode: 'read' });
@@ -462,7 +495,7 @@ class AssetLibrary {
         } catch (err) {
             console.error('读取文件夹失败:', err);
             this.bodyEl.innerHTML =
-                '<div class="asset-library-empty">读取文件夹失败，请重新绑定</div>';
+                '<div class="asset-library-empty">读取文件夹失败，请确认文件夹仍存在，或删除标签后重新添加</div>';
             return;
         }
         this._renderGrid(files);
@@ -623,7 +656,15 @@ class AssetLibrary {
         // drop 监听按标记取回文件（见 init）。不可 setData('text/plain')
         // ——画布 drop 处理器视其为页面内元素拖拽而忽略
         card.addEventListener('dragstart', (e) => {
-            this._dragFile = file;
+            if (typeof file.getFile === 'function') {
+                // 内置资产：File 需异步从后端拉取；drop 晚于 dragstart，
+                // 拉取完成前落点会被忽略（handleCanvasDrop 有空值保护）
+                file.getFile().then((f) => { this._dragFile = f; }).catch((err) => {
+                    console.error('拉取资产文件失败:', err);
+                });
+            } else {
+                this._dragFile = file;
+            }
             e.dataTransfer.setData('application/x-lumen-asset', '1');
             e.dataTransfer.effectAllowed = 'copy';
         });
@@ -641,8 +682,15 @@ class AssetLibrary {
         if (!file || !thumb || thumb.dataset.loaded) return;
         thumb.dataset.loaded = '1';
 
-        const url = URL.createObjectURL(file);
-        this._activeUrls.push(url);
+        // 内置资产：后端静态 URL 直连（http URL 不需要 revoke）；
+        // 本地 File：blob URL，登记到当前网格缓存统一释放
+        let url;
+        if (file.url) {
+            url = file.url;
+        } else {
+            url = URL.createObjectURL(file);
+            this._activeUrls.push(url);
+        }
 
         if (thumb.classList.contains('is-video')) {
             // 视频缩略图：#t=0.1 媒体片段让浏览器定位并显示首帧
@@ -692,6 +740,18 @@ class AssetLibrary {
     }
 
     /**
+     * 「添加到资产」保存成功后由图片工具栏调用：清除内置标签的隐藏
+     * 标记并刷新——窗口开着时「我的资产」立即出现/更新；未开窗口则
+     * 下次打开生效
+     */
+    async onAssetsSaved() {
+        localStorage.removeItem(AssetLibrary.BUILTIN_HIDDEN_KEY);
+        this._revokeGrid(AssetLibrary.BUILTIN_TAG.name);
+        if (!this.el.classList.contains('show')) return;
+        await this.refreshTags();
+    }
+
+    /**
      * 双击资产：打开灯箱预览（图片直显大图，视频用带控件播放器）。
      * 灯箱优先复用聊天窗口的实例，聊天未初始化时自建一个
      * @param {File} file - 资产文件
@@ -699,10 +759,16 @@ class AssetLibrary {
     openPreview(file) {
         const lightbox = window.llmChat?.lightbox ||
             (this._lightbox = this._lightbox || new LlmLightbox());
-        // 预览 URL 登记到当前网格缓存，网格重建时随统一 revoke 释放；
-        // 灯箱为全屏模态，展示期间不可能触发网格刷新，URL 不会提前失效
-        const url = URL.createObjectURL(file);
-        this._activeUrls.push(url);
+        // 内置资产直连后端 URL；本地 File 走 blob URL 并登记到当前网格
+        // 缓存，网格重建时随统一 revoke 释放；灯箱为全屏模态，展示期间
+        // 不可能触发网格刷新，URL 不会提前失效
+        let url;
+        if (file.url) {
+            url = file.url;
+        } else {
+            url = URL.createObjectURL(file);
+            this._activeUrls.push(url);
+        }
         lightbox.open(url, { video: CanvasVideoManager.isVideoFile(file) });
     }
 }
@@ -712,6 +778,40 @@ AssetLibrary.isImageFile = function (file) {
     if (!file) return false;
     if ((file.type || '').startsWith('image/')) return true;
     return /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name || '');
+};
+
+// 内置标签「我的资产」：name 用哨兵值避免与用户自建的同名 FSA 标签
+// 在下拉框里 value 冲突；label 才是显示名
+AssetLibrary.BUILTIN_TAG = { name: '__builtin__', label: '我的资产', builtin: true };
+
+// 内置标签隐藏标记（localStorage）：删除标签只是隐藏视图，保存资产即恢复
+AssetLibrary.BUILTIN_HIDDEN_KEY = 'lumen-asset-builtin-hidden';
+
+/**
+ * 把 /api/assets 列表条目包装成资产卡片可用的"伪文件"对象：
+ * name/type 供 isImageFile/isVideoFile 判断，url 直连后端静态读取
+ * （缩略图与灯箱零 blob），getFile 惰性拉取真实 File（拖拽入画布时才下载）
+ * @param {Object} item - 列表条目 { filename, name, size, savedAt, url }
+ */
+AssetLibrary.makeBuiltinAsset = function (item) {
+    const ext = (((item.name || item.filename || '').match(/\.(\w+)$/i) || [])[1] || 'png').toLowerCase();
+    const mimeMap = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+    };
+    return {
+        name: item.name || item.filename,
+        type: mimeMap[ext] || 'image/png',
+        url: item.url,
+        savedAt: item.savedAt,
+        getFile: async () => {
+            const response = await fetch(item.url);
+            if (!response.ok) throw new Error(`读取资产失败（HTTP ${response.status}）`);
+            const blob = await response.blob();
+            return new File([blob], item.name || item.filename,
+                { type: blob.type || 'image/png' });
+        }
+    };
 };
 
 // 暴露到全局作用域

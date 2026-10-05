@@ -4,12 +4,14 @@
  * 作用：处理画布上的鼠标与键盘交互，包括点击选择、拖拽图片、拖角等比缩放图片、
  *       按住空格平移画布、鼠标中键（滚轮按下）平移画布、滚轮缩放、
  *       双击图片打开灯箱查看原生分辨率大图、拖拽端口圆点连线串联图片、
- *       悬停/点击连线断开以及光标样式更新。
+ *       悬停/点击连线断开、编组（Group）的选中/拖动/边缘缩放/双击改名
+ *       以及光标样式更新。
  *       所有交互状态通过画布主类共享。
  * 说明：本类只处理交互逻辑，渲染工作交给 CanvasRenderer。
  *
  * 结构说明（一个完整的手势状态机，勿拆分为多文件）：
- *   onMouseDown 按优先级分流（节点端口 > 中键 > 图片端口 > 缩放点 > 图片 > 连线 > 空白），
+ *   onMouseDown 按优先级分流（节点端口 > 中键 > 图片端口 > 缩放点 >
+ *   组手柄 > 组标题栏 > 图片 > 连线 > 空白），
  *   每个分支调用对应的 _startXxx() 设置交互状态并绑定 window 级事件；
  *   onMouseMove / onMouseUp 按激活的交互状态分发到 _applyXxx() / _finishXxx() 收尾。
  *   优先级判定链是行为正确性的核心，必须保持在 onMouseDown 单点可见。
@@ -117,6 +119,13 @@ class CanvasInteraction {
         const rect = c.canvas.getBoundingClientRect();
         const cp = c.viewport.screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
 
+        // 双击组标题栏：进入改名（浮动输入框），不触发图片灯箱
+        const hitGroupTitle = GroupManager.hitGroupTitle(c, cp.x, cp.y);
+        if (hitGroupTitle) {
+            c.groups.startRename(hitGroupTitle);
+            return;
+        }
+
         // 双击在缩放控制点上不打开灯箱，避免与拖角缩放操作冲突
         if (CanvasHitTester.hitResizeHandle(c, cp.x, cp.y)) return;
 
@@ -171,22 +180,27 @@ class CanvasInteraction {
             }
         }
 
-        // Delete 键删除选中的图片（Backspace 不触发删除，避免输入框误操作）
+        // Delete 键删除选中的对象（Backspace 不触发删除，避免输入框误操作）：
+        // 图片/节点整对象删除；组只删组壳，成员原样保留（解除编组的入口）
         if (e.key === 'Delete') {
             const selected = this.canvas.images.getSelected();
-            if (selected.length > 0) {
-                e.preventDefault();
-                for (const img of selected) {
-                    this.canvas.images.delete(img.id);
-                    // DOM 节点（提示词/生图节点）需要同步移除 DOM 元素
-                    if (typeof img.destroy === 'function') img.destroy();
-                    // 同步清理被删图片关联的所有连线
-                    this.canvas.connections.removeByImage(img.id);
-                }
-                // 清空选中状态并触发事件，通知工具栏等组件隐藏
-                this.canvas.images.select(null);
-                this.canvas.draw();
+            const selectedGroups = this.canvas.groups.getSelected();
+            if (selected.length === 0 && selectedGroups.length === 0) return;
+            e.preventDefault();
+            for (const img of selected) {
+                this.canvas.images.delete(img.id);
+                // DOM 节点（提示词/生图节点）需要同步移除 DOM 元素
+                if (typeof img.destroy === 'function') img.destroy();
+                // 同步清理被删图片关联的所有连线
+                this.canvas.connections.removeByImage(img.id);
             }
+            for (const group of selectedGroups) {
+                this.canvas.groups.delete(group.id);
+            }
+            // 清空选中状态并触发事件，通知工具栏等组件隐藏
+            this.canvas.images.select(null);
+            this.canvas.groups.clearSelection();
+            this.canvas.draw();
         }
     }
 
@@ -253,6 +267,80 @@ class CanvasInteraction {
     }
 
     /**
+     * 进入编组拖动模式：拖动组的标题栏，组与拖动开始瞬间的所有成员一起移动。
+     * 成员是快照（完全在组内的图片/节点），拖动过程中不再实时判定包含关系，
+     * 避免成员移动导致判定抖动。
+     * @param {Object} group - 拖动的组对象
+     * @param {{x: number, y: number}} cp - 鼠标画布坐标
+     */
+    _startGroupDrag(group, cp) {
+        const c = this.canvas;
+        // 选中该组并清掉图片选中（隐藏图片工具栏等），两组选中互斥语义在此收口
+        if (!c.groups.selectedIds.has(group.id)) {
+            c.groups.select(group.id);
+            c.images.select(null);
+        }
+        c.isDraggingGroup = true;
+        c.dragGroup = group;
+        c.groupDragOrigin = { x: cp.x, y: cp.y };
+        c.groupDragStartRect = { x: group.x, y: group.y };
+        c.groupDragMembers = c.groups.getMembers(group).map(obj => ({
+            obj, ox: obj.x, oy: obj.y
+        }));
+        // 通知编组工具栏等组件隐藏（拖动结束经 canvasGroupDragEnd 恢复）
+        window.dispatchEvent(new CustomEvent('canvasGroupDragStart'));
+        this._bindWindowEvents();
+        c.draw();
+    }
+
+    /**
+     * 进入编组边缘缩放模式（快照起始矩形，避免逐帧累加浮点漂移）。
+     * 只改组边界，成员不动（出组自动脱离、入组自动加入，几何包含实时判定）。
+     * @param {Object} group - 缩放的组对象
+     * @param {string} handle - 手柄方位 'n'|'s'|'w'|'e'
+     */
+    _startGroupResize(group, handle) {
+        const c = this.canvas;
+        c.isResizingGroup = true;
+        c.resizeGroupTarget = group;
+        c.resizeGroupHandle = handle;
+        c.resizeGroupStartRect = {
+            x: group.x, y: group.y, width: group.width, height: group.height
+        };
+        // 缩放与拖动共用一组手势事件（工具栏隐藏/恢复同一套）
+        window.dispatchEvent(new CustomEvent('canvasGroupDragStart'));
+        this._bindWindowEvents();
+    }
+
+    /**
+     * 执行编组边缘缩放计算（onMouseMove 辅助方法）
+     * 每个手柄只动一条边，对边固定；钳制最小宽高，防止组缩没了无法再抓取。
+     * @param {Object} cp - 当前鼠标的画布坐标 {x, y}
+     */
+    applyGroupResize(cp) {
+        const c = this.canvas;
+        const g = c.resizeGroupTarget;
+        const start = c.resizeGroupStartRect;
+        const handle = c.resizeGroupHandle;
+        const minW = GroupManager.MIN_WIDTH;
+        const minH = GroupManager.MIN_HEIGHT;
+
+        if (handle === 'e') {
+            g.width = Math.max(minW, cp.x - start.x);
+        } else if (handle === 'w') {
+            const right = start.x + start.width;
+            g.x = Math.min(cp.x, right - minW);
+            g.width = right - g.x;
+        } else if (handle === 's') {
+            g.height = Math.max(minH, cp.y - start.y);
+        } else if (handle === 'n') {
+            const bottom = start.y + start.height;
+            g.y = Math.min(cp.y, bottom - minH);
+            g.height = bottom - g.y;
+        }
+    }
+
+    /**
      * 进入图片拖动模式（支持多选同时移动，占位图只能单独移动）
      * @param {Object} clicked - 命中的图片（或提示词节点）
      * @param {{x: number, y: number}} cp - 鼠标画布坐标
@@ -261,9 +349,13 @@ class CanvasInteraction {
         const c = this.canvas;
         const isPlaceholder = NodeTypes.isPlaceholder(clicked.source);
 
-        // 普通点击且目标未选中时，单选它
+        // 普通点击且目标未选中时，单选它，并清掉编组选中——两组选中
+        // 互斥语义在此收口（与 _startGroupDrag 清图片选中对称）；
+        // 不清的话编组青色描边会残留（drawGroupOverlays 按
+        // selectedIds 绘制），Delete 还会连带删掉看不见的选中组
         if (!isPlaceholder && !c.images.selectedIds.has(clicked.id)) {
             c.images.select(clicked.id);
+            c.groups.clearSelection();
         }
 
         c.isDraggingImage = true;
@@ -343,7 +435,8 @@ class CanvasInteraction {
     /**
      * 鼠标按下事件处理：按优先级分流到各交互启动方法
      * 优先级：节点端口/缩放/拖动 > 中键平移 > 图片端口拖线 >
-     *         缩放控制点 > 图片拖动 > 连线点击 > 空白（平移/框选）
+     *         缩放控制点 > 组边缘手柄 > 组标题栏 > 图片拖动 > 连线点击 >
+     *         空白（平移/框选）
      * @param {MouseEvent} e - 鼠标事件对象
      */
     onMouseDown(e) {
@@ -412,6 +505,29 @@ class CanvasInteraction {
             return;
         }
 
+        // 检测选中组的边缘缩放手柄：与图片控制点同理排在图片本体命中之前
+        // （手柄一半在组外，且可能与成员图片重叠）
+        const hitGroupHandle = GroupManager.hitGroupEdgeHandle(c, cp.x, cp.y);
+        if (hitGroupHandle && !isShiftPressed) {
+            this._startGroupResize(hitGroupHandle.group, hitGroupHandle.handle);
+            return;
+        }
+
+        // 检测组标题栏：只有标题栏可选中/拖动组（组体内部透传给成员与框选）。
+        // 排在图片本体命中之前：标题栏是组的操作面，压住组内上部内容
+        const hitGroupTitle = GroupManager.hitGroupTitle(c, cp.x, cp.y);
+        if (hitGroupTitle) {
+            if (isShiftPressed) {
+                // Shift+点击：切换组的多选状态
+                c.groups.toggleSelect(hitGroupTitle.id);
+                c.images.select(null);
+                c.draw();
+            } else {
+                this._startGroupDrag(hitGroupTitle, cp);
+            }
+            return;
+        }
+
         // 检查是否点中图片本身
         const clicked = c.images.isHit(cp.x, cp.y);
         // 占位图标记：生成中的灰色占位图不可选中、不可触发选中事件
@@ -419,9 +535,11 @@ class CanvasInteraction {
 
         if (clicked) {
             if (isShiftPressed) {
-                // Shift+点击：切换多选状态（占位图不可选中）
+                // Shift+点击：切换多选状态（占位图不可选中）；
+                // 同样收口互斥——Shift 选图片时清编组选中
                 if (!isPlaceholder) {
                     c.images.toggleSelect(clicked.id);
+                    c.groups.clearSelection();
                     c.draw();
                 }
             } else {
@@ -437,9 +555,11 @@ class CanvasInteraction {
             }
             this._connectionClickCandidate = null;
 
-            // 点击空白处：非 Shift 时清除选择，隐藏工具栏、图片名字和尺寸信息
+            // 点击空白处：非 Shift 时清除选择（图片与组一并清），
+            // 隐藏工具栏、图片名字和尺寸信息
             if (!isShiftPressed) {
                 c.images.select(null);
+                c.groups.clearSelection();
                 c.draw();
             }
 
@@ -496,6 +616,21 @@ class CanvasInteraction {
             c.draw();
             // 实时通知工具栏更新尺寸标签的文本与位置
             window.dispatchEvent(new CustomEvent('canvasImageResizing'));
+        } else if (c.isResizingGroup && c.resizeGroupTarget) {
+            // 编组边缘缩放：只改组边界，成员不动
+            this.applyGroupResize(cp);
+            c.draw();
+        } else if (c.isDraggingGroup && c.dragGroup) {
+            // 编组拖动：组与成员快照按同一偏移整体移动
+            const dx = cp.x - c.groupDragOrigin.x;
+            const dy = cp.y - c.groupDragOrigin.y;
+            c.dragGroup.x = c.groupDragStartRect.x + dx;
+            c.dragGroup.y = c.groupDragStartRect.y + dy;
+            for (const m of c.groupDragMembers) {
+                m.obj.x = m.ox + dx;
+                m.obj.y = m.oy + dy;
+            }
+            c.draw();
         } else if (c.isDraggingImage && c.dragTarget) {
             // 多选同时移动 - 直接使用数组更新，避免重复计算
             if (c.dragOffsets && c.dragOffsets.length > 1) {
@@ -605,6 +740,11 @@ class CanvasInteraction {
             this.applyBoxSelection(isShiftPressed);
         }
 
+        // 编组拖动/缩放结束：通知编组工具栏恢复显示（在状态复位前判定）
+        if (c.isDraggingGroup || c.isResizingGroup) {
+            window.dispatchEvent(new CustomEvent('canvasGroupDragEnd'));
+        }
+
         // 重置所有交互状态
         c.isDraggingImage = false;
         c.dragTarget = null;
@@ -614,6 +754,16 @@ class CanvasInteraction {
         c.resizeTarget = null;
         c.resizeHandle = null;
         c.resizeStartRect = null;
+        // 编组手势状态复位
+        c.isDraggingGroup = false;
+        c.dragGroup = null;
+        c.groupDragOrigin = null;
+        c.groupDragStartRect = null;
+        c.groupDragMembers = null;
+        c.isResizingGroup = false;
+        c.resizeGroupTarget = null;
+        c.resizeGroupHandle = null;
+        c.resizeGroupStartRect = null;
         c.isPanning = false;
         this.isMiddleButtonPanning = false;
         c.isBoxSelecting = false;

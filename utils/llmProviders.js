@@ -169,9 +169,11 @@ function parseResponseBody(raw, statusCode, headers, errorHint) {
  * @param {string} body - JSON 字符串请求体
  * @param {number} timeout - 超时时间（毫秒）
  * @param {string} errorHint - 解析失败时的错误提示
+ * @param {AbortSignal} [signal] - 中止信号（客户端取消生图时由路由层传入，
+ *                                  触发即销毁底层请求，上游调用随之终止）
  * @returns {Promise<Object>} 接口返回的 JSON
  */
-function requestJson(url, apiKey, body, timeout, errorHint) {
+function requestJson(url, apiKey, body, timeout, errorHint, signal) {
     const options = {
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
@@ -182,7 +184,8 @@ function requestJson(url, apiKey, body, timeout, errorHint) {
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(body)
         },
-        timeout
+        timeout,
+        signal
     };
 
     return new Promise((resolve, reject) => {
@@ -227,15 +230,17 @@ function requestJson(url, apiKey, body, timeout, errorHint) {
  * @param {URL} url - 请求地址
  * @param {string} apiKey - API Key
  * @param {Object} payload - 请求体（OpenAI 兼容格式）
+ * @param {AbortSignal} [signal] - 中止信号（透传 requestJson）
  * @returns {Promise<Object>} 接口返回的 JSON
  */
-function requestChatCompletions(url, apiKey, payload) {
+function requestChatCompletions(url, apiKey, payload, signal) {
     return requestJson(
         url,
         apiKey,
         JSON.stringify(payload),
         120000, // 模型生成可能较慢，给足超时时间
-        '解析模型响应失败'
+        '解析模型响应失败',
+        signal
     );
 }
 
@@ -244,15 +249,17 @@ function requestChatCompletions(url, apiKey, payload) {
  * @param {URL} url - 请求地址
  * @param {string} apiKey - API Key
  * @param {Object} payload - 请求体
+ * @param {AbortSignal} [signal] - 中止信号（透传 requestJson）
  * @returns {Promise<Object>} 接口返回的 JSON
  */
-function requestImageGeneration(url, apiKey, payload) {
+function requestImageGeneration(url, apiKey, payload, signal) {
     return requestJson(
         url,
         apiKey,
         JSON.stringify(payload),
         180000, // 图像生成可能较慢，超时 180 秒
-        '解析图像生成响应失败'
+        '解析图像生成响应失败',
+        signal
     );
 }
 
@@ -300,10 +307,10 @@ function buildMultipartBody(boundary, fields, files) {
  * 参考图以二进制文件字段上传，而非 JSON 的 image 参数
  * @param {URL} url - 请求地址（/images/edits）
  * @param {string} apiKey - API Key
- * @param {Object} params - { model, prompt, images, size, quality }，images 为 base64 data URL 数组
+ * @param {Object} params - { model, prompt, images, size, quality, signal }，images 为 base64 data URL 数组
  * @returns {Promise<Object>} 接口返回的 JSON
  */
-function requestImageEdit(url, apiKey, { model, prompt, images, size, quality }) {
+function requestImageEdit(url, apiKey, { model, prompt, images, size, quality, signal }) {
     const boundary = `----LumenLightForm${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
 
     // 普通文本字段；size 已映射为 gpt-image 支持的档位，null 时不传（自动跟随参考图比例）
@@ -343,7 +350,8 @@ function requestImageEdit(url, apiKey, { model, prompt, images, size, quality })
             'Content-Type': `multipart/form-data; boundary=${boundary}`,
             'Content-Length': body.length
         },
-        timeout: 180000 // 图像编辑可能较慢，超时 180 秒
+        timeout: 180000, // 图像编辑可能较慢，超时 180 秒
+        signal
     };
 
     return new Promise((resolve, reject) => {

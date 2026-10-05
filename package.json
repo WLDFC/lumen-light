@@ -17,11 +17,13 @@
   "_comment_type": "模块规范：commonjs 使用 require/module.exports（区别于 esm 的 import/export）",
   "_comment_dependencies_用途": "生产环境必需的第三方库，换电脑后执行 npm install 即可按此清单装齐",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "mammoth": "^1.12.3",
     "onnxruntime-node": "^1.27.0",
     "pdf-parse": "^2.4.5",
+    "puppeteer-core": "^24.0.0",
     "sharp": "^0.35.3",
     "uuid": "^13.0.0",
     "ws": "^8.20.0",
@@ -32,6 +34,7 @@
     "express": "Web 服务器框架（server.js 用它搭建后端路由）",
     "mammoth": "解析 Word .docx 为纯文本（utils/fileTextExtractor.js，上传文档提交给 AI）",
     "pdf-parse": "解析 PDF 为纯文本（utils/fileTextExtractor.js，v2 API）",
+    "puppeteer-core": "CDP 浏览器驱动（utils/webBridgeManager.js，网页桥接模式控制专用浏览器；不捆绑 Chromium，使用本机 Chrome/Edge）",
     "uuid": "生成全局唯一 ID（图片、存档等对象的标识）",
     "ws": "WebSocket 库（js/api/LumenSocket.js 与 ComfyUI 实时通信）",
     "xlsx": "解析 Excel .xls/.xlsx 为文本（utils/fileTextExtractor.js，逐工作表转 CSV）"

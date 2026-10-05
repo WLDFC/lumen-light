@@ -27,6 +27,8 @@ class LlmChat {
         this.emptyTipEl = document.getElementById('llmChatEmpty');
         this.inputEl = document.getElementById('llmInput');
         this.sendBtn = document.getElementById('llmSendBtn');
+        // 生图停止按钮：默认暗置，有在飞生图任务时点亮（见 _updateStopBtn）
+        this.stopBtn = document.getElementById('llmStopBtn');
         this.modelSelect = document.getElementById('llmModelSelect');
         this.qualitySelect = document.getElementById('llmQualitySelect');
         this.uploadBtn = document.getElementById('llmUploadBtn');
@@ -34,6 +36,15 @@ class LlmChat {
         this.fileInput = document.getElementById('llmFileInput');
         // 面板头部 pi 调用统计灰字（上下文 token · 缓存命中率）
         this.piUsageEl = document.getElementById('piUsageStatus');
+
+        // 快速回底按钮（消息区悬浮）：滚离底部时浮现，点击平滑滚回最新消息
+        this.scrollBtn = document.getElementById('llmScrollBottom');
+        // 自动跟随：为 true 时流式输出持续贴底；用户上滑阅读历史即暂停，点回底按钮恢复
+        this.autoFollow = true;
+        if (this.scrollBtn) {
+            this.scrollBtn.addEventListener('click', () => this._smoothScrollToBottom());
+            this.messagesEl.addEventListener('scroll', () => this._onMessagesScroll(), { passive: true });
+        }
 
         // 图片灯箱组件（已从本类拆分出去）
         this.lightbox = new LlmLightbox();
@@ -43,6 +54,8 @@ class LlmChat {
         this.videoGen = new LlmVideoGen(this);
         // pi 编码智能体控制器（画布代理，流式渲染经 piEvent 页面事件）
         this.piAgent = new LlmPiAgent(this);
+        // 网页桥接控制器（豆包等站点网页直连，流式渲染经 webbridgeEvent 页面事件）
+        this.webBridge = new LlmWebBridge(this);
         // 比例 + 分辨率档位双段选择面板（已从本类拆分出去）
         this.sizePicker = new LlmSizePicker('llmSizeSelect');
         // 模型 / 质量自定义下拉（图标按钮模式：纯图标触发器，点击弹出
@@ -51,7 +64,7 @@ class LlmChat {
         this.modelDropdown = new LumenDropdown(this.modelSelect, {
             iconButton: true,
             triggerIcon: LLM_DD_ICONS.box,
-            onChange: () => this.updateToolbarForModel()
+            onChange: () => this._onModelChanged()
         });
         this.qualityDropdown = new LumenDropdown(this.qualitySelect, {
             iconButton: true,
@@ -69,8 +82,19 @@ class LlmChat {
         this.history = [];
         // 是否正在等待模型回复
         this.isSending = false;
+        // 在飞生图任务的 AbortController 集合（停止按钮的作用域：
+        // 生图不走 isSending 串行锁，任务彼此独立可并发，点停止全部中止）
+        this._imageGenTasks = new Set();
         // 当前厂商的模型配置列表（含 type 标记），用于区分聊天/绘图模型
         this.modelsConfig = [];
+
+        // ===== 聊天记录持久化（F5 后恢复） =====
+        // 存取编排拆至 LlmHistoryController（同名方法，下方留同名薄代理，
+        // 调用点零改动）；_genParams / _piUsage 是生成图块与 pi 统计的
+        // 功能状态，仍归本类，控制器读写时经 chat 引用访问
+        this._historyCtl = new LlmHistoryController(this);
+        this._genParams = new Map();   // 生成图片块 id → 原始请求参数（重新生成/恢复重绑用）
+        this._piUsage = null;          // 最近一次 pi 调用统计 {usage, modelId}（随快照持久化）
 
         this.init();
     }
@@ -83,6 +107,11 @@ class LlmChat {
 
         // 发送按钮
         this.sendBtn?.addEventListener('click', () => this.send());
+
+        // 生图停止按钮
+        this.stopBtn?.addEventListener('click', () => this.abortImageGenerations());
+        // 初始显隐同步（默认模型非绘图时隐藏）
+        this._updateStopBtn();
 
         // 输入框：Enter 发送，Shift+Enter 换行
         this.inputEl?.addEventListener('keydown', (e) => {
@@ -120,6 +149,11 @@ class LlmChat {
         // 设置保存后刷新模型列表（设置界面会派发该事件）
         window.addEventListener('settingsSaved', () => this.loadModels());
 
+        // 设置里切换了桥接站点：处于网页桥接模式时按新站点换聊天记录
+        window.addEventListener('webbridgeSiteChanged', () => {
+            if (this.isWebMode()) this._swapHistorySnapshot();
+        });
+
         // 切换到 LLM 模式时刷新模型列表（PromptPanel 会派发该事件）
         window.addEventListener('llmModeEnter', () => this.loadModels());
 
@@ -133,6 +167,11 @@ class LlmChat {
 
         // 初始加载一次模型列表
         this.loadModels();
+
+        // 恢复上次会话的聊天记录（等实时保存确定存档键后按存档恢复）
+        this._restoreHistory();
+        // 卸载前把防抖窗口内的最后一次变更尽力落盘
+        window.addEventListener('beforeunload', () => this._flushHistory());
     }
 
     /**
@@ -216,6 +255,17 @@ class LlmChat {
         }
     }
 
+    /**
+     * 是否为网页桥接入口（厂商名 'web'）
+     */
+    isWebBridgeModel(modelId) {
+        try {
+            return LumenLight.parseModelKey(modelId).provider === 'web';
+        } catch {
+            return false;
+        }
+    }
+
     isVideoModel(modelId) {
         return this.videoGen ? this.videoGen.isVideoModel(modelId) : false;
     }
@@ -229,9 +279,20 @@ class LlmChat {
     updateToolbarForModel() {
         if (!this.modelDropdown) return;
         const modelId = this.modelDropdown.value;
+        // 停止生图按钮的显隐跟随模型类型（仅绘图模型显示）
+        this._updateStopBtn();
         const isVideo = this.isVideoModel(modelId);
         const isImage = !isVideo && this.isImageModel(modelId);
         const qualityOptions = isImage ? this.getQualityOptions(modelId) : null;
+
+        // 网页桥接：无尺寸/质量概念，消息驱动进站点网页（回复里带什么
+        // 尺寸由网页自己决定）
+        if (this.isWebBridgeModel(modelId)) {
+            this.sizePicker.setVisible(false);
+            this.qualityDropdown?.setVisible(false);
+            if (this.sendBtn) this.sendBtn.textContent = '发送';
+            return;
+        }
 
         this.sizePicker.setVisible(isImage);
         // 同步档位可用性：低于模型最小总像素的档位会被禁用，
@@ -281,8 +342,12 @@ class LlmChat {
             const showProvider = providerCount > 1;
 
             if (models.length === 0) {
+                // 未配置任何 API 模型：网页桥接不依赖 API 配置，仍保底可用
                 this.modelDropdown.setOptions(
-                    [{ value: '', label: '未配置模型（请到设置中添加）' }], '');
+                    [{ value: 'web||webbridge', label: '网页桥接', icon: LLM_DD_ICONS.box }],
+                    'web||webbridge');
+                this.modelsConfig = [];
+                this.updateToolbarForModel();
                 return;
             }
 
@@ -291,8 +356,18 @@ class LlmChat {
                 key: 'pi||pi-agent',
                 provider: 'pi',
                 id: 'pi-agent',
-                displayName: 'pi 编码智能体',
+                displayName: 'agent模式',
                 type: 'agent'
+            });
+
+            // 网页桥接（豆包等站点网页直连）：消息经后端专用浏览器驱动进
+            // 网页，回复与产物自动回流画布；桥接站点在 设置 → 网页桥接 选择
+            models.push({
+                key: 'web||webbridge',
+                provider: 'web',
+                id: 'webbridge',
+                displayName: '网页桥接',
+                type: 'web'
             });
 
             // 尽量保持之前的选择；无有效选择时取第一项（与原生 select 行为一致）。
@@ -410,6 +485,8 @@ class LlmChat {
             </svg>
         `;
         editBtn.addEventListener('click', () => this.reeditMessage(prompt, images));
+        // 原始提示词存 data 属性：F5 恢复后重绑"重新编辑"时从 DOM 取回
+        actions.dataset.rawPrompt = prompt ?? '';
 
         actions.appendChild(editBtn);
         return actions;
@@ -435,10 +512,63 @@ class LlmChat {
     }
 
     /**
-     * 消息区滚动到底部
+     * 消息区无条件滚动到底部并恢复自动跟随：
+     * 用于发送消息、F5 恢复记录等"应当贴底"的场景
      */
     scrollToBottom() {
+        this.autoFollow = true;
         this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+        this._updateScrollBtn();
+    }
+
+    /**
+     * 仅在自动跟随状态下贴底（流式输出逐块滚动走这里）：
+     * 用户上滑阅读历史即暂停跟随，不被新输出拽回；点回底按钮恢复
+     */
+    followBottom() {
+        if (this.autoFollow) this.scrollToBottom();
+    }
+
+    /** 回底按钮点击：平滑滚动到最新消息（滚动到位后自然恢复自动跟随） */
+    _smoothScrollToBottom() {
+        this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: 'smooth' });
+    }
+
+    /**
+     * 消息区滚动监听：按离底距离驱动自动跟随开关与回底按钮显隐
+     * （距底 ≤120px 视为贴底；离底超过 120px 浮现按钮）
+     */
+    _onMessagesScroll() {
+        const dist = this.messagesEl.scrollHeight - this.messagesEl.scrollTop - this.messagesEl.clientHeight;
+        this.autoFollow = dist <= 120;
+        this._updateScrollBtn();
+    }
+
+    /** 按离底距离显隐回底按钮 */
+    _updateScrollBtn() {
+        if (!this.scrollBtn) return;
+        const dist = this.messagesEl.scrollHeight - this.messagesEl.scrollTop - this.messagesEl.clientHeight;
+        this.scrollBtn.classList.toggle('visible', dist > 120);
+    }
+
+    /**
+     * 创建空的 assistant 消息容器作为流式块序列的父节点（供各模式控制器
+     * 使用：pi 智能体的分阶段块、网页桥接的流式文本都以它为容器）。
+     * 追加后移除默认文本节点，可选带一个流式文本元素
+     * @param {boolean} [withTextEl=false] - 是否预置 .llm-msg-text 文本元素
+     * @returns {{wrap: HTMLElement, textEl: HTMLElement|null}}
+     */
+    createAssistantBubble(withTextEl = false) {
+        const seedEl = this.appendMessage('assistant', '');
+        const wrap = seedEl.parentElement;
+        seedEl.remove();
+        let textEl = null;
+        if (withTextEl) {
+            textEl = document.createElement('div');
+            textEl.className = 'llm-msg-text';
+            wrap.appendChild(textEl);
+        }
+        return { wrap, textEl };
     }
 
     // ==================== 发送消息 ====================
@@ -453,7 +583,14 @@ class LlmChat {
             this.piAgent.abort();
             return;
         }
-        if (this.isSending) return;
+        // 网页桥接捕获回复中：发送按钮即"停止"（中止捕获并尽力停掉网页侧生成）
+        if (this.webBridge?.isStreaming()) {
+            this.webBridge.abort();
+            return;
+        }
+        // 聊天/视频仍走 isSending 串行锁；生图任务彼此独立（API 并发），
+        // 选中绘图模型时不拦，允许不等上一张完成就发下一张
+        if (this.isSending && !this.isImageModel(this.modelDropdown?.value)) return;
 
         const text = this.inputEl.value.trim();
         if (!text && !this.attachments.hasAttachments()) return;
@@ -472,6 +609,10 @@ class LlmChat {
         if (this.isAgentModel(model)) {
             // pi 编码智能体路径：文档文本直接拼进提示词（不走 /chat 后端拼接）
             await this.piAgent.send(this.buildAgentText(text), this.attachments.getAll());
+        } else if (this.isWebBridgeModel(model)) {
+            // 网页桥接路径：消息由后端专用浏览器驱动进站点网页，
+            // 流式回复与产物经 webbridgeEvent / WS 回流，不走 /api/llm
+            await this.webBridge.send(text, this.attachments.getAll());
         } else if (this.isVideoModel(model)) {
             await this.videoGen.generate(text, model, this.attachments.getAll());
         } else if (this.isImageModel(model)) {
@@ -563,7 +704,7 @@ class LlmChat {
                 // 根据当前模型恢复按钮文案（聊天=发送，绘图=生成图片）
                 this.updateToolbarForModel();
             }
-            this.scrollToBottom();
+            this.followBottom();   // 仅在跟随态贴底：用户上滑阅读时不拽回
         }
     }
 
@@ -601,12 +742,12 @@ class LlmChat {
         const thinkingEl = this.appendMessage('assistant', isI2I ? `正在生成 ${sizeText} 图片（图生图）…` : `正在生成 ${sizeText} 图片…`);
         thinkingEl.parentElement.classList.add('thinking');
 
-        // 锁定发送状态
-        this.isSending = true;
-        if (this.sendBtn) {
-            this.sendBtn.disabled = true;
-            this.sendBtn.textContent = '生成中…';
-        }
+        // 生图不走 isSending 串行锁（聊天/视频专用）：API 支持并发，
+        // 连续发送互不阻塞；每个任务持独立 AbortController 供停止按钮中止，
+        // 前端 abort 后后端监听断连同步掐断对上游厂商的请求（不再继续计费）
+        const abortController = new AbortController();
+        this._imageGenTasks.add(abortController);
+        this._updateStopBtn();
 
         try {
             // 根据模型、比例、档位计算实际像素，模型不支持时自动降级
@@ -648,7 +789,8 @@ class LlmChat {
             const response = await fetch('/api/llm/generate-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody)
+                body: JSON.stringify(requestBody),
+                signal: abortController.signal
             });
 
             const result = await response.json();
@@ -673,18 +815,47 @@ class LlmChat {
             }
         } catch (error) {
             thinkingEl.parentElement.classList.remove('thinking');
-            thinkingEl.textContent = '❌ 连接失败：' + error.message;
-            thinkingEl.parentElement.classList.add('error');
-            console.error('图像生成请求失败:', error);
-        } finally {
-            this.isSending = false;
-            if (this.sendBtn) {
-                this.sendBtn.disabled = false;
-                // 根据当前模型恢复按钮文案（聊天=发送，绘图=生成图片）
-                this.updateToolbarForModel();
+            if (error?.name === 'AbortError') {
+                // 用户点停止按钮主动中止：中性提示，不算错误
+                thinkingEl.textContent = '⛔ 已停止生成';
+            } else {
+                thinkingEl.textContent = '❌ 连接失败：' + error.message;
+                thinkingEl.parentElement.classList.add('error');
+                console.error('图像生成请求失败:', error);
             }
-            this.scrollToBottom();
+        } finally {
+            this._imageGenTasks.delete(abortController);
+            this._updateStopBtn();
+            this.followBottom();   // 仅在跟随态贴底：用户上滑阅读时不拽回
         }
+    }
+
+    /**
+     * 中止面板全部在飞生图任务（停止按钮回调）
+     * 逐个 abort 会触发各任务自己的 catch：气泡改为"已停止生成"并落盘快照；
+     * 后端经断连监听同步中止对上游厂商的请求
+     */
+    abortImageGenerations() {
+        if (this._imageGenTasks.size === 0) return;
+        const count = this._imageGenTasks.size;
+        for (const ac of [...this._imageGenTasks]) ac.abort();
+        window.socket?.showNotification?.(`已停止 ${count} 张生图`);
+    }
+
+    /**
+     * 按在飞生图任务数与当前模型刷新停止按钮：
+     *   - 显隐：仅绘图模型显示（agent/聊天/视频/网页桥接无生图可停）；
+     *     有在飞任务时即使切走了模型也保持可见，避免任务失管无法取消
+     *   - 两态：无任务暗红灭置禁用，有任务亮红可点
+     */
+    _updateStopBtn() {
+        if (!this.stopBtn) return;
+        const modelId = this.modelDropdown?.value;
+        const isImage = !this.isVideoModel(modelId) && this.isImageModel(modelId);
+        const active = this._imageGenTasks.size > 0;
+        this.stopBtn.style.display = (isImage || active) ? '' : 'none';
+        this.stopBtn.classList.toggle('active', active);
+        this.stopBtn.disabled = !active;
     }
 
     /**
@@ -696,6 +867,10 @@ class LlmChat {
     buildGeneratedImageBlock(imgEl, requestParams) {
         const block = document.createElement('div');
         block.className = 'llm-gen-block';
+        // 块 id → 原始请求参数：重新生成与 F5 恢复后的重绑都按它索引
+        // （参考图为 data URL，随快照一起进 IndexedDB）
+        block.dataset.genId = LumenLight.generateId();
+        this._genParams.set(block.dataset.genId, requestParams);
 
         // 图片容器（悬停显示删除按钮，复用现有逻辑）
         block.appendChild(this.wrapRemovableImage(imgEl));
@@ -728,7 +903,7 @@ class LlmChat {
      * @param {Object} params - 原始请求参数 { prompt, images, ratio, tier, quality }
      */
     async regenerate({ prompt, images, ratio, tier, quality }) {
-        if (this.isSending) return;
+        // 与正常发送一致：生图任务不查 isSending 串行锁，允许在飞时再次发起
 
         const model = this.modelDropdown?.value;
         if (!model) {
@@ -778,6 +953,8 @@ class LlmChat {
      */
     updatePiUsage(usage, modelId) {
         if (!this.piUsageEl || !usage) return;
+        // 记住最近一次统计：随聊天快照按存档持久化，F5 后恢复显示
+        this._piUsage = { usage, modelId: modelId || null };
         const ctx = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
         const parts = [];
         if (modelId) parts.push(String(modelId));
@@ -795,6 +972,67 @@ class LlmChat {
         return String(n);
     }
 
+    // ==================== 聊天记录持久化（编排已拆至 LlmHistoryController） ====================
+    // 消息区 DOM 快照存 IndexedDB（跨存档统一键，网页桥接按站点分键），
+    // F5 后整体回填并重绑交互。
+    // 本类只保留同名薄代理（内部/外部调用点零改动）；isWebMode 与
+    // _onModelChanged 属模型切换逻辑，仍归本类。
+
+    /** 当前持久化键（代理到持久化控制器；网页桥接模式按站点细分） */
+    _historyKey() {
+        return this._historyCtl._historyKey();
+    }
+
+    /**
+     * 当前选中的是否为网页桥接入口（厂商名 'web'；公共接口，控制器复用）
+     */
+    isWebMode() {
+        try {
+            return LumenLight.parseModelKey(this.modelDropdown?.value || '').provider === 'web';
+        } catch {
+            return false;
+        }
+    }
+
+    /** 统一处理模型切换：工具栏刷新 + 网页桥接模式的聊天记录互换 */
+    _onModelChanged() {
+        this.updateToolbarForModel();
+        this._swapHistorySnapshot();
+    }
+
+    // ---- 以下 6 个为 LlmHistoryController 同名方法的薄代理 ----
+    // （存取编排与恢复重绑的实现见 js/components/LlmHistoryController.js）
+
+    /** 模式切换（网页桥接 ↔ LLM/agent 或站点变更）时的历史互换 */
+    _swapHistorySnapshot() {
+        return this._historyCtl._swapHistorySnapshot();
+    }
+
+    /** 变更防抖保存（800ms 合并高频更新；恢复完成前忽略） */
+    _scheduleHistorySave() {
+        return this._historyCtl._scheduleHistorySave();
+    }
+
+    /** 序列化消息区写入 IndexedDB（key 缺省按当前持久化键） */
+    _saveHistorySnapshot(key) {
+        return this._historyCtl._saveHistorySnapshot(key);
+    }
+
+    /** 卸载前把防抖窗口内的最后一次变更尽力落盘 */
+    _flushHistory() {
+        return this._historyCtl._flushHistory();
+    }
+
+    /** 启动恢复：等实时保存就绪后读快照回填消息区并重绑交互 */
+    _restoreHistory() {
+        return this._historyCtl._restoreHistory();
+    }
+
+    /** 挂消息区变更监听（此后一切增删改都会触发防抖落盘） */
+    _startHistoryObserver() {
+        return this._historyCtl._startHistoryObserver();
+    }
+
     /**
      * 清空对话历史与界面
      */
@@ -804,13 +1042,20 @@ class LlmChat {
         this.videoGen?.cancelAll();
         // 同步重置 pi 会话：pi 的对话按存档持久化在会话文件里，只清界面
         // 会让旧上下文在下一句原样背进去（上下文持续膨胀，历史里的
-        // 过期信息甚至会误导模型自我认知）
+        // 过期信息甚至会误导模型自我认知）；后端重置时清空 sessions/
+        // 全部会话文件（所有存档的 agent 上下文一并推倒重来）
         fetch('/api/pi/reset-session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ archive: window.saveManager?.currentSave || null })
         }).catch(() => { /* pi 未运行或重置失败：不阻塞界面清空 */ });
-        if (this.piUsageEl) this.piUsageEl.textContent = '';
+        if (this.piUsageEl) {
+            this.piUsageEl.textContent = '';
+            this._piUsage = null;   // 随快照持久化的统计一并清除
+        }
+        // 持久化快照与生成参数一并清除（防抖随后写入的空快照与之一致）
+        this._genParams.clear();
+        this._historyCtl._deleteHistorySnapshot();
         // 移除消息区内除空状态提示外的所有节点。
         // 这里刻意不按 class 白名单（如 .llm-msg）删除：生成图片块 .llm-gen-block 是
         // 用 replaceWith 整体替换占位气泡产生的，并不带 .llm-msg，白名单会漏掉它。

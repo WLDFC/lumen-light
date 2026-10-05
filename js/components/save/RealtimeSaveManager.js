@@ -59,8 +59,8 @@ class RealtimeSaveManager {
         this._lastWrittenJson = null;   // 上一份已成功写入的完整负载（内容比对用）
         this._lastSyncStart = 0;        // 最近一次同步开始时间（强制落盘判定用）
 
-        // 图片内容哈希缓存：imageId -> Promise<hex|null>（null = 计算失败）
-        // 同一张图会话内只取一次字节与算一次哈希
+        // 图片内容哈希缓存：imageId -> { src, Promise<hex|null> }（null = 计算失败）
+        // 同一 src 会话内只取一次字节与算一次哈希；src 变化（编辑写回新内容）时重算
         this._hashCache = new Map();
         // 本会话已成功上传的资产哈希（含后端已存在的），避免重复请求
         this._uploadedHashes = new Set();
@@ -98,6 +98,17 @@ class RealtimeSaveManager {
      * @returns {Promise<boolean>} 是否成功恢复
      */
     async restore() {
+        try {
+            return await this._restoreInner();
+        } finally {
+            // 存档键已就绪（无论恢复成败，键为当前值）：聊天记录等按存档键
+            // 持久化的组件以此为准恢复（__realtimeSaveRestored 供错过事件者查询）
+            window.__realtimeSaveRestored = true;
+            window.dispatchEvent(new CustomEvent('realtimeSaveRestored'));
+        }
+    }
+
+    async _restoreInner() {
         let remote;
         try {
             const response = await fetch('/api/autosave');
@@ -112,6 +123,7 @@ class RealtimeSaveManager {
         const data = remote.data;
         const hasContent = (data.images && data.images.length > 0) ||
                            (data.nodes && data.nodes.length > 0) ||
+                           (data.groups && data.groups.length > 0) ||
                            (data.prompt && data.prompt.trim()) ||
                            (data.prompt2 && data.prompt2.trim()) ||
                            (data.negativePrompt && data.negativePrompt.trim());
@@ -242,11 +254,19 @@ class RealtimeSaveManager {
         // 逐张处理图片：data:/blob: 的需要上传，其余（save/... 等服务器路径）直接引用
         for (const entry of images) {
             const src = entry.src || '';
-            if (!src.startsWith('data:') && !src.startsWith('blob:')) continue;
+            if (src.startsWith('data:') || src.startsWith('blob:')) {
+                const url = await this._ensureAssetUploaded(entry.id, src);
+                if (url) entry.src = url;
+                // 上传失败时保留原 data: src（下一轮同步会再次尝试上传）
+            }
 
-            const url = await this._ensureAssetUploaded(entry.id, src);
-            if (url) entry.src = url;
-            // 上传失败时保留原 data: src（下一轮同步会再次尝试上传）
+            // 编辑笔迹层（非破坏性图层，data URL）：同样上传为内容寻址资产，
+            // 缓存键独立于图片本体（imageId:strokes），互不干扰
+            const strokes = entry.editStrokes || '';
+            if (strokes.startsWith('data:')) {
+                const sUrl = await this._ensureAssetUploaded(entry.id + ':strokes', strokes);
+                if (sUrl) entry.editStrokes = sUrl;
+            }
         }
 
         return {
@@ -256,6 +276,7 @@ class RealtimeSaveManager {
             viewport: this.serializer.getViewport(),
             images,
             nodes: this.serializer.collectNodes(),
+            groups: this.serializer.collectGroups(),
             connections: this.serializer.getConnectionsData()
         };
     }
@@ -273,11 +294,14 @@ class RealtimeSaveManager {
             return null;
         }
 
-        // 1. 计算内容哈希（会话内按图片 id 缓存）
-        if (!this._hashCache.has(imageId)) {
-            this._hashCache.set(imageId, this._computeHash(src).catch(() => null));
+        // 1. 计算内容哈希（按 imageId + src 缓存；src 变化必须重算——
+        //    编辑器写回新内容后若仍命中旧哈希，资产与元数据会永远指向
+        //    原始图片，F5 恢复后编辑笔迹全部丢失）
+        const cached = this._hashCache.get(imageId);
+        if (!cached || cached.src !== src) {
+            this._hashCache.set(imageId, { src, hash: this._computeHash(src).catch(() => null) });
         }
-        const hash = await this._hashCache.get(imageId);
+        const hash = await this._hashCache.get(imageId).hash;
         if (!hash) return null;
 
         // 2. 本会话已上传过（或确认后端已存在）直接复用

@@ -37,7 +37,7 @@ module.exports = {
      * @returns {Promise<{imageSrc: string}>} 图片源（URL 或 base64 data URL）
      */
     async run(request) {
-        const { model, prompt, size, quality, images, provider } = request;
+        const { model, prompt, size, quality, images, provider, signal } = request;
 
         // 比例指令追加在原始提示词末尾（Gemini 图像系等忽略 size 参数的模型依赖它；
         // 对正常透传 size 的模型则与 size 参数互相印证，无冲突）
@@ -77,7 +77,7 @@ module.exports = {
         }
 
         const url = buildImageGenerationUrl(provider.config.endpoint);
-        const result = await requestImageGeneration(url, provider.config.apiKey, payload);
+        const result = await requestImageGeneration(url, provider.config.apiKey, payload, signal);
 
         // 支持返回 url 或 base64（已请求 b64_json，url 为兜底）
         const first = result.data?.[0];

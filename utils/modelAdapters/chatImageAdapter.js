@@ -38,7 +38,7 @@ module.exports = {
      * @returns {Promise<{imageSrc: string, reply: string}>} 图片源与模型文本回复
      */
     async run(request) {
-        const { model, prompt, size, images, provider } = request;
+        const { model, prompt, size, images, provider, signal } = request;
 
         // 比例指令追加在提示词末尾（Gemini 图像系对提示词中的比例描述跟随度高）
         const sizeHint = buildAspectRatioHint(size);
@@ -58,7 +58,7 @@ module.exports = {
                     }))
                 ]
             }]
-        });
+        }, signal);
 
         const { imageSrc, reply } = extractImageFromChatReply(chatResult);
         if (!imageSrc) {

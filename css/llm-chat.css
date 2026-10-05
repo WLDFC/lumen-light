@@ -22,6 +22,15 @@
 }
 
 /* ==================== 消息区 ==================== */
+/* 外层定位容器：为"回到底部"悬浮按钮提供基准，自身接管消息区的弹性占位 */
+.llm-chat-messages-wrap {
+    position: relative;
+    flex: 1;                  /* 接管原消息区的弹性空间 */
+    min-height: 0;            /* flex 布局中允许收缩，否则内层无法滚动 */
+    display: flex;
+    flex-direction: column;
+}
+
 .llm-chat-messages {
     flex: 1;                  /* 撑满输入栏以外的全部高度 */
     min-height: 0;            /* flex 布局中允许收缩，否则不会被裁剪、无法滚动 */
@@ -29,7 +38,125 @@
     display: flex;
     flex-direction: column;   /* 消息按时间从上到下排列 */
     gap: 18px;                /* 相邻消息的间距 */
-    padding: 18px;             /* 内边距，避免消息气泡靠边 */
+    padding: 24px 24px 24px 30px;   /* 数值对应上 右 下 左，右侧比左侧少 6px：滚动条宽 6px（style.css 全局）压在
+                                       内边距外侧，减掉后左右视觉边距对称 */
+}
+
+/* 快速回底按钮：滚离底部（未处于跟随态）时浮现，点击平滑滚回最新消息。
+   配色按配色美学规范：浮起层底色 + 叠加式悬停，无描边，靠投影区分边界 */
+.llm-scroll-bottom-btn {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;                                 /* 无描边（覆盖按钮 UA 默认边框） */
+    background: var(--icon-bg, #1b1c21);          /* 浮起层（面板同色） */
+    color: var(--icon-color, #fff);               /* 图标白色 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    z-index: 5;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.18s ease, visibility 0.18s ease;
+}
+
+.llm-scroll-bottom-btn.visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+/* 悬停/按下：半透明白叠加，不换底色（配色美学规范交互层约定） */
+.llm-scroll-bottom-btn:hover {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.1));
+}
+
+.llm-scroll-bottom-btn:active {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.18));
+}
+
+/* ==================== 消息刻度导航（左侧定位索引） ==================== */
+/* 贴消息区左缘的悬浮细条：每条用户消息一个刻度，点击跳转、滚动同步高亮。
+   容器本身不拦鼠标（pointer-events:none），只有刻度可点，不挡消息内容 */
+.llm-msg-rail {
+    position: absolute;
+    left: 6px;                 /* 留出滚动条宽度 */
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;                 /* 消息很多时由 JS 压缩 */
+    max-height: 70%;
+    z-index: 6;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.llm-msg-rail.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* 刻度：短横线，闲置半透明白，当前轮次提亮为纯白（不加宽——位置拥挤） */
+.llm-msg-rail-tick {
+    pointer-events: auto;
+    flex: none;
+    width: 10px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.llm-msg-rail-tick:hover {
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.llm-msg-rail-tick.active {
+    background: #ffffff;
+}
+
+/* 悬停预览 tooltip：面板内浮起层样式，pointer-events none 不挡阅读 */
+.llm-msg-rail-tip {
+    position: absolute;
+    left: 24px;
+    transform: translateY(-50%);
+    max-width: 280px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--icon-bg, #1b1c21);          /* 浮起层 */
+    border: 1px solid rgba(128, 128, 128, 0.3);   /* 通用边框 */
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    color: rgba(255, 255, 255, 0.85);             /* 次要文字 */
+    font-size: 12px;
+    line-height: 1.5;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;                        /* 最多三行，超出省略 */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    z-index: 7;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+
+.llm-msg-rail-tip.show {
+    opacity: 1;
+    visibility: visible;
 }
 
 /* 空状态提示（无任何对话时显示的引导文字） */
@@ -76,16 +203,21 @@
     border-bottom-right-radius: 3px;   /* 靠右的角收小，形成"对话指向"效果 */
 }
 
-/* 模型回复：深灰底 */
+/* 模型回复：无气泡裸排（主流 agent 观感），白字顶格左对齐；
+   与用户消息靠左右对齐方向区分，错误消息保留红底警示（见下方 error 规则） */
 .llm-msg.assistant .llm-msg-text {
-    background: #2a2b31;
-    border-bottom-left-radius: 3px;    /* 靠左的角收小 */
+    padding: 0;
+    border-radius: 0;
+    background: none;
 }
 
-/* 错误消息：红色系提示 */
+/* 错误消息：红色系提示。保留气泡底——警示语义不可淹没在正文里，
+   需补回被上方裸排规则收掉的内边距与圆角 */
 .llm-msg.error .llm-msg-text {
     background: rgba(239, 68, 68, 0.12);   /* 半透明红底 */
     color: #f87171;
+    padding: 8px 12px;
+    border-radius: 10px;
 }
 
 /* 思考中：等待模型回复时的灰色提示文字 */
@@ -250,6 +382,57 @@
 .llm-gen-btn svg {
     display: block;            /* 消除 svg 基线空隙 */
     flex-shrink: 0;
+}
+
+/* 网页桥接推荐追问胶囊行：站点给出的可续问选项（点击即续问），
+ * 按钮复用 .llm-gen-btn 白线条风格，这里负责灰底胶囊化与换行排列 */
+.webbridge-suggestion-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 6px;
+}
+
+.webbridge-suggestion {
+    background: rgba(255, 255, 255, 0.09);   /* 灰底：与正文视觉区分 */
+    padding: 4px 12px;
+    border-radius: 14px;
+}
+
+/* 网页桥接任务进度行（生图/生视频进行中）：单例元素原地更新，
+ * 回合收尾移除，不入聊天快照（LlmChat._saveHistorySnapshot 排除） */
+.webbridge-task {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+}
+
+.webbridge-task::before {
+    content: '';
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 255, 255, 0.7);
+    animation: webbridge-spin 1s linear infinite;
+}
+
+/* 网页桥接消息内嵌视频：回复交付的视频在面板里直接可播放 */
+.webbridge-msg-video {
+    display: block;
+    max-width: 240px;
+    max-height: 320px;
+    margin-top: 6px;
+    border-radius: 8px;
+    background: #000;
+}
+
+@keyframes webbridge-spin {
+    to { transform: rotate(360deg); }
 }
 
 /* ==================== 待发送图片预览 ==================== */
@@ -702,6 +885,38 @@
     cursor: not-allowed;
 }
 
+/* ==================== 停止生图按钮 ==================== */
+/* 取消动作独立于发送按钮（生成期间主按钮保持可点可连发）：
+   位于生图按钮右侧；无在飞任务时呈暗红灭置（不可点但始终可见，
+   仅绘图模型下显示），有任务时由 JS 加 active 点亮为亮红 */
+.llm-stop-btn {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    margin-left: 6px;         /* 与生图按钮拉开一点间距 */
+    border: none;
+    border-radius: 6px;
+    background: #3d2529;      /* 暗置态：暗红底，灭而不隐身（参考用户样图） */
+    color: #a35b63;           /* 图标暗红灰（SVG currentColor 继承） */
+    cursor: default;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+/* 点亮态（JS 在有在飞生图任务时加 active）：红色实底白叉，
+   配色取自项目规范红 #ef4444，悬停加深 */
+.llm-stop-btn.active {
+    background: #ef4444;
+    color: #ffffff;
+    cursor: pointer;
+}
+
+.llm-stop-btn.active:hover {
+    background: #dc2626;
+}
+
 /* ==================== 生成图片全屏灯箱 ==================== */
 /* 全屏遮罩层，默认隐藏，点击消息中的图片后显示 */
 .llm-image-lightbox {
@@ -821,17 +1036,15 @@
     width: 100%;
 }
 
-/* 最终回答文本块：沿用助手气泡观感 */
+/* 最终回答文本块：无气泡裸排（与普通对话 AI 回复一致，
+   思考/工具块保留边框——"过程有框、结论裸文"的主流 agent 层级） */
 .pi-block-text {
     align-self: stretch;
     width: 100%;
 }
 .pi-block-text .pi-block-content {
-    background: #2a2b31;
     color: #ffffff;
-    padding: 8px 10px;
-    border-radius: 8px;
-    border-bottom-left-radius: 3px;
+    padding: 2px 0 0;         /* 去气泡后仅留少量上间距，与上方思考/工具块分隔 */
     font-size: 13px;
     line-height: 1.6;
     white-space: pre-wrap;
@@ -856,6 +1069,18 @@
 .pi-block-header:hover {
     background: rgba(255, 255, 255, 0.09);
     color: #e5e7eb;
+}
+
+/* 思考块头部：去框裸排（保留图标/标题/箭头，左缘与最终回答正文对齐）；
+   悬停以轻量半透明白提示可点。工具块头部仍保留边框（用户指定） */
+.pi-block-thinking .pi-block-header {
+    padding: 4px 0;
+    border: none;
+    border-radius: 0;
+    background: none;
+}
+.pi-block-thinking .pi-block-header:hover {
+    background: rgba(255, 255, 255, 0.05);
 }
 
 /* 折叠箭头：展开时旋转 90° */

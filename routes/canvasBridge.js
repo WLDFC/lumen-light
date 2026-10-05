@@ -35,7 +35,7 @@ function createCanvasBridgeRouter({ clients }) {
     let bridgeSeq = 0;
 
     /** 需要路由到单一客户端的写命令（广播会重复执行） */
-    const MUTATING_COMMANDS = new Set(['drop_image', 'delete_media', 'clear_media']);
+    const MUTATING_COMMANDS = new Set(['drop_image', 'delete_media', 'clear_media', 'build_graph']);
     /** 心跳新鲜度阈值：超过视为页面失去响应 */
     const FRESH_MS = 10 * 1000;
 
@@ -94,7 +94,7 @@ function createCanvasBridgeRouter({ clients }) {
                 res.status(504).json({ status: 'error', message: '画布执行超时' });
             }
         }, BRIDGE_TIMEOUT_MS);
-        pending.set(id, { res, timer });
+        pending.set(id, { res, timer, command });
 
         // 目标客户端断线即释放：挂起的请求会占住发起方（pi）的连接，
         // 等满 30s 超时纯属浪费，断线时立即明确报错
@@ -138,7 +138,16 @@ function createCanvasBridgeRouter({ clients }) {
         }
         clearTimeout(waiter.timer);
         pending.delete(id);
-        console.log(`[桥接] 应答 ${id}: ${ok ? 'ok' : 'error ' + (error || '')}`);
+        console.log(`[桥接] 应答 ${id} (${waiter.command}): ${ok ? 'ok' : 'error ' + (error || '')}`);
+        if (ok && waiter.command === 'get_state') {
+            // 诊断：selected 字段存在与否直接暴露浏览器端代码版本——
+            // 字段缺失 = 浏览器还在跑旧 LumenSocket.js（需硬刷新）；
+            // 多标签页时旧标签可能抢先应答，此日志可定位这种情况
+            const sel = data && Array.isArray(data.selected) ? data.selected : null;
+            console.log(`[桥接] get_state 诊断: selected=` +
+                (sel === null ? '字段缺失（浏览器为旧代码，需 Ctrl+F5）' : `${sel.length} 项`) +
+                `，数据总量 ${JSON.stringify(data || null).length} 字符`);
+        }
         if (ok) {
             waiter.res.json({ status: 'ok', id, data: data === undefined ? null : data });
         } else {

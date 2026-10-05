@@ -91,6 +91,9 @@ class LoraNode extends BaseCanvasNode {
         this.entriesEl = this.el.querySelector('.lora-entries');
         this.addBtn = this.el.querySelector('.lora-add-btn');
 
+        // 标题双击重命名（基类共用实现，六类节点同一套交互）
+        this.initTitleEditor();
+
         // 挂载到页面：面板节点是浮在画布上方的 DOM 元素（body 直挂，
         // 由 updateTransform 按画布视口变换定位），漏挂则完全不可见
         document.body.appendChild(this.el);
@@ -280,7 +283,8 @@ class LoraNode extends BaseCanvasNode {
             y: this.y,
             width: this.width,
             height: this.height,
-            entries: this.entries
+            entries: this.entries,
+            ...(this.title ? { title: this.title } : {})
         };
     }
 
@@ -306,6 +310,7 @@ class LoraNode extends BaseCanvasNode {
 // 的排版完全一致——否则同为 2048 宽时本节点字号会小 25%
 LoraNode.DESIGN_BASE = 384;
 LoraNode.DEFAULT_WIDTH = 2048;    // 与提示词节点同宽量级
+LoraNode.DEFAULT_TITLE = 'LoRA Stack'; // 默认标题（双击标题可自定义）
 LoraNode.DEFAULT_HEIGHT = 1536;   // 纵向留多条条目的空间，超出由列表区滚动
 
 // 将类暴露到全局作用域

@@ -15,6 +15,7 @@
  *     排序（数据流方向：源头在前）
  *   - 参考图：连入生图节点或链上任意提示词节点的画布图片，
  *     命中后继续沿图片串联链向上游遍历，链上图片一并收入
+ *     （有编辑笔迹的图片取合成图——涂抹的重绘说明随参考图生效）
  * ==========================================================================
  */
 class ImagePipeline {
@@ -45,6 +46,31 @@ class ImagePipeline {
      */
     static isCanvasImage(obj) {
         return NodeTypes.isRealCanvasImage(obj);
+    }
+
+    /**
+     * 图片对象 → 参考图 src（所见即所得）：有编辑笔迹层时合成原图与笔迹
+     * （按图层透明度 editStrokesOpacity），让画布连线参考图把涂抹的重绘
+     * 说明一并带给模型。与 ImageManager.getCompositeSrc 同一规则（该方法
+     * 委托到这里，单一实现防漂移）。无笔迹/跨域污染画布时回退原 src，
+     * 开销为零
+     * @param {Object} obj - 画布图片对象（含 img 与可选 editStrokesImg/editStrokes）
+     * @returns {string} 图片 src（可能是合成 data URL）
+     */
+    static compositeSrc(obj) {
+        if (!obj.editStrokesImg || !obj.editStrokes) return obj.img.src;
+        try {
+            const c = document.createElement('canvas');
+            c.width = obj.img.naturalWidth;
+            c.height = obj.img.naturalHeight;
+            const g = c.getContext('2d');
+            g.drawImage(obj.img, 0, 0);
+            g.globalAlpha = obj.editStrokesOpacity ?? 1;
+            g.drawImage(obj.editStrokesImg, 0, 0);
+            return c.toDataURL('image/png');
+        } catch {
+            return obj.img.src;   // 跨域污染等：回退原图
+        }
     }
 
     /**
@@ -120,6 +146,19 @@ class ImagePipeline {
      * @returns {Promise<string[]>} base64 data URL 数组（转换失败的图片跳过并打印日志）
      */
     async collectImages(nodeId) {
+        const entries = await this.collectImageEntries(nodeId);
+        return entries.map((e) => e.image).filter(Boolean);
+    }
+
+    /**
+     * 收集槽位载荷（Comfy 局部重绘用）：与 collectImages 同一遍遍历，
+     * 每张图产出 { image, mask }——image 为所见即所得合成图（原图+笔迹），
+     * mask 为黑白遮罩 PNG（白=重绘区，无遮罩时 null）。数组按位对齐：
+     * 第 i 项对应槽位 i+1，mask 为 null 时提交端清空对应遮罩槽。
+     * @param {string} nodeId - 生图节点 id
+     * @returns {Promise<Array<{image: string|null, mask: string|null}>>}
+     */
+    async collectImageEntries(nodeId) {
         // 待收集的接收方节点集合：生图节点 + 整条上游提示词链
         const upstreamIds = new Set(
             [nodeId, ...this.collectUpstreamPromptNodes(nodeId).map(n => n.id)]
@@ -127,7 +166,7 @@ class ImagePipeline {
 
         // 从上述节点的连入连线中收集画布图片；命中后继续沿图片串联链
         // 向上游遍历，把链上所有图片一并收入
-        const srcList = [];
+        const collected = [];           // 画布图片对象（保序）
         const seen = new Set();
         const queue = [];               // 待向上游遍历的图片对象
         for (const c of this.connections) {
@@ -139,7 +178,7 @@ class ImagePipeline {
         }
         while (queue.length) {
             const img = queue.shift();
-            srcList.push(img.img.src);
+            collected.push(img);
             // 图片串联：连入当前图片的上游图片同样作为参考图
             for (const c of this.connections) {
                 if (c.toId !== img.id || seen.has(c.fromId)) continue;
@@ -149,11 +188,49 @@ class ImagePipeline {
                 queue.push(from);
             }
         }
-        if (srcList.length === 0) return [];
+        if (collected.length === 0) return [];
 
-        // 并发转换为 base64 data URL
-        const results = await Promise.all(srcList.map((src) => ImagePipeline.imageToDataUrl(src)));
-        return results.filter(Boolean);
+        // 并发生成槽位载荷（image + mask 按位对齐）
+        const entries = await Promise.all(collected.map((obj) => ImagePipeline.slotPayload(obj)));
+        return entries;
+    }
+
+    /**
+     * 生成单个图片对象的槽位载荷：
+     *   - image：所见即所得合成图（原图 + 笔迹，与旧参考图语义一致）。
+     *     注意不烘任何 alpha 洞——浏览器 canvas 导出 PNG 有预乘 alpha
+     *     损耗（alpha=0 的像素 RGB 会被清成黑），洞会以黑像素进入工作流
+     *   - mask：黑白遮罩 PNG（白=重绘区），从遮罩图层的 alpha 覆盖度
+     *     二值化生成（全强度，无灰阶）；无遮罩图层时为 null
+     * @param {Object} obj - 画布图片对象（img / editStrokesImg / maskImg）
+     * @returns {Promise<{image: string|null, mask: string|null}>}
+     */
+    static async slotPayload(obj) {
+        const image = await ImagePipeline.imageToDataUrl(ImagePipeline.compositeSrc(obj));
+        let mask = null;
+        if (obj.mask && obj.maskImg) {
+            try {
+                const m = document.createElement('canvas');
+                m.width = obj.maskImg.naturalWidth;
+                m.height = obj.maskImg.naturalHeight;
+                const mg = m.getContext('2d');
+                mg.drawImage(obj.maskImg, 0, 0);
+                const md = mg.getImageData(0, 0, m.width, m.height);
+                const threshold = ImageMaskEditor.ALPHA_THRESHOLD;
+                for (let i = 0; i < md.data.length; i += 4) {
+                    // 遮罩层笔迹是纯色红，覆盖度读 alpha 即可；二值化为黑白
+                    const on = md.data[i + 3] > threshold ? 255 : 0;
+                    md.data[i] = on; md.data[i + 1] = on; md.data[i + 2] = on;
+                    md.data[i + 3] = 255;
+                }
+                mg.putImageData(md, 0, 0);
+                mask = m.toDataURL('image/png');
+            } catch (err) {
+                console.error('遮罩导出失败，该图按无遮罩提交:', err);
+                mask = null;
+            }
+        }
+        return { image, mask };
     }
 
     /**

@@ -33,11 +33,13 @@
     <link rel="stylesheet" href="css/prompt-panel.css">
     <link rel="stylesheet" href="css/workflow-manager.css">
     <link rel="stylesheet" href="css/image-toolbar.css">
+    <link rel="stylesheet" href="css/image-editor.css">
     <link rel="stylesheet" href="css/save-manager.css">
     <link rel="stylesheet" href="css/prompt-autocomplete.css">
     <link rel="stylesheet" href="css/llm-chat.css">
     <link rel="stylesheet" href="css/lumen-dropdown.css">
     <link rel="stylesheet" href="css/llm-system-prompt.css">
+    <link rel="stylesheet" href="css/llm-skills.css">
     <link rel="stylesheet" href="css/settings.css">
     <link rel="stylesheet" href="css/side-toolbar.css">
     <link rel="stylesheet" href="css/asset-library.css">
@@ -51,6 +53,8 @@
     <!-- 顶栏样式放在 save-manager.css / prompt-panel.css 之后，
          以便覆盖被收纳进顶栏的按钮原有的 fixed 定位相关声明 -->
     <link rel="stylesheet" href="css/top-toolbar.css">
+    <!-- 工作流编辑器（顶栏 Comfy 按钮：节点图 + 参数编辑）样式 -->
+    <link rel="stylesheet" href="css/workflow-editor.css">
 </head>
 <body>
     <!--
@@ -269,9 +273,14 @@
         -->
         <section class="prompt-panel-content hidden" id="llmContent">
             <div class="llm-chat">
-                <!-- 消息区 -->
-                <div class="llm-chat-messages" id="llmMessages">
-                    <div class="llm-chat-empty" id="llmChatEmpty">发送消息，开始与模型对话</div>
+                <!-- 消息区（外层 wrap 为"回到底部"悬浮按钮提供定位基准） -->
+                <div class="llm-chat-messages-wrap">
+                    <div class="llm-chat-messages" id="llmMessages">
+                        <div class="llm-chat-empty" id="llmChatEmpty">发送消息，开始与模型对话</div>
+                    </div>
+                    <button type="button" class="llm-scroll-bottom-btn" id="llmScrollBottom" title="回到底部（最新消息）" aria-label="滚动到底部">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                    </button>
                 </div>
 
                 <!-- 待发送图片预览 -->
@@ -298,6 +307,7 @@
                         </div>
                         <div class="llm-toolbar-spacer"></div>
                         <button class="llm-send-btn" id="llmSendBtn" type="button">发送</button>
+                        <button class="llm-stop-btn" id="llmStopBtn" type="button" title="停止生图" aria-label="停止图片生成" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                     </div>
                     <input type="file" id="llmFileInput" accept="image/*,video/*,.txt,.md,.markdown,.csv,.tsv,.log,.json,.xml,.yaml,.yml,.ini,.conf,.srt,.vtt,.pdf,.docx,.xls,.xlsx,.xlsm" multiple style="display: none;">
                 </div>
@@ -337,6 +347,7 @@
         2. 画布核心模块
            js/canvas/Viewport.js        视口变换（缩放、平移、坐标转换）
            js/canvas/ImageManager.js    图片数据管理与命中检测
+           js/canvas/GroupManager.js    编组管理器（组数据/命中检测/标题改名）
            js/canvas/CanvasRenderer.js  画布渲染（图片、边框、尺寸标签）
            js/canvas/CanvasHitTester.js 画布命中检测与光标决策（纯几何计算）
            js/canvas/CanvasInteraction.js  鼠标 / 键盘交互（拖拽、框选、删除、连线）
@@ -358,11 +369,15 @@
            js/components/LlmChat.js             LLM 聊天窗口
            js/components/PiStatusLight.js       pi 智能体健康状态灯（面板头部）
            js/components/LlmSystemPrompt.js     系统提示词管理（弹窗与启用状态）
+           js/components/LlmSkillManager.js     pi 技能库管理（查阅与启停勾选）
            js/components/PromptPanel.js         右侧面板主组件
 
         5. 图片工具栏与视图控制
+           js/utils/ImageExport.js              图片源导出工具（data URL/blob 统一转换）
            js/components/UpscaleManager.js      高清放大管理
            js/components/ImageToolbar.js        图片选中工具栏
+           js/components/GroupToolbar.js        编组选中工具栏（按钮预留）
+           js/components/ImageMaskEditor.js     遮罩灯箱（局部重绘遮罩涂抹）
            js/components/Controls.js            左下角视图控制
 
         6. 文件菜单与存档
@@ -390,6 +405,10 @@
     <script defer src="js/utils/PromptDictStore.js"></script>
     <script defer src="js/canvas/Viewport.js"></script>
     <script defer src="js/canvas/ImageManager.js"></script>
+    <!-- 编组管理器：组数据/命中/改名，渲染器与交互层共用（需先于 Canvas 加载） -->
+    <script defer src="js/canvas/GroupManager.js"></script>
+    <!-- 编组布局算法：布局按钮的纯函数排列器（GroupToolbar 依赖） -->
+    <script defer src="js/canvas/GroupLayout.js"></script>
     <script defer src="js/canvas/CanvasConnections.js"></script>
     <!-- 节点文本镜像层（@引用高亮 + 自绘光标），PromptNode/TextNode 共用 -->
     <script defer src="js/canvas/NodeTextMirror.js"></script>
@@ -402,14 +421,20 @@
     <script defer src="js/utils/ImagePipeline.js"></script>
     <!-- Comfy 工作流参数扫描与覆盖表编译（ComfyGenNode/面板参数区共用） -->
     <script defer src="js/utils/ComfyParamScanner.js"></script>
+    <!-- RunningHub 工作流 JSON 导入解析：设置登记卡「导入工作流 JSON」用 -->
+    <script defer src="js/utils/RhWorkflowImporter.js"></script>
     <!-- 提示词段合并（节点链/面板双正面框共用，拼接处自动补逗号区分中英文） -->
     <script defer src="js/utils/PromptMerge.js"></script>
+    <script defer src="js/utils/ImageExport.js"></script>
     <script defer src="js/canvas/nodes/ImageGenNode.js"></script>
     <!-- Comfy 动态参数行控制器：画布 Comfy 生图节点与右侧面板共用 -->
     <script defer src="js/components/ComfyParamRows.js"></script>
     <!-- 数量步进器行为层：节点生成按钮旁与面板运行按钮旁共用 -->
     <script defer src="js/components/CountStepper.js"></script>
     <script defer src="js/canvas/nodes/ComfyGenNode.js"></script>
+    <!-- RunningHub 云端工作流节点：参数行控制器（登记卡渲染）必须先于节点类加载 -->
+    <script defer src="js/components/RunningHubParamRows.js"></script>
+    <script defer src="js/canvas/nodes/RunningHubGenNode.js"></script>
     <!-- LoRA 节点：串在提示词链路中的可堆叠 LoRA 组合（依赖基类与 NodeTypes） -->
     <script defer src="js/canvas/nodes/LoraNode.js"></script>
     <!-- 图片显示代理缓存：CanvasRenderer 构造时实例化，需先于其加载 -->
@@ -434,15 +459,25 @@
     <script defer src="js/components/LlmImageDrag.js"></script>
     <script defer src="js/components/LlmVideoGen.js"></script>
     <script defer src="js/components/LlmPiAgent.js"></script>
+    <script defer src="js/components/LlmWebBridge.js"></script>
     <script defer src="js/components/PiStatusLight.js"></script>
     <script defer src="js/components/LumenDropdown.js"></script>
+    <script defer src="js/components/ChatHistoryStore.js"></script>
+    <script defer src="js/components/LlmHistoryController.js"></script>
     <script defer src="js/components/LlmChat.js"></script>
+    <script defer src="js/components/LlmMessageRail.js"></script>
     <script defer src="js/components/LlmSystemPrompt.js"></script>
+    <script defer src="js/components/LlmSkillManager.js"></script>
     <script defer src="js/components/PanelThumbnailManager.js"></script>
     <script defer src="js/components/PanelComfyRunner.js"></script>
     <script defer src="js/components/PromptPanel.js"></script>
     <script defer src="js/components/UpscaleManager.js"></script>
     <script defer src="js/components/ImageToolbar.js"></script>
+    <!-- 编组选中工具栏：样式复用 image-toolbar.css，显隐经 canvasGroupSelected 事件驱动 -->
+    <script defer src="js/components/GroupToolbar.js"></script>
+    <script defer src="js/components/ImageEditor.js"></script>
+    <script defer src="js/components/ImageOutpaint.js"></script>
+    <script defer src="js/components/ImageMaskEditor.js"></script>
     <script defer src="js/components/SaveTagDialog.js"></script>
     <script defer src="js/components/TagDetailDialog.js"></script>
     <script defer src="js/components/TagReferenceSlots.js"></script>
@@ -454,10 +489,14 @@
     <script defer src="js/components/save/SaveModal.js"></script>
     <script defer src="js/components/SaveManager.js"></script>
     <script defer src="js/components/RecipeManager.js"></script>
+    <!-- 工作流编辑器（顶栏 Comfy 按钮：节点图 + 全参数编辑，写回 workflows/*.json） -->
+    <script defer src="js/components/WorkflowEditor.js"></script>
     <!-- 设置分类面板需先于 SettingsManager 加载：SettingsManager 构造时会实例化它们 -->
     <script defer src="js/components/settings/SettingsGeneralPanel.js"></script>
     <script defer src="js/components/settings/SettingsApiPanel.js"></script>
     <script defer src="js/components/settings/SettingsRembgPanel.js"></script>
+    <script defer src="js/components/settings/SettingsMcpPanel.js"></script>
+    <script defer src="js/components/settings/SettingsWebBridgePanel.js"></script>
     <script defer src="js/components/SettingsManager.js"></script>
     <script defer src="js/components/PlaceholderManager.js"></script>
     <script defer src="js/components/GenerationFeedback.js"></script>

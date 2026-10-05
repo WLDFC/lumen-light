@@ -46,6 +46,10 @@ const createSettingsRouter = require('./routes/settings');
 const createLlmRouter = require('./routes/llm');
 const createTagsRouter = require('./routes/tags');
 const createComfyNodeRouter = require('./routes/comfyNode');
+const createRunningHubRouter = require('./routes/runninghub');
+const MCPManager = require('./utils/mcpManager');
+const createMcpRouter = require('./routes/mcp');
+const createWebBridgeRouter = require('./routes/webbridge');
 
 // ==================== ComfyUI API 配置 ====================
 // 从环境变量读取 ComfyUI 地址，默认使用本地 8188 端口
@@ -143,6 +147,19 @@ const canvasImages = {
 
 // 记录每个槽位图片的更新时间戳
 const canvasImagesTimestamp = {
+    1: 0,
+    2: 0,
+    3: 0
+};
+
+// 遮罩槽位（局部重绘：黑白遮罩图，白=重绘区；与图片槽按位对齐，
+// 由生图提交写入/清空，From Canvas 节点的 mask 输出读取）
+const canvasMasks = {
+    1: null,
+    2: null,
+    3: null
+};
+const canvasMasksTimestamp = {
     1: 0,
     2: 0,
     3: 0
@@ -246,13 +263,22 @@ app.use('/api', createComfyRouter({
     comfyApiUrl: COMFY_API_URL
 }));
 
-// 工作流管理 API（/api/workflows）
-app.use('/api/workflows', createWorkflowsRouter({ workflowsDir: WORKFLOWS_DIR }));
+// 工作流管理 API（/api/workflows；布局 sidecar 存 data/workflow-layouts.json）
+app.use('/api/workflows', createWorkflowsRouter({
+    workflowsDir: WORKFLOWS_DIR,
+    layoutsFile: path.join(__dirname, 'data', 'workflow-layouts.json')
+}));
 
 // 画板图片槽位 API（/api/canvas-image）
 app.use('/api/canvas-image', createCanvasImagesRouter({
     canvasImages,
     canvasImagesTimestamp
+}));
+
+// 遮罩槽位 API（/api/canvas-mask：局部重绘遮罩，与图片槽按位对齐）
+app.use('/api/canvas-mask', createCanvasImagesRouter({
+    canvasImages: canvasMasks,
+    canvasImagesTimestamp: canvasMasksTimestamp
 }));
 
 // Comfy 生图节点 API（/api/comfy-node：模型清单代理 + 节点生图提交）。
@@ -261,6 +287,8 @@ app.use('/api/comfy-node', createComfyNodeRouter({
     workflowsDir: WORKFLOWS_DIR,
     canvasImages,
     canvasImagesTimestamp,
+    canvasMasks,
+    canvasMasksTimestamp,
     latestPrompts,
     comfyApiUrl: COMFY_API_URL
 }));
@@ -280,9 +308,33 @@ app.use('/api/videos', createVideosRouter({ videosDir: VIDEOS_DIR }));
 // 画布桥接 API（/api/canvas-bridge，pi 等外部 agent 经此操作画布）
 app.use('/api/canvas-bridge', createCanvasBridgeRouter({ clients }));
 
+// RunningHub 云端工作流 API（/api/runninghub，画布 RunningHub 生成节点后端）
+app.use('/api/runninghub', createRunningHubRouter({ clients, dataDir: DATA_DIR }));
+
 // pi 编码智能体（/api/pi，LLM 窗口的 pi 模式后端）
 const piAgentManager = new PiAgentManager({ projectRoot: __dirname, dataDir: DATA_DIR, clients });
 app.use('/api/pi', createPiAgentRouter({ manager: piAgentManager }));
+// 启动即拉起 pi RPC 进程（与下方 MCP 初始连接同理）：状态灯/agent 模式
+// 开箱即用。此前为惰性启动——首次 prompt 才 spawn，后端重启后 /state
+// 如实报 running:false，状态灯会一直灰到首问。失败不阻塞启动：
+// starting 已复位，下次 prompt 时 ensureStarted 自动重试
+piAgentManager.ensureStarted().catch((err) => {
+    console.warn('[pi] 启动时拉起失败（首次使用时会自动重试）:', err.message);
+    piAgentManager._logLine('[spawn] 启动时拉起失败: ' + err.message);
+});
+
+// MCP 宿主（/api/mcp，用户自挂 MCP 服务器：设置 → MCP；
+// 工具经 lumen-mcp 扩展注册给 pi，agent 即可结构化调用）
+const mcpManager = new MCPManager({ dataDir: DATA_DIR });
+app.use('/api/mcp', createMcpRouter({ mcpManager }));
+mcpManager.ensureStarted().catch((err) => console.warn('[MCP] 初始连接失败:', err.message));
+
+// 网页桥接（/api/webbridge，LLM 面板「网页桥接」模式后端）：路由层持有
+// WebBridgeManager 并负责领域事件 → WS 消息的映射（webbridge-event 推面板、
+// new-image/new-video 落画布），server.js 只做挂载。惰性启动：首次发送或
+// 设置里手动启动时才拉起浏览器，不在后端启动时自动弹窗
+const webBridgeRouter = createWebBridgeRouter({ clients, dataDir: DATA_DIR });
+app.use('/api/webbridge', webBridgeRouter);
 
 // ==================== 后端进程级兜底与 pi 子进程清理 ====================
 // 历史教训：pi 执行中崩溃时 agent.log 只剩 spawn 记录、没有任何 [exit]——
@@ -310,6 +362,10 @@ process.on('exit', () => {
             piAgentManager._logLine('[backend] 后端退出，终止 pi 子进程防孤儿');
             piAgentManager.stop();
         }
+        mcpManager.closeAll();   // 终止 MCP 服务器子进程，防孤儿
+        // 桥接浏览器是独立进程（调试端口 9224），这里只断开连接不关进程：
+        // 后端重启后凭端口重连原实例，登录态与打开的对话页原样保留
+        webBridgeRouter.manager.closeAll();
     } catch { /* 退出清理尽力而为 */ }
 });
 process.on('SIGINT', () => process.exit(0));
@@ -346,10 +402,21 @@ app.use('/api/system-prompts', createPromptsRouter({ dataDir: DATA_DIR }));
 const createSkillsRouter = require('./routes/skills');
 app.use('/api/skills', createSkillsRouter({ skillsDir: path.join(DATA_DIR, 'skills') }));
 
+// pi 技能库 API（/api/pi-skills，查阅与启停 data/pi/skills/ 技能库——
+// pi agent 的 skill_list/skill_load 数据源；禁用状态落 data/pi/settings.json
+// 的 disabledSkills，lumen-skills 扩展每次调用现读，勾选即时生效）
+const createPiSkillsRouter = require('./routes/piSkills');
+app.use('/api/pi-skills', createPiSkillsRouter({ dataDir: DATA_DIR }));
+
 // 实时保存 API（/api/autosave，数据落盘 data/autosave/ 目录：
 // 内容寻址图片资产 + 轻量恢复元数据，与 save/ 正式存档分离）
 const createAutosaveRouter = require('./routes/autosave');
 app.use('/api/autosave', createAutosaveRouter({ dir: path.join(DATA_DIR, 'autosave') }));
+
+// 用户资产 API（/api/assets，数据落盘 data/assets/ 目录：图片工具栏
+// 「添加到资产」的存储端，内容寻址去重；资产库内置标签「我的资产」的数据源）
+const createAssetsRouter = require('./routes/assets');
+app.use('/api/assets', createAssetsRouter({ assetsDir: path.join(DATA_DIR, 'assets') }));
 
 // ==================== 统一错误处理 ====================
 

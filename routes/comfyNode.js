@@ -21,6 +21,7 @@ const {
     applyWorkflowOverrides,
     injectLoraChain
 } = require('../utils/workflowInjector');
+const { applyBypass } = require('../utils/workflowBypass');
 const { submitPromptToComfy } = require('../utils/comfySubmit');
 
 /**
@@ -63,9 +64,16 @@ function createComfyNodeRouter(options) {
         workflowsDir,
         canvasImages,
         canvasImagesTimestamp,
+        canvasMasks,
+        canvasMasksTimestamp,
         latestPrompts,
-        comfyApiUrl
+        comfyApiUrl,
+        layoutsFile
     } = options;
+
+    // 布局 sidecar（bypass 状态存这里；与 routes/workflows.js 同一推导规则）
+    const layoutFile = layoutsFile
+        || path.join(path.dirname(workflowsDir), 'data', 'workflow-layouts.json');
 
     const router = express.Router();
 
@@ -174,6 +182,83 @@ function createComfyNodeRouter(options) {
     });
 
     /**
+     * GET /api/comfy-node/object-info?classes=A,B,C
+     * 通用 object_info 代理：按传入的 class 列表原样转发各
+     * /object_info/{class} 响应（含每个输入的完整类型/枚举/取值范围），
+     * 供工作流编辑器渲染全部参数控件。某类未安装时该类键省略，不影响其他类；
+     * 全部失败（含 ComfyUI 离线）返回 connected:false，前端按值类型推断降级。
+     */
+    router.get('/object-info', async (req, res) => {
+        const classNames = String(req.query.classes || '')
+            .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 60);
+        if (classNames.length === 0) {
+            return res.json({ status: 'ok', connected: false, info: {} });
+        }
+        const results = await Promise.allSettled(
+            classNames.map(async (cls) => {
+                const response = await fetchWithTimeout(
+                    `${comfyApiUrl}/object_info/${encodeURIComponent(cls)}`
+                );
+                if (!response.ok) return null;   // 未安装的自定义节点，静默跳过
+                return { cls, data: await response.json() };
+            })
+        );
+        const info = {};
+        for (const result of results) {
+            if (result.status !== 'fulfilled' || !result.value) continue;
+            // 解包到类条目本身（/object_info/{class} 响应是 { [类名]: {...} }，
+            // 前端按 objInfo[类名].input 直接消费，这里不保留外层键）
+            const { cls, data } = result.value;
+            info[cls] = data[cls] || data;
+        }
+        res.json({ status: 'ok', connected: Object.keys(info).length > 0, info });
+    });
+
+    /**
+     * 读取工作流的 bypass 状态（布局 sidecar 的 bypassed 数组）。
+     * 文件缺失/损坏/字段缺失都按空处理，绝不阻塞提交
+     * @param {string} workflowId - 工作流 id
+     * @returns {string[]} 被忽略的节点 id 列表
+     */
+    async function readBypassedIds(workflowId) {
+        try {
+            const raw = await fs.readFile(layoutFile, 'utf-8');
+            const layouts = JSON.parse(raw);
+            const entry = layouts && layouts[workflowId];
+            const ids = entry && Array.isArray(entry.bypassed) ? entry.bypassed : [];
+            return ids.map(String).filter((id) => id);
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * 批量获取节点类型的 object_info 定义（bypass 直通重连的类型依据）。
+     * ComfyUI 离线/类缺失时对应键省略——applyBypass 内按同名启发式降级
+     * @param {string[]} classNames - 节点类型列表
+     * @returns {Promise<Object>} { [class_type]: def }
+     */
+    async function fetchClassInfo(classNames) {
+        const info = {};
+        if (!classNames.length) return info;
+        const results = await Promise.allSettled(
+            classNames.map(async (cls) => {
+                const response = await fetchWithTimeout(
+                    `${comfyApiUrl}/object_info/${encodeURIComponent(cls)}`
+                );
+                if (!response.ok) return null;
+                return { cls, data: await response.json() };
+            })
+        );
+        for (const result of results) {
+            if (result.status !== 'fulfilled' || !result.value) continue;
+            const { cls, data } = result.value;
+            info[cls] = data[cls] || data;
+        }
+        return info;
+    }
+
+    /**
      * 读取工作流模板（与 routes/workflows.js 的格式兼容逻辑一致）：
      * 支持包装格式 { workflow: {...} } 与纯 ComfyUI 格式两种
      * @param {string} workflowId - 工作流 id（即 workflows/ 下的文件名，不含 .json）
@@ -196,10 +281,13 @@ function createComfyNodeRouter(options) {
      * 图片为 data URL（ImagePipeline.collectImages 的输出），剥离前缀后存裸 base64，
      * 与提示词面板的上传格式保持一致（Python 端直接 base64.b64decode）。
      * 图片数量少于槽位数时清空剩余槽位，避免上次运行残留的旧图被误用。
+     * masks 与 images 按位对齐（黑白遮罩 PNG data URL 或 null）：有值写入
+     * 遮罩槽位（局部重绘），null 清空对应遮罩槽，防上次运行的遮罩残留
      * @param {string[]} images - data URL 数组
+     * @param {string[]} [masks] - 遮罩 data URL 数组（可缺省）
      * @returns {number} 实际写入的槽位数量
      */
-    function uploadImagesToSlots(images) {
+    function uploadImagesToSlots(images, masks) {
         const count = Math.min(MAX_SLOTS, Array.isArray(images) ? images.length : 0);
         for (let slot = 1; slot <= MAX_SLOTS; slot++) {
             if (slot <= count) {
@@ -213,6 +301,21 @@ function createComfyNodeRouter(options) {
             } else {
                 canvasImages[slot] = null;
                 canvasImagesTimestamp[slot] = 0;
+            }
+            // 遮罩槽与图片槽同步写/清（仅前端传了 masks 数组时才动，
+            // 旧客户端/面板旧版本不传则保留现状）
+            if (canvasMasks && Array.isArray(masks)) {
+                const maskUrl = slot <= masks.length ? masks[slot - 1] : null;
+                if (maskUrl) {
+                    canvasMasks[slot] = maskUrl.startsWith('data:')
+                        ? maskUrl.slice(maskUrl.indexOf(',') + 1)
+                        : maskUrl;
+                    canvasMasksTimestamp[slot] = Date.now();
+                    console.log(`  🎭 槽位 ${slot} 已写入遮罩，长度: ${canvasMasks[slot].length}`);
+                } else {
+                    canvasMasks[slot] = null;
+                    canvasMasksTimestamp[slot] = 0;
+                }
             }
         }
         return count;
@@ -230,7 +333,7 @@ function createComfyNodeRouter(options) {
      * }
      */
     router.post('/run', async (req, res) => {
-        const { workflowId, positive, negative, overrides, target, images, loras } = req.body;
+        const { workflowId, positive, negative, overrides, target, images, masks, loras } = req.body;
 
         if (!workflowId) {
             return res.status(400).json({ status: 'error', message: '请先选择工作流' });
@@ -242,7 +345,21 @@ function createComfyNodeRouter(options) {
         try {
             // 读取模板并深拷贝，避免污染磁盘上的原始文件
             const template = await loadWorkflowTemplate(workflowId);
-            const workflowToRun = JSON.parse(JSON.stringify(template));
+            let workflowToRun = JSON.parse(JSON.stringify(template));
+
+            // 应用编辑器 bypass（忽略节点）：从布局 sidecar 读状态，
+            // 按 ComfyUI 同款规则直通重连后剔除（此后的注入只看存留节点）。
+            // 类型取 object_info；ComfyUI 离线时 applyBypass 按同名启发式降级
+            const bypassedIds = await readBypassedIds(workflowId);
+            if (bypassedIds.length) {
+                const bypassClasses = [...new Set(
+                    bypassedIds.map((id) => workflowToRun[id] && workflowToRun[id].class_type).filter(Boolean)
+                )];
+                const classInfo = await fetchClassInfo(bypassClasses);
+                const before = Object.keys(workflowToRun).length;
+                workflowToRun = applyBypass(workflowToRun, bypassedIds, classInfo);
+                console.log(`  ⏭️ 已忽略节点: ${bypassedIds.join(', ')}（${before} → ${Object.keys(workflowToRun).length} 个）`);
+            }
 
             // 工作流内含画板取图节点时才写槽位，纯文生图工作流不必动槽位。
             // 仅在请求体携带 images 数组时写入：右侧面板流程自行经
@@ -253,7 +370,7 @@ function createComfyNodeRouter(options) {
             );
             if (hasReceiveNode && Array.isArray(images)) {
                 console.log('📤 工作流含画板取图节点，写入槽位图片...');
-                uploadImagesToSlots(images);
+                uploadImagesToSlots(images, masks);
             }
 
             // 提交前预处理（移除占位节点、注入取图随机种子），

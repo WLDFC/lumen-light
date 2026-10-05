@@ -136,6 +136,9 @@ class ImageGenNode extends BaseCanvasNode {
         this.sizePicker.tier = this.tier;
         this.sizePicker.render();
 
+        // 标题双击重命名（基类共用实现，六类节点同一套交互）
+        this.initTitleEditor();
+
         // 挂到画布容器（canvas 元素的父级，即 body），跟随视口变换
         document.body.appendChild(this.el);
     }
@@ -504,7 +507,8 @@ class ImageGenNode extends BaseCanvasNode {
             ratio: this.sizePicker.getRatio(),
             tier: this.sizePicker.getTier(),
             quality: this.quality,
-            count: this.count
+            count: this.count,
+            ...(this.title ? { title: this.title } : {})
         };
     }
 }
@@ -516,6 +520,7 @@ class ImageGenNode extends BaseCanvasNode {
 ImageGenNode.LAYOUT_MODE = 'design';  // 固定设计基准布局 + 整体缩放（见 BaseCanvasNode 类头）
 ImageGenNode.DEFAULT_WIDTH = 2048;    // 默认宽度（px，与提示词节点同量级）
 ImageGenNode.DEFAULT_HEIGHT = 2048;   // 默认高度（px）
+ImageGenNode.DEFAULT_TITLE = 'Generate'; // 默认标题（双击标题可自定义）
 ImageGenNode.PLACEHOLDER_GAP = 300;   // 占位图与节点右缘的间距（px）
 ImageGenNode.PLACEHOLDER_CASCADE = 160; // 多张占位图的对角线级联间距（px）
 ImageGenNode.MAX_COUNT = 8;           // 同时生成数量的上限（并发请求数）

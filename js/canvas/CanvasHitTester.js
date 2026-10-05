@@ -120,6 +120,27 @@ class CanvasHitTester {
                 canvas.canvas.style.cursor = CanvasHitTester.getResizeCursor(hitHandle.handle);
                 return;
             }
+
+            // 组缩放进行中：锁定对应方位的光标
+            if (canvas.isResizingGroup && canvas.resizeGroupTarget) {
+                canvas.canvas.style.cursor =
+                    GroupManager.getGroupResizeCursor(canvas.resizeGroupHandle);
+                return;
+            }
+
+            // 悬停选中组的边缘手柄：给出对应方位的缩放光标
+            const hitGroupHandle = GroupManager.hitGroupEdgeHandle(canvas, cp.x, cp.y);
+            if (hitGroupHandle) {
+                canvas.canvas.style.cursor =
+                    GroupManager.getGroupResizeCursor(hitGroupHandle.handle);
+                return;
+            }
+
+            // 悬停组标题栏：move 光标提示可拖动整组
+            if (GroupManager.hitGroupTitle(canvas, cp.x, cp.y)) {
+                canvas.canvas.style.cursor = 'move';
+                return;
+            }
         }
 
         let cursor = isSpacePressed ? 'grab' : 'default';

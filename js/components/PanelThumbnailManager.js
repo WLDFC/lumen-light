@@ -254,8 +254,14 @@ class PanelThumbnailManager {
     }
 
     /**
-     * 发送所有缩略图到后端（用于 ComfyUI Edit 工作流）
-     * 将图片转为 base64 后按槽位 POST 到 /api/canvas-image/{slot}
+     * 发送所有缩略图到后端（用于 ComfyUI Edit / 局部重绘工作流）
+     * 将图片转为 base64 后按槽位 POST 到 /api/canvas-image/{slot}；
+     * 同时把遮罩槽位（/api/canvas-mask/{slot}）按位写/清——遮罩槽是
+     * 独立的黑白遮罩图（白=重绘区），From Canvas 节点的 mask 输出读取
+     *
+     * 遮罩实时性：按缩略图记录的画布图片 id 回查实时对象取遮罩图层，
+     * 画布对象已删除或无遮罩时清空遮罩槽并回退到添加时的快照 src——
+     * 缩略图只是快照，遮罩永远是画布对象的实时图层
      */
     async sendThumbnailsToBackend() {
         for (let i = 0; i < this.slotCount; i++) {
@@ -264,10 +270,27 @@ class PanelThumbnailManager {
 
             if (imgData && imgData.src) {
                 try {
-                    // 将图片转换为 base64
+                    // 按 id 回查画布实时对象（遮罩在对象上，不在快照里）
+                    const canvasObj = window.canvas?.images?.images?.find(
+                        (im) => im.id === imgData.id
+                    );
+
+                    // 图片：添加时的快照（原图+笔迹合成，无 alpha 洞）
                     const base64Image = await this.imageToBase64(imgData.src);
 
-                    // 发送到后端
+                    // 遮罩：实时对象有遮罩图层时导出黑白 PNG，否则清空遮罩槽
+                    let maskPayload = null;
+                    if (canvasObj && canvasObj.mask) {
+                        const payload = await ImagePipeline.slotPayload(canvasObj);
+                        if (payload.mask) maskPayload = payload.mask.split(',')[1];
+                    }
+                    await fetch(`http://localhost:8080/api/canvas-mask/${slot}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: maskPayload })
+                    });
+
+                    // 发送图片到后端
                     const response = await fetch(`http://localhost:8080/api/canvas-image/${slot}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

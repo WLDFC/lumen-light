@@ -58,9 +58,8 @@ function createSettingsRouter({ dataDir }) {
     /**
      * 获取默认设置
      * 新版结构：按 API 厂商分组保存多套配置。
-     * bindings 为「用途 → 模型」绑定：技能（提示词节点技能栏）可固定使用
-     * 某厂商的某个模型（如视觉模型做反推），provider/model 为空表示
-     * 跟随右侧对话框当前选中的模型。
+     * bindings 为「用途 → 模型」绑定（技能绑定已删除：技能模型选择
+     * 迁移到提示词节点技能栏的模型下拉，2026-10）
      * @returns {Object} 默认设置
      */
     function getDefaultSettings() {
@@ -72,9 +71,14 @@ function createSettingsRouter({ dataDir }) {
                     OpenAI: { endpoint: '', apiKey: '', models: [] },
                     Doubao: { endpoint: '', apiKey: '', models: [] }
                 },
-                bindings: {
-                    skill: { provider: '', model: '' }
-                }
+                bindings: {}
+            },
+            // RunningHub 云端工作流通道：apiKey/端点 + 工作流登记卡
+            // （endpoint 空 = 用平台默认 https://www.runninghub.cn）
+            runninghub: {
+                apiKey: '',
+                endpoint: '',
+                workflows: []
             }
         };
     }
@@ -111,8 +115,16 @@ function createSettingsRouter({ dataDir }) {
         if (!api.bindings || typeof api.bindings !== 'object') {
             api.bindings = getDefaultSettings().api.bindings;
         }
-        if (!api.bindings.skill || typeof api.bindings.skill !== 'object') {
-            api.bindings.skill = { provider: '', model: '' };
+        // 存量配置里的 skill 绑定不再使用（技能模型已迁移到提示词节点
+        // 技能栏），迁移时顺手清掉，避免无效数据长期滞留
+        delete api.bindings.skill;
+
+        // 为存量配置补 RunningHub 区块（不覆盖用户已登记的内容）
+        if (!settings.runninghub || typeof settings.runninghub !== 'object') {
+            settings.runninghub = getDefaultSettings().runninghub;
+        }
+        if (!Array.isArray(settings.runninghub.workflows)) {
+            settings.runninghub.workflows = [];
         }
         return settings;
     }

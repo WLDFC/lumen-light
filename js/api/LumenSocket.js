@@ -120,6 +120,18 @@ class LumenSocket {
                 h = img.height;
                 x = cp.x - w / 2;
                 y = cp.y - h / 2;
+
+                // 多图连续落画布（网页桥接一轮回多图等）错开排布：
+                // 与已有图片重叠时沿对角线每次偏移 24px，直到让开为止
+                const overlaps = (nx, ny, nw, nh) => this.imageManager.images.some(
+                    (im) => nx < im.x + im.width && im.x < nx + nw &&
+                            ny < im.y + im.height && im.y < ny + nh
+                );
+                let guard = 0;
+                while (guard++ < 100 && overlaps(x, y, w, h)) {
+                    x += 24;
+                    y += 24;
+                }
             }
 
             // 创建图片对象并添加到图片管理器
@@ -209,7 +221,51 @@ class LumenSocket {
 
                 // 处理新视频消息（ComfyUI 视频工作流经 LumenSendVideoToCanvas 上传）
                 if (msg.type === 'new-video' && msg.videoUrl) {
+                    // 诊断日志：视频回流有三层（WS 到达 → target 节点消费 →
+                    // 兜底落画布），占位图未被消费时靠这行定位断在哪层
+                    console.log(`[回流] new-video 到达 target=${msg.target || '无'} url=${msg.videoUrl}`);
+
+                    // 定向投递：带 target 的消息（RunningHub 云端工作流回流）
+                    // 路由到发起生成的节点（视频落占位图中心）；目标节点
+                    // 不存在（已删除/页面刷新过）时按默认路径落画布，视频不丢
+                    if (msg.target) {
+                        const node = this.canvas.images.images.find(
+                            (img) => img.id === msg.target &&
+                                     typeof img.receiveGeneratedVideo === 'function'
+                        );
+                        if (node) {
+                            console.log(`[回流] new-video 定向到节点 ${msg.target}（receiveGeneratedVideo）`);
+                            node.receiveGeneratedVideo(msg.videoUrl, msg.prompt);
+                            return;
+                        }
+                        console.warn(`[回流] new-video 目标节点 ${msg.target} 不存在（页面刷新过/已删除），走兜底落画布`);
+                    }
                     this.addVideoToCanvas(msg.videoUrl, msg.prompt);
+                }
+
+                // 处理生成失败消息（RunningHub 云端任务失败，带 target 定向通知
+                // 节点清占位图并复位；无 target 或目标已删除时忽略）
+                if (msg.type === 'generation-failed' && msg.target) {
+                    const failedNode = this.canvas.images.images.find(
+                        (img) => img.id === msg.target &&
+                                 typeof img.onGenerationFailed === 'function'
+                    );
+                    if (failedNode) {
+                        failedNode.onGenerationFailed(msg.message || '未知错误');
+                    }
+                }
+
+                // 处理生成完成消息（RunningHub 云端任务的全部结果已推完，带 target
+                // 定向通知节点复位生成态——产出数量不可知，完成只能由后端判定，
+                // 前端计数会在首个结果就复位导致后续结果被丢弃）
+                if (msg.type === 'generation-complete' && msg.target) {
+                    const doneNode = this.canvas.images.images.find(
+                        (img) => img.id === msg.target &&
+                                 typeof img.onGenerationComplete === 'function'
+                    );
+                    if (doneNode) {
+                        doneNode.onGenerationComplete();
+                    }
                 }
 
                 // 处理画布桥接命令（pi 等外部 agent 经 /api/canvas-bridge 下发）
@@ -220,6 +276,11 @@ class LumenSocket {
                 // pi 智能体事件流：转发为页面事件供 LLM 窗口的流式气泡消费
                 if (msg.type === 'pi-event' && msg.event) {
                     window.dispatchEvent(new CustomEvent('piEvent', { detail: msg.event }));
+                }
+
+                // 网页桥接事件流：转发为页面事件供 LLM 窗口的网页桥接气泡消费
+                if (msg.type === 'webbridge-event' && msg.event) {
+                    window.dispatchEvent(new CustomEvent('webbridgeEvent', { detail: msg.event }));
                 }
             
         }
@@ -281,9 +342,12 @@ class LumenSocket {
 
     /**
      * 桥接命令分发。命令即画布对外暴露的原子工具：
-     *   - get_state   ：画布状态快照（图片/视频清单、节点数、视口、提示词、存档名）
-     *   - get_image   ：取一张画布图片的 base64（params: {name?} 或 {index?}）
-     *   - drop_image  ：落一张图（params: {dataUrl, name?, x?, y?}，缺省落视口中心）
+     *   - get_state   ：画布状态快照（图片/视频清单、选中列表、节点数、视口、提示词、存档名）
+     *   - get_image   ：取一张画布图片的 base64（params: {name?} 或 {index?}，
+     *                    均缺省时优先取当前选中的图片）
+     *   - drop_image  ：落一张图（params: {dataUrl?|url?, name?, x?, y?}——
+     *                    dataUrl 为 base64 数据，url 为公网图片直链（经后端
+     *                    同源代理取图，base64 不进 agent 上下文）；缺省落视口中心）
      *   - get_prompts ：读取正面/负面提示词
      * @param {string} command - 命令名
      * @param {Object} params - 命令参数
@@ -302,7 +366,38 @@ class LumenSocket {
                     x: Math.round(img.x), y: Math.round(img.y),
                     width: Math.round(img.width), height: Math.round(img.height)
                 }));
+            // 当前选中的图片（ImageManager.selectedIds 维护，多选有序）：
+            // agent 据此知道用户正在操作哪些图，配合 get_image 的 name/index
+            // 参数即可对"选中的那张"做后续处理
+            const selected = c.images.getSelected().map((img) => ({
+                index: c.images.images
+                    .filter(m => !NodeTypes.isPanelNode(m.source) && !NodeTypes.isPlaceholder(m.source))
+                    .indexOf(img),
+                id: img.id,
+                name: img.name || ''
+            })).filter(s => s.index >= 0);
+            // DOM 节点清单（提示词/文本/LoRA/三类生图节点）：agent 搭建或
+            // 修改节点工作流前需要知道现有节点的 id/类型/内容/位置
+            const nodes = c.images.images
+                .filter(img => NodeTypes.isPanelNode(img.source))
+                .map(n => ({
+                    id: n.id,
+                    type: n.source,
+                    x: Math.round(n.x), y: Math.round(n.y),
+                    width: Math.round(n.width), height: Math.round(n.height),
+                    ...(NodeTypes.isPromptNode(n.source) || NodeTypes.isTextNode(n.source))
+                        ? { text: n.text || '' } : {},
+                    ...(n.workflowId ? { workflowId: n.workflowId } : {}),
+                    ...(n.count ? { count: n.count } : {}),
+                    ...(NodeTypes.isLoraNode(n.source) ? {
+                        loraFiles: (n.entries || []).filter(e => e.file).map(e => e.file)
+                    } : {})
+                }));
             return {
+                // selected 放最前：这是 agent 判断"用户正在操作哪张图"的关键
+                // 信息，媒体清单可能很长（实测 14KB+），靠前放置保证长结果
+                // 下也不易被截断遗漏
+                selected,
                 archive: window.saveManager?.currentSave || null,
                 viewport: {
                     scale: c.viewport.scale,
@@ -310,6 +405,7 @@ class LumenSocket {
                     offsetY: Math.round(c.viewport.offsetY)
                 },
                 prompts: window.promptInputManager?.getPrompts() || { positive: '', negative: '' },
+                nodes,
                 media
             };
         }
@@ -329,10 +425,14 @@ class LumenSocket {
             } else if (params.index !== undefined) {
                 target = media[params.index];
             } else {
-                target = media[0];
+                // 无参数：优先取当前选中的图片（用户正在操作的那张），
+                // 未选中任何图片时回落第一张
+                const sel = c.images.getSelected().find(
+                    img => !NodeTypes.isVideo(img.source));
+                target = sel || media[0];
             }
             if (!target) throw new Error('未找到指定的画布图片');
-            return this._imageToBase64(target);
+            return await this._imageToBase64(target);
         }
 
         if (command === 'get_images') {
@@ -351,7 +451,7 @@ class LumenSocket {
                 selected = media.slice(0, limit);
             }
             if (selected.length === 0) throw new Error('画布上没有图片');
-            return { images: selected.map((img) => this._imageToBase64(img)) };
+            return { images: await Promise.all(selected.map((img) => this._imageToBase64(img))) };
         }
 
         if (command === 'search_assets') {
@@ -398,12 +498,37 @@ class LumenSocket {
         }
 
         if (command === 'drop_image') {
-            if (!params.dataUrl) throw new Error('缺少 dataUrl');
+            // 图片来源二选一：dataUrl（pi 自带 base64，如画布取图回传）或
+            // url（搜图直链——浏览器经后端同源代理 /api/llm/download-image
+            // 取字节，避开 CORS，且 base64 全程不进 agent 上下文）
+            let dataUrl = params.dataUrl;
+            if (!dataUrl && params.url) {
+                const proxyUrl = '/api/llm/download-image?url=' +
+                    encodeURIComponent(params.url) +
+                    '&filename=' + encodeURIComponent(params.name || 'bridge-image');
+                const resp = await fetch(proxyUrl);
+                if (!resp.ok) {
+                    throw new Error(`取图失败：HTTP ${resp.status}（${params.url}）`);
+                }
+                const blob = await resp.blob();
+                if (!blob.size) throw new Error('取图失败：内容为空');
+                // 代理返回的 Content-Type 不可信（可能是 octet-stream）：
+                // 非 image/* 时按魔数嗅探重写——声明错 mime 会让 <img> 拒绝解码
+                let mime = (blob.type || '').startsWith('image/') ? blob.type : null;
+                if (!mime) {
+                    const head = await blob.slice(0, 16).arrayBuffer();
+                    mime = window.ImageExport?.sniffImageMime?.(head) || null;
+                }
+                if (!mime) throw new Error(`该地址不是可识别的图片格式（${params.url}）`);
+                dataUrl = await window.ImageExport.blobToDataUrl(blob, mime);
+            }
+            if (!dataUrl) throw new Error('缺少图片来源：dataUrl 与 url 至少提供一个');
             const img = new Image();
             await new Promise((resolve, reject) => {
                 img.onload = () => resolve();
                 img.onerror = () => reject(new Error('图片数据无法解码'));
-                img.src = params.dataUrl;
+                // 用上文解析出的 dataUrl（url 模式下来自代理下载，非 params 原值）
+                img.src = dataUrl;
             });
             // 缺省落点：当前视口中心
             const dpr = c.dpr || 1;
@@ -426,24 +551,287 @@ class LumenSocket {
             return { id: obj.id, name: obj.name };
         }
 
+        if (command === 'build_graph') {
+            return this._execBuildGraph(params);
+        }
+
         throw new Error(`未知桥接命令: ${command}`);
     }
 
     /**
+     * build_graph 节点类型表：桥接入参类型名 → 创建器与布局默认几何。
+     * 创建复用各节点类的存档恢复契约（与 ProjectSerializer.restoreNodes
+     * 同一构造路径），保证 agent 建出的节点与手建/存档恢复的完全同构
+     */
+    static BUILD_NODE_TYPES() {
+        const clampCount = (v) => {
+            const n = parseInt(v, 10);
+            return Number.isFinite(n) ? Math.max(1, Math.min(9999, n)) : undefined;
+        };
+        return {
+            prompt: {
+                w: PromptNode.DEFAULT_WIDTH, h: PromptNode.DEFAULT_HEIGHT,
+                create: (d, c) => new PromptNode(c, d.x, d.y, (d.n.text || '').trim(),
+                    { width: d.width, height: d.height })
+            },
+            text: {
+                w: TextNode.DEFAULT_WIDTH, h: TextNode.DEFAULT_HEIGHT,
+                create: (d, c) => new TextNode(c, d.x, d.y, (d.n.text || ''),
+                    { width: d.width, height: d.height })
+            },
+            lora: {
+                w: LoraNode.DEFAULT_WIDTH, h: LoraNode.DEFAULT_HEIGHT,
+                create: (d, c) => new LoraNode(c, d.x, d.y, {
+                    width: d.width, height: d.height,
+                    entries: (Array.isArray(d.n.entries) ? d.n.entries : []).map(e => ({
+                        id: LumenLight.generateId(),
+                        file: e.file || '',
+                        strengthModel: Number.isFinite(+e.strengthModel) ? +e.strengthModel : 1,
+                        strengthClip: Number.isFinite(+e.strengthClip) ? +e.strengthClip : 1
+                    }))
+                })
+            },
+            image_gen: {
+                w: ImageGenNode.DEFAULT_WIDTH, h: ImageGenNode.DEFAULT_HEIGHT,
+                create: (d, c) => new ImageGenNode(c, d.x, d.y, {
+                    width: d.width, height: d.height,
+                    model: d.n.model, ratio: d.n.ratio, tier: d.n.tier,
+                    quality: d.n.quality, count: clampCount(d.n.count)
+                })
+            },
+            comfy_gen: {
+                w: ComfyGenNode.DEFAULT_WIDTH, h: ComfyGenNode.DEFAULT_HEIGHT,
+                create: (d, c) => new ComfyGenNode(c, d.x, d.y, {
+                    width: d.width, height: d.height,
+                    workflowId: d.n.workflowId, count: clampCount(d.n.count),
+                    loraEnabled: d.n.loraEnabled, steps: d.n.steps, cfg: d.n.cfg,
+                    sampler: d.n.sampler, sizeW: d.n.sizeW, sizeH: d.n.sizeH,
+                    denoise: d.n.denoise
+                })
+            },
+            runhub_gen: {
+                w: RunningHubGenNode.DEFAULT_WIDTH, h: RunningHubGenNode.DEFAULT_HEIGHT,
+                create: (d, c) => new RunningHubGenNode(c, d.x, d.y, {
+                    width: d.width, height: d.height,
+                    workflowId: d.n.workflowId, values: d.n.values,
+                    count: clampCount(d.n.count)
+                })
+            }
+        };
+    }
+
+    /**
+     * build_graph 命令：一次性创建多个画布节点并按 edges 连线，返回创建
+     * 清单与失败连线明细（无效连线逐条报告，不中断已有效的创建/连线）。
+     * 数据流方向：提示词/LoRA → 生图节点（与画布拖拽连线同一套规则，
+     * CanvasConnections.isValidLink 校验）。
+     * @param {Object} params - { nodes: [{id?, type, x?, y?, width?, height?, ...props}],
+     *                           edges: [{from, to}] }
+     */
+    async _execBuildGraph(params) {
+        const c = this.canvas;
+        const input = Array.isArray(params?.nodes) ? params.nodes : [];
+        const edges = Array.isArray(params?.edges) ? params.edges : [];
+        if (input.length === 0) throw new Error('缺少 nodes 数组');
+        if (input.length > 20) throw new Error('单次最多创建 20 个节点，更大规模请分批搭建');
+
+        // ===== 1. 规范化定义（类型白名单 + 引用名唯一） =====
+        const TYPE_DEFS = LumenSocket.BUILD_NODE_TYPES();
+        const defs = [];
+        const refSet = new Set();
+        input.forEach((n, i) => {
+            if (!n || typeof n !== 'object') throw new Error(`nodes[${i}] 不是对象`);
+            const def = TYPE_DEFS[n.type];
+            if (!def) {
+                throw new Error(`nodes[${i}].type「${n.type}」无效，可用类型: ${Object.keys(TYPE_DEFS).join(' / ')}`);
+            }
+            const ref = String(n.id || `n${i + 1}`).trim();
+            if (refSet.has(ref)) throw new Error(`节点引用名「${ref}」重复`);
+            refSet.add(ref);
+            defs.push({
+                ref, type: n.type, def, n,
+                x: Number.isFinite(n.x) ? n.x : undefined,
+                y: Number.isFinite(n.y) ? n.y : undefined,
+                width: Number.isFinite(n.width) ? n.width : undefined,
+                height: Number.isFinite(n.height) ? n.height : undefined
+            });
+        });
+
+        // ===== 2. 工作流引用预校验（任何节点创建前拦截，给出可用清单） =====
+        await this._validateWorkflowRefs(defs);
+
+        // ===== 3. 布局：缺坐标的节点按连线深度自动分层 =====
+        this._layoutGraphNodes(defs, edges, c);
+
+        // ===== 4. 创建节点 =====
+        const refToId = new Map();
+        const created = [];
+        for (const d of defs) {
+            const node = d.def.create(d, c);
+            c.images.images.push(node);
+            refToId.set(d.ref, node.id);
+            created.push({
+                ref: d.ref, id: node.id, type: d.type,
+                x: Math.round(node.x), y: Math.round(node.y),
+                width: Math.round(node.width), height: Math.round(node.height)
+            });
+        }
+
+        // ===== 5. 连线：端点优先按本次引用名解析，其余按画布对象 id（可连接到既有节点） =====
+        const failedEdges = [];
+        for (const e of edges) {
+            const fail = (reason) => failedEdges.push({ from: e.from, to: e.to, reason });
+            const fromId = refToId.get(e.from) || e.from;
+            const toId = refToId.get(e.to) || e.to;
+            const fromObj = c.images.images.find(img => img.id === fromId);
+            const toObj = c.images.images.find(img => img.id === toId);
+            if (!fromObj || !toObj) { fail('端点不存在（引用名或画布节点 id 无效）'); continue; }
+            if (!CanvasConnections.isValidLink(fromObj, toObj)) {
+                fail('连线规则不允许（提示词/LoRA→提示词/LoRA/生图；生图节点无输出端口）');
+                continue;
+            }
+            if (!c.connections.add(fromId, toId)) fail('重复连线（同一对端点已连接）');
+        }
+
+        c.draw();
+        return {
+            created,
+            connected: edges.length - failedEdges.length,
+            failedEdges
+        };
+    }
+
+    /**
+     * build_graph 的工作流引用预校验：comfy_gen 校验本地工作流清单、
+     * runhub_gen 校验登记卡清单。清单接口不可达时跳过校验（节点自身
+     * 对无效 id 有回退行为），校验失败则在任何创建发生前抛出可读错误
+     * @param {Array} defs - 规范化节点定义
+     */
+    async _validateWorkflowRefs(defs) {
+        const comfy = defs.filter(d => d.type === 'comfy_gen' && d.n.workflowId);
+        if (comfy.length) {
+            try {
+                const res = await fetch('/api/workflows');
+                const json = await res.json();
+                const valid = new Set((json.workflows || []).map(w => String(w.id)));
+                if (valid.size) {
+                    for (const d of comfy) {
+                        if (!valid.has(String(d.n.workflowId))) {
+                            throw new Error(
+                                `comfy_gen「${d.ref}」的 workflowId「${d.n.workflowId}」不存在，可用: ${[...valid].join(', ')}`);
+                        }
+                    }
+                }
+            } catch (err) {
+                if (err.message && err.message.includes('workflowId')) throw err;
+                // 清单接口失败：跳过校验，交由节点自身的回退逻辑处理
+            }
+        }
+        const rh = defs.filter(d => d.type === 'runhub_gen' && d.n.workflowId);
+        if (rh.length) {
+            try {
+                const res = await fetch('/api/runninghub/workflows');
+                const json = await res.json();
+                const valid = new Set((json.workflows || []).map(w => String(w.id)));
+                if (valid.size) {
+                    for (const d of rh) {
+                        const wid = String(d.n.workflowId);
+                        if (!valid.has(wid)) {
+                            throw new Error(
+                                `runhub_gen「${d.ref}」的 workflowId「${d.n.workflowId}」不在登记卡中，可用: ${[...valid].join(', ')}`);
+                        }
+                    }
+                }
+            } catch (err) {
+                if (err.message && err.message.includes('workflowId')) throw err;
+            }
+        }
+    }
+
+    /**
+     * build_graph 的自动布局：显式给了 x/y 的节点原样保留；缺坐标的节点
+     * 按新建节点之间引用边的最长路径分层（列=深度，行=同列堆叠），整体
+     * 居中于当前视口。引用边成环时抛错拒绝布局
+     * @param {Array} defs - 规范化节点定义（布局结果直接写回 d.x/d.y）
+     * @param {Array} edges - 连线定义 [{from, to}]
+     */
+    _layoutGraphNodes(defs, edges, c) {
+        if (defs.every(d => d.x !== undefined && d.y !== undefined)) return;
+        const auto = defs.filter(d => d.x === undefined || d.y === undefined);
+
+        // 最长路径分层（松弛迭代，上限节点数次；未收敛 = 有环）
+        const depth = new Map(auto.map(d => [d.ref, 0]));
+        const refSet = new Set(auto.map(d => d.ref));
+        const rel = edges
+            .filter(e => refSet.has(e.from) && refSet.has(e.to))
+            .map(e => [e.from, e.to]);
+        for (let i = 0; i < auto.length; i++) {
+            let changed = false;
+            for (const [f, t] of rel) {
+                if (depth.get(t) < depth.get(f) + 1) {
+                    depth.set(t, depth.get(f) + 1);
+                    changed = true;
+                }
+            }
+            if (!changed) break;
+            if (i === auto.length - 1) throw new Error('edges 在新建节点之间形成环，无法布局');
+        }
+
+        // 分列（深度→列，列号连续），列内纵向堆叠、各列纵向居中，整体锚定视口中心
+        const cols = [];
+        for (const d of auto) {
+            const k = depth.get(d.ref);
+            (cols[k] = cols[k] || []).push(d);
+        }
+        const GAP_X = 80, GAP_Y = 40;
+        const compact = cols.filter(Boolean);
+        const colW = compact.map(col => Math.max(...col.map(d => d.width || d.def.w)));
+        const colStackH = compact.map(col =>
+            col.reduce((a, d) => a + (d.height || d.def.h), 0) + GAP_Y * (col.length - 1));
+        const totalW = colW.reduce((a, b) => a + b, 0) + GAP_X * (compact.length - 1);
+        const dpr = c.dpr || 1;
+        const centerX = (-c.viewport.offsetX + c.canvas.width / 2 / dpr) / c.viewport.scale;
+        const centerY = (-c.viewport.offsetY + c.canvas.height / 2 / dpr) / c.viewport.scale;
+        let x = centerX - totalW / 2;
+        for (let k = 0; k < compact.length; k++) {
+            let y = centerY - colStackH[k] / 2;
+            for (const d of compact[k]) {
+                d.x = x;
+                d.y = y;
+                y += (d.height || d.def.h) + GAP_Y;
+            }
+            x += colW[k] + GAP_X;
+        }
+    }
+
+    /**
      * 画布图片对象 → PNG base64 信息（get_image / get_images 共用）。
-     * 无论 src 是 data: 还是 http:，都从内存位图重绘导出，保证自包含
+     * 无论 src 是 data: 还是 http:，都从内存位图重绘导出，保证自包含。
+     * 所见即所得：有编辑笔迹时先合成原图+笔迹（重绘说明随图可见，
+     * 与 ImageManager.getCompositeSrc 同源），无笔迹/合成失败沿用内存位图
      * @param {Object} target - 画布图片对象
      */
-    _imageToBase64(target) {
+    async _imageToBase64(target) {
+        let img = target.img;
+        const composite = this.canvas.images.getCompositeSrc(target);
+        if (composite !== target.img.src) {
+            // 有笔迹（返回了合成 data URL）：加载合成结果再导出
+            img = await new Promise((resolve, reject) => {
+                const im = new Image();
+                im.onload = () => resolve(im);
+                im.onerror = () => reject(new Error('合成图（原图+笔迹）加载失败'));
+                im.src = composite;
+            });
+        }
         const cnv = document.createElement('canvas');
-        cnv.width = target.img.naturalWidth;
-        cnv.height = target.img.naturalHeight;
-        cnv.getContext('2d').drawImage(target.img, 0, 0);
+        cnv.width = img.naturalWidth;
+        cnv.height = img.naturalHeight;
+        cnv.getContext('2d').drawImage(img, 0, 0);
         const dataUrl = cnv.toDataURL('image/png');
         return {
             name: target.name || '',
-            width: target.img.naturalWidth,
-            height: target.img.naturalHeight,
+            width: img.naturalWidth,
+            height: img.naturalHeight,
             base64: dataUrl.split(',')[1],
             mediaType: 'image/png'
         };

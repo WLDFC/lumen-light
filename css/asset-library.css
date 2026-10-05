@@ -70,6 +70,7 @@
 }
 
 /* ==================== 标签栏 ==================== */
+/* 一行布局：标签下拉（LumenDropdown 触发器，占满剩余宽度）+ 新建 + 删除 */
 
 .asset-library-tagbar {
     display: flex;
@@ -77,60 +78,26 @@
     gap: 6px;
     padding: 8px 10px;
     border-bottom: 1px solid rgba(128, 128, 128, 0.15);
-    flex-wrap: wrap;               /* 首行放不下自动换到下一行 */
-    max-height: 90px;              /* 极多标签时的安全上限，超出纵向滚动 */
-    overflow-y: auto;
     flex-shrink: 0;
-    /* 细滚动条 */
-    scrollbar-width: thin;
-    scrollbar-color: rgba(128, 128, 128, 0.4) transparent;
 }
 
-.asset-library-tag {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    border-radius: 12px;
-    border: none;                  /* 无轮廓 */
-    background: #1b1c21;           /* 底色与左侧工具栏一致 */
+/* 下拉触发器：底色沿用原标签 chip 的面板色；尺寸/悬停/展开叠加态由
+   lumen-dropdown.css 的 button.lumen-dd-trigger 基础规则提供（本文件
+   在其之后加载，后代选择器优先级更高，可安全覆盖底色与文字色） */
+.asset-library-tagbar .asset-library-tag-select {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    background: #1b1c21;
+    border-radius: 6px;
     font-size: 11px;
     color: rgba(255, 255, 255, 0.6);
-    white-space: nowrap;
-    cursor: pointer;
-    user-select: none;
-    transition: color 0.15s ease;
-    flex-shrink: 0;
 }
 
-.asset-library-tag:hover {
+.asset-library-tagbar .asset-library-tag-select:hover,
+.asset-library-tagbar .asset-library-tag-select.lumen-dd-open {
     color: #ffffff;
-}
-
-/* 选中标签：青色文字区分（项目强调色），底色不变 */
-.asset-library-tag.active {
-    color: #6cebff;
-}
-
-.asset-library-tag.active:hover {
-    color: #6cebff;
-}
-
-.asset-library-tag-name {
-    max-width: 96px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.asset-library-tag-del {
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 12px;
-    line-height: 1;
-    padding: 0 1px;
-}
-
-.asset-library-tag-del:hover {
-    color: #ef4444;
 }
 
 .asset-library-tag-add {
@@ -139,9 +106,9 @@
     border-radius: 50%;
     border: 1px dashed rgba(128, 128, 128, 0.45);
     color: rgba(255, 255, 255, 0.6);
-    font-size: 14px;
-    line-height: 20px;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     user-select: none;
     flex-shrink: 0;
@@ -152,6 +119,35 @@
     border-color: #3b82f6;
     color: #ffffff;
     background: rgba(59, 130, 246, 0.1);
+}
+
+/* 删除当前标签：小圆钮，仅选中标签时可用（无选中禁用） */
+.asset-library-tag-del {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    line-height: 22px;
+    text-align: center;
+    font-family: inherit;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.asset-library-tag-del:hover:not(:disabled) {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.asset-library-tag-del:disabled {
+    opacity: 0.35;
+    cursor: default;
 }
 
 /* ==================== 资产网格 ==================== */

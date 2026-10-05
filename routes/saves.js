@@ -321,6 +321,8 @@ function createSavesRouter({ savesDir, videosDir }) {
             connections: Array.isArray(projectMeta.connections) ? projectMeta.connections : [],
             // 提示词节点数据 [{id, type, x, y, width, height, text}]
             nodes: Array.isArray(projectMeta.nodes) ? projectMeta.nodes : [],
+            // 编组数据 [{id, title, x, y, width, height}]（纯几何对象，成员按包含判定）
+            groups: Array.isArray(projectMeta.groups) ? projectMeta.groups : [],
             images: savedImages
         };
 
@@ -372,7 +374,7 @@ function createSavesRouter({ savesDir, videosDir }) {
      * POST /api/saves
      * 创建或覆盖存档，协议分三段（元数据与图片彻底解耦，任一侧为空均不影响另一侧）：
      *   1. init     : POST { name?, prompt, prompt2, negativePrompt, viewport?,
-     *                        connections?, nodes?, overwrite? }
+     *                        connections?, nodes?, groups?, overwrite? }
      *                 → 创建保存会话，返回 { token, name, overwrite }，不写任何图片
      *   2. 批次     : POST { token, images: [...] }（0 次或多次，空存档可跳过）
      *                 → 图片写入会话的临时目录
@@ -421,7 +423,7 @@ function createSavesRouter({ savesDir, videosDir }) {
             // ---------- init：创建保存会话（仅元数据，不含图片） ----------
             cleanupStalePending();
 
-            const { name, prompt, prompt2, negativePrompt, viewport, connections, nodes, overwrite } = req.body;
+            const { name, prompt, prompt2, negativePrompt, viewport, connections, nodes, groups, overwrite } = req.body;
 
             // 确定存档文件夹名称
             const folderName = sanitizeFolderName(name) || await generateDefaultName();
@@ -474,7 +476,7 @@ function createSavesRouter({ savesDir, videosDir }) {
                 tempVideosDir,
                 isOverwrite,
                 savedImages: [],
-                projectMeta: { prompt, prompt2, negativePrompt, viewport, connections, nodes },
+                projectMeta: { prompt, prompt2, negativePrompt, viewport, connections, nodes, groups },
                 createdAt: Date.now()
             };
 

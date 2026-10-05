@@ -1,0 +1,344 @@
+/**
+ * ==========================================================================
+ * LumenLight 画布图片编辑器（画笔灯箱）样式
+ * ==========================================================================
+ * 配色遵循配色美学规范：遮罩黑、顶栏浮起层 #1b1c21、通用边框
+ * rgba(128,128,128,0.25~0.3)、强调蓝 #3b82f6、悬停半透明白叠加。
+ * 对应组件：js/components/ImageEditor.js
+ * ==========================================================================
+ */
+
+/* ==================== 遮罩层（灯箱式全屏） ==================== */
+.image-editor {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;            /* 弹窗层级（节点 997 / 面板 999 / 弹窗 ≥1200） */
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    flex-direction: column;
+}
+
+/* ==================== 顶栏 ==================== */
+.image-editor-topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    height: 56px;
+    padding: 0 16px;
+    background: var(--icon-bg, #1b1c21);          /* 浮起层 */
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    flex: none;
+}
+
+.ie-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 工具按钮（画笔/橡皮/还原）：方形图标钮 */
+.ie-tool-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.ie-tool-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.ie-tool-btn:hover {
+    background: rgba(255, 255, 255, 0.05);        /* 叠加式悬停 */
+    color: #ffffff;
+}
+
+/* 激活工具：强调蓝（配色规范：选中态用主蓝） */
+.ie-tool-btn.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+
+/* 色块：小圆点，激活时蓝色聚焦环（配色规范：聚焦/选中边框） */
+.ie-colors {
+    gap: 7px;
+}
+
+.ie-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(128, 128, 128, 0.3);   /* 深色块（黑）在深底上可见 */
+    padding: 0;
+    cursor: pointer;
+    transition: box-shadow 0.15s ease;
+}
+
+.ie-swatch.active {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.6);
+}
+
+/* 粗细滑块（原图像素） */
+.ie-size {
+    gap: 8px;
+}
+
+.ie-size-label,
+.ie-size-value {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.ie-size-value {
+    min-width: 22px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.ie-size-slider,
+.ie-size input[type="range"] {
+    width: 140px;
+    accent-color: #3b82f6;
+}
+
+/* 状态提示（保存失败等）：占位撑开把保存/关闭推到最右 */
+.ie-msg {
+    flex: 1;
+    text-align: right;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ie-msg.error {
+    color: #f87171;
+}
+
+/* 保存：主按钮蓝 */
+.ie-save-btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 6px;
+    background: #3b82f6;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.ie-save-btn:hover {
+    background: #2563eb;
+}
+
+/* 关闭：图标钮 */
+.ie-close-btn {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+}
+
+.ie-close-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.ie-close-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+}
+
+/* ==================== 画布区 ==================== */
+.image-editor-stage {
+    position: relative;       /* 平移画布与缩放指示的定位基准 */
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;         /* 放大超出部分裁剪，通过平移查看 */
+}
+
+/* 关键覆盖：全局规则 css/style.css 给所有 canvas 垫了不透明深色背景
+   （var(--canvas-bg)），会把底层原图完全盖住——编辑器画布必须透明 */
+.image-editor canvas {
+    background: transparent;
+}
+
+/* 双层画布的尺寸与舞台内位置全部由 JS 按缩放/平移状态设定 */
+/* 双层画布的尺寸与舞台内位置全部由 JS 按缩放状态设定（固定中心缩放） */
+.ie-canvas-wrap {
+    position: absolute;
+    line-height: 0;
+}
+
+.ie-base,
+.ie-strokes {
+    position: absolute;
+    inset: 0;
+    /* 显式 100% 宽高：压制全局 canvas 规则（width:100vw/height:100vh）
+       ——否则两层画布会被拉成全屏比例，图像严重变形 */
+    width: 100%;
+    height: 100%;
+}
+
+.ie-strokes {
+    touch-action: none;       /* 绘制时不触发浏览器触摸手势 */
+    cursor: none;             /* 用自定义圆圈光标替代系统光标 */
+}
+
+/* 中键平移中：抓手光标（覆盖画笔的 none 光标与舞台默认光标） */
+.image-editor.panning .image-editor-stage,
+.image-editor.panning .ie-strokes {
+    cursor: grabbing;
+}
+
+/* ==================== 左下角缩放指示（适应屏幕 + 百分比） ====================
+   与主画布左下角"适应屏幕 / NN%"同款布局与观感 */
+.ie-zoomctrl {
+    position: absolute;
+    left: 16px;
+    bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    z-index: 8;
+}
+
+.ie-fit-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 14px;
+    background: var(--icon-bg, #1b1c21);          /* 浮起层 */
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ie-fit-btn svg {
+    width: 13px;
+    height: 13px;
+}
+
+.ie-fit-btn:hover {
+    background: rgba(255, 255, 255, 0.1);         /* 叠加式悬停 */
+    color: #ffffff;
+}
+
+.ie-zoom-pill {
+    min-width: 58px;
+    padding: 6px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 14px;
+    background: var(--icon-bg, #1b1c21);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    cursor: pointer;
+    text-align: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ie-zoom-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+/* ==================== 笔刷光标（跟随圆圈） ==================== */
+.ie-cursor {
+    position: fixed;
+    transform: translate(-50%, -50%);
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.15);
+    pointer-events: none;
+    z-index: 5;
+}
+
+/* ==================== 丢弃确认框 ==================== */
+.ie-confirm {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    padding: 18px 22px;
+    background: var(--icon-bg, #1b1c21);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    z-index: 10;
+}
+
+.ie-confirm-text {
+    font-size: 13px;
+    color: #ffffff;
+    margin-bottom: 14px;
+}
+
+.ie-confirm-btns {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.ie-confirm-btns button {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: transparent;
+    color: #ffffff;
+}
+
+.ie-confirm-btns button:hover {
+    background: rgba(255, 255, 255, 0.1);         /* 叠加式悬停 */
+}
+
+.ie-confirm-btns .ie-confirm-discard {
+    border: none;
+    background: #3b82f6;
+}
+
+.ie-confirm-btns .ie-confirm-discard:hover {
+    background: #2563eb;
+}
+
+/* ==================== 扩图灯箱画布 ====================
+   覆盖全局 canvas 规则（style.css：position:fixed 全屏）——fixed 元素
+   不受 stage 的 overflow:hidden 裁剪，会把顶栏按钮整个盖住导致全部
+   点不了。改为舞台内绝对定位铺满（与 .ie-base/.ie-strokes 同策略） */
+.image-editor .io-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* ==================== 遮罩灯箱（ImageMaskEditor） ==================== */
+
+/* 遮罩层显示固定半透明：笔迹以全强度红色存储（导出/烘焙不损失），
+   显示压到 55% 呈现惯例的"半透明红"观感，仍能看清涂了哪里。
+   无透明度滑块——半透明遮罩会产生灰阶，让重绘边界模糊 */
+.ie-mask-strokes {
+    opacity: 0.55;
+}

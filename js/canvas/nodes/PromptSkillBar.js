@@ -6,11 +6,18 @@
  *       对话输入框的「模式三角下拉 + 圆形发送按钮」）。
  *
  *   - 技能（skill）= 发给聊天模型的指令模板 + 输入配置（文本/图片）。
- *     技能来源有两种：内置（本文件 SKILLS 数组）+ 用户自定义
- *     （data/skills/ 目录下一个技能一个 JSON，经 /api/skills 读取，
- *      格式见 data/skills/README.md），同 id 时内置优先。
+ *     技能来源有两种：内置（本文件 SKILLS 数组，现仅反推图像——
+ *     优化提示词已迁移为用户技能 data/skills/optimize-prompt.md）
+ *     + 用户自定义（data/skills/ 目录下一个技能一个 .md，经 /api/skills
+ *      读取，格式见 data/skills/README.md），同 id 时内置优先。
+ *   - 模型下拉（技能右侧，2026-10 起取代 设置 → API → 技能模型 全局绑定）：
+ *     选择技能使用的聊天模型，全局记忆（localStorage，所有节点共用）；
+ *     只列聊天模型（排除生图与 pi/网页桥接特殊项），内部值用复合键
+ *     「厂商||模型ID」保跨厂商同名模型的路由唯一性，文案只显示模型名。
+ *     无存储值或存储值失效时自动选清单第一序模型（不再跟随对话框——
+ *     右侧常驻 agent 模式时对话框没有可借用的 API 模型）。
  *   - 执行流程：收集节点文本与直连参考图 → POST /api/llm/chat
- *     （复用右侧 LLM 对话框当前选中的聊天模型与 API 配置）→ 结果填回节点。
+ *     （按技能栏选择的模型）→ 结果填回节点。
  *   - 反推图像类技能的参考图顺序与节点缩略图的 @图片N 编号一致
  *     （都来自 PromptNode.collectInputImages）。
  *
@@ -28,23 +35,6 @@
 //   inputText   是否把节点文字作为内容发给模型
 //   inputImages 是否把直连参考图发给模型（需要能看图的多模态模型）
 const SKILLS = [
-    {
-        id: 'optimize-prompt',
-        name: '优化提示词',
-        icon: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
-        instruction: [
-            '你是绘画提示词优化专家。把用户发来的绘画提示词改写得更具体、更有画面感，适合用于 AI 绘图。用户可能附带参考图：参考图是提示词所指的画面内容依据。',
-            '规则：',
-            '1. 只输出优化后的提示词本身，不要任何解释、前言或引号；',
-            '2. 保留原意，不新增与原意无关的元素；',
-            '3. 原文中的 @图片N 引用标记必须原样保留，位置和编号都不能改动；',
-            '4. 若附带参考图，优化后的描述需与参考图内容保持一致（如人物外观、场景、色调），但不要输出对图片的单独描述；',
-            '5. 保持语言与原文一致（中文输入输出中文，英文输入输出英文）。'
-        ].join('\n'),
-        inputText: true,
-        inputImages: true,      // 可选输入：有连线图就附带（作为画面依据），没有则纯文本优化
-        requireImages: false
-    },
     {
         id: 'image-to-prompt',
         name: '反推图像',
@@ -75,6 +65,31 @@ const SKILL_ICONS = {
     flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>'
 };
 
+// ==================== 聊天模型清单（技能模型下拉数据源） ====================
+// 模块级共享缓存：同一页面的多个提示词节点共用一次 /api/settings 拉取
+// （30s TTL）。只保留聊天模型——排除生图模型（type 标记 + 名称启发式）
+// 与 pi/网页桥接两个特殊 provider（技能走 /api/llm/chat，其余无意义）。
+// 清单只用于下拉展示；执行时 resolveModel 仍以选择键/对话框实时为准
+const CHAT_MODELS_TTL = 30 * 1000;
+let chatModelsCache = { at: 0, promise: null };
+
+function fetchChatModels() {
+    if (chatModelsCache.promise && Date.now() - chatModelsCache.at < CHAT_MODELS_TTL) {
+        return chatModelsCache.promise;
+    }
+    chatModelsCache.at = Date.now();
+    chatModelsCache.promise = fetch('/api/settings')
+        .then((r) => r.json())
+        .then((result) => {
+            const { models } = LumenLight.collectConfiguredModels((result.settings && result.settings.api) || {});
+            return models.filter((m) => m.provider !== 'pi' && m.provider !== 'web' &&
+                m.type !== 'image' &&
+                !(m.type === 'auto' && LumenLight.looksLikeImageModel(m.id)));
+        })
+        .catch(() => []);   // 拉取失败：空清单，不打断节点创建
+    return chatModelsCache.promise;
+}
+
 class PromptSkillBar {
     /**
      * 构造函数：创建技能栏 DOM 并插入提示词节点
@@ -88,10 +103,19 @@ class PromptSkillBar {
         this.current = this.skills[0];   // 默认选中第一个技能
         this.running = false;            // 是否执行中（防重复触发）
         this.menuOpen = false;
+        this.userPicked = false;         // 用户是否手动选过技能（默认选中迁移只发生在未挑选时）
+
+        // 技能模型（全局记忆，所有节点共用）：'' = 跟随右侧对话框模型，
+        // 否则为复合键「厂商||模型ID」。清单懒加载（首次展开模型菜单才拉取）
+        this.currentModelKey = localStorage.getItem('lumenLight.skillModel') || '';
+        this.chatModels = [];
+        this.modelMenuOpen = false;
 
         this.buildDom();
+        this.buildModelDom();
         this.bindEvents();
         this.loadUserSkills();
+        this.loadChatModels();   // 对齐默认模型（清单来自共享缓存，多数时候已就绪）
     }
 
     /**
@@ -123,6 +147,16 @@ class PromptSkillBar {
             this.renderMenu();
         } catch {
             // 后端不可达等情况：保持仅内置技能，不打断使用
+        }
+        // 默认选中迁移：优化提示词（历史上的默认技能）已是用户技能、排在
+        // 内置项之后，若用户尚未手动挑选，把它选回来，保持开箱默认行为
+        if (!this.userPicked) {
+            const preferred = this.skills.find((s) => s.id === 'optimize-prompt');
+            if (preferred && preferred !== this.current) {
+                this.current = preferred;
+                this.renderTrigger();
+                this.renderMenu();
+            }
         }
     }
 
@@ -177,6 +211,112 @@ class PromptSkillBar {
     }
 
     /**
+     * 构建模型下拉（技能触发按钮右侧、执行按钮左侧）：
+     * 复用技能下拉的交互样式与菜单类。触发按钮与菜单包一层定位容器——
+     * 菜单的定位父级是容器而非整条技能栏，弹出位置才紧贴模型按钮
+     */
+    buildModelDom() {
+        this.modelWrapEl = document.createElement('div');
+        this.modelWrapEl.className = 'prompt-skill-model-wrap';
+
+        this.modelTriggerEl = document.createElement('button');
+        this.modelTriggerEl.type = 'button';
+        this.modelTriggerEl.className = 'prompt-skill-trigger prompt-skill-model-trigger';
+        this.modelTriggerEl.title = '技能使用的模型（全局记忆，所有节点共用）';
+
+        this.modelMenuEl = document.createElement('div');
+        this.modelMenuEl.className = 'prompt-skill-menu prompt-skill-model-menu';
+        this.modelMenuEl.hidden = true;
+
+        this.modelWrapEl.appendChild(this.modelTriggerEl);
+        this.modelWrapEl.appendChild(this.modelMenuEl);
+        this.barEl.insertBefore(this.modelWrapEl, this.runEl);
+
+        this.modelTriggerEl.addEventListener('click', () => {
+            this.modelMenuOpen ? this.closeModelMenu() : this.openModelMenu();
+        });
+        this.renderModelTrigger();
+    }
+
+    /** 模型选项文案：默认只显示模型名；跨厂商同名模型加厂商后缀消歧义 */
+    modelDisplayText(m) {
+        const dup = this.chatModels.some((x) => x.id === m.id && x.provider !== m.provider);
+        return dup ? `${m.displayName}（${m.provider}）` : m.displayName;
+    }
+
+    renderModelTrigger() {
+        const selected = this.chatModels.find((m) => m.key === this.currentModelKey);
+        const label = this.currentModelKey
+            ? (selected ? this.modelDisplayText(selected)
+                        : LumenLight.parseModelKey(this.currentModelKey).id)
+            : '模型';
+        this.modelTriggerEl.innerHTML =
+            `<span class="skill-name">${LumenLight.escapeHtml(label)}</span>` +
+            '<svg class="skill-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    }
+
+    openModelMenu() {
+        if (this.running) return;
+        this.closeMenu();
+        this.modelMenuOpen = true;
+        this.modelMenuEl.innerHTML = '<div class="prompt-skill-hint">加载中…</div>';
+        this.modelMenuEl.hidden = false;
+        this.loadChatModels();
+    }
+
+    /**
+     * 拉取聊天模型清单（模块级共享缓存）并对齐默认选中：
+     * 无存储值或存储值已失效（厂商/模型被删）时自动选第一序模型并持久化。
+     * 触发按钮与展开中的菜单随之刷新
+     */
+    loadChatModels() {
+        return fetchChatModels().then((models) => {
+            this.chatModels = models;
+            if (models.length && !models.some((m) => m.key === this.currentModelKey)) {
+                this.currentModelKey = models[0].key;
+                localStorage.setItem('lumenLight.skillModel', this.currentModelKey);
+            }
+            this.renderModelTrigger();
+            if (this.modelMenuOpen) this.renderModelMenu();
+        });
+    }
+
+    closeModelMenu() {
+        this.modelMenuOpen = false;
+        this.modelMenuEl.hidden = true;
+    }
+
+    /**
+     * 渲染模型菜单：全部聊天模型（默认选中第一序，见 loadChatModels）
+     */
+    renderModelMenu() {
+        this.modelMenuEl.innerHTML = '';
+        if (!this.chatModels.length) {
+            const tip = document.createElement('div');
+            tip.className = 'prompt-skill-hint';
+            tip.textContent = '暂无可用模型：请先在 设置 → API 配置厂商与模型';
+            this.modelMenuEl.appendChild(tip);
+        }
+        for (const m of this.chatModels) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'prompt-skill-option' +
+                (m.key === this.currentModelKey ? ' selected' : '');
+            btn.title = this.modelDisplayText(m);
+            btn.innerHTML =
+                `<span class="skill-name">${LumenLight.escapeHtml(this.modelDisplayText(m))}</span>` +
+                '<svg class="skill-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+            btn.addEventListener('click', () => {
+                this.currentModelKey = m.key;
+                localStorage.setItem('lumenLight.skillModel', m.key);
+                this.renderModelTrigger();
+                this.closeModelMenu();
+            });
+            this.modelMenuEl.appendChild(btn);
+        }
+    }
+
+    /**
      * 渲染下拉面板的技能项（内置 + 用户自定义，当前选中项带对勾）
      */
     renderMenu() {
@@ -193,6 +333,7 @@ class PromptSkillBar {
                 '<svg class="skill-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
             btn.addEventListener('click', () => {
                 this.current = skill;
+                this.userPicked = true;   // 用户手动挑选后不再自动迁移默认选中
                 this.renderTrigger();
                 this.renderMenu();
                 this.closeMenu();
@@ -218,12 +359,14 @@ class PromptSkillBar {
         // 点击面板外关闭（工具行内部点击已被上面拦截，不会走到这里）
         this._onDocMouseDown = (e) => {
             if (this.menuOpen && !this.barEl.contains(e.target)) this.closeMenu();
+            if (this.modelMenuOpen && !this.barEl.contains(e.target)) this.closeModelMenu();
         };
         document.addEventListener('mousedown', this._onDocMouseDown);
     }
 
     openMenu() {
         if (this.running) return;
+        this.closeModelMenu();   // 两个下拉互斥，不同时展开
         this.menuOpen = true;
         this.renderMenu();
         this.menuEl.hidden = false;
@@ -235,29 +378,16 @@ class PromptSkillBar {
     }
 
     /**
-     * 解析技能使用的模型：
-     *   1. 优先「设置 → API → 技能模型」的绑定（如把视觉模型绑给反推，
-     *      不必动右侧对话框的对话模型）；
-     *   2. 未绑定时回落右侧对话框当前选中的模型。
-     * 每次执行时实时读取，设置改动即时生效。
+     * 解析技能使用的模型：技能栏模型下拉的选择（全局记忆，复合键
+     * 「厂商||模型ID」，后端按厂商显式路由——跨厂商同名模型也不会串）。
+     * 默认选中由 loadChatModels 对齐为清单第一序；这里只在清单未就绪/
+     * 为空时返回空串，交由上层提示
      * @returns {Promise<{model: string, provider: string}>} 模型 ID 与所属厂商
-     *          （model 可能为空串，由调用方提示；provider 为空表示由后端自动路由）
      */
     async resolveModel() {
-        try {
-            const response = await fetch('/api/settings');
-            const result = await response.json();
-            const binding = result.settings?.api?.bindings?.skill;
-            if (binding && binding.model) {
-                return { model: binding.model, provider: binding.provider || '' };
-            }
-        } catch {
-            // 设置读取失败时静默回落到对话框模型
-        }
-        // 回落：右侧对话框当前选中项（下拉 value 为"厂商||模型ID"复合键，
-        // 裸 ID 也兼容解析），拆出厂商供后端显式路由
-        const raw = window.llmChat?.modelSelect?.value || '';
-        return LumenLight.parseModelKey(raw);
+        if (!this.currentModelKey) return { model: '', provider: '' };
+        const { provider, id } = LumenLight.parseModelKey(this.currentModelKey);
+        return { model: id, provider };
     }
 
     /**
@@ -271,7 +401,7 @@ class PromptSkillBar {
 
         const { model, provider } = await this.resolveModel();
         if (!model) {
-            notify('未指定技能模型：请在设置 → API → 技能模型 中绑定，或在右侧对话框选择模型', 8000);
+            notify('未指定技能模型：请在技能栏的模型下拉选择（需先在 设置 → API 配置厂商与模型）', 8000);
             return;
         }
 
@@ -340,7 +470,11 @@ class PromptSkillBar {
         this.runEl.classList.toggle('running', running);
         this.runEl.disabled = running;
         this.triggerEl.disabled = running;
-        if (running) this.closeMenu();
+        this.modelTriggerEl.disabled = running;
+        if (running) {
+            this.closeMenu();
+            this.closeModelMenu();
+        }
     }
 
     /**

@@ -64,14 +64,15 @@ class SettingsGeneralPanel {
 
                 <div class="settings-models-section">
                     <div class="settings-models-header">
-                        <span class="settings-models-title">pi 编码智能体</span>
+                        <span class="settings-models-title">agent模型</span>
                     </div>
                     <div class="settings-switch-row">
                         <div class="settings-switch-info">
-                            <span class="settings-switch-label">pi 权限分级</span>
+                            <span class="settings-switch-label">权限分级</span>
                             <span class="settings-switch-desc">
                                 只读：仅允许查看画布与提示词；标准：可操作画布但禁用
-                                bash 等系统工具；完整：全部放行（pi 拥有系统完整权限，请谨慎）
+                                bash 等系统工具；完整：全部放行（拥有系统完整权限，
+                                请谨慎）。MCP 工具按此分级过滤
                             </span>
                         </div>
                         <select class="settings-input" id="settingsPiPermission">
@@ -82,9 +83,9 @@ class SettingsGeneralPanel {
                     </div>
                     <div class="settings-switch-row">
                         <div class="settings-switch-info">
-                            <span class="settings-switch-label">pi 使用的模型</span>
+                            <span class="settings-switch-label">agent 使用的模型</span>
                             <span class="settings-switch-desc">
-                                pi 对话所用的底层模型（来自 API 设置中的聊天/视觉模型）
+                                对话所用的底层模型（来自 API 设置中的聊天/视觉模型）
                             </span>
                         </div>
                         <select class="settings-input" id="settingsPiModel"></select>

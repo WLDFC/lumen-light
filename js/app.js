@@ -28,6 +28,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化图片工具栏（选中图片时显示的浮动工具栏）
     new ImageToolbar(window.canvas);
 
+    // 初始化编组工具栏（选中编组时显示的浮动工具栏，按钮预留；
+    // 显隐经 canvasGroupSelected 事件驱动，样式复用 image-toolbar.css）
+    window.groupToolbar = new GroupToolbar(window.canvas);
+
     // 初始化左侧工具栏（画布左侧垂直工具栏，含本地上传图片入口）
     new SideToolbar(window.canvas);
 
@@ -42,17 +46,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化配方管理器（顶栏配方按钮与收藏窗口）
     new RecipeManager();
 
+    // 初始化工作流编辑器（顶栏 Comfy 按钮：左列表右节点图，全参数编辑，
+    // 修改直接写回 workflows/*.json；见 js/components/WorkflowEditor.js）
+    window.workflowEditor = new WorkflowEditor();
+
     // 初始化设置管理器
     window.settingsManager = new SettingsManager();
 
     // 初始化 LLM 聊天窗口（右侧面板 LLM 模式）
     window.llmChat = new LlmChat();
 
+    // 初始化消息刻度导航（LLM 窗口左侧定位索引：点击跳转历史提问，
+    // 自行监听消息区 DOM 与滚动，见 js/components/LlmMessageRail.js）
+    window.llmMessageRail = new LlmMessageRail(window.llmChat);
+
     // 初始化 pi 健康状态灯（面板头部模式选择器左侧，黄/红可点击重启 pi 进程）
     window.piStatusLight = new PiStatusLight();
 
     // 初始化系统提示词管理器（面板头部按钮 + 弹窗，LlmChat 发送时消费）
     window.llmSystemPrompt = new LlmSystemPrompt();
+
+    // 初始化技能库管理器（面板头部按钮 + 弹窗，查阅/启停 pi 技能库；
+    // 在系统提示词之后初始化，按钮插入顺序形成「系统提示词-技能库-清空-收起」）
+    window.llmSkillManager = new LlmSkillManager();
 
     // 初始化全局占位图管理器（面板与两类生图节点的占位图统一走这一份实现）
     window.placeholderManager = new PlaceholderManager(window.canvas);
@@ -156,6 +172,54 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 设置图片源为放大后的 base64 数据
         img.src = upscaledImage;
+    });
+
+    // ==================== 监听扩图完成事件 ====================
+    // ImageOutpaint 灯箱保存后触发：按画幅导出的新图（白色填充扩展区）
+    // 作为新图片落到原图右侧，原图不动（与放大/抠图同流程）
+    window.addEventListener('outpaintComplete', (e) => {
+        const { originalImage, imageDataUrl } = e.detail;
+
+        if (!window.canvas?.images?.images) {
+            console.error('❌ window.canvas 不存在');
+            return;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            img.onload = null;
+            const viewport = window.canvas.viewport;
+
+            // 新图落在原图右侧偏移 100 像素处（与放大结果同placement）
+            const sp1 = viewport.canvasToScreen(originalImage.x, originalImage.y);
+            const sp2 = viewport.canvasToScreen(originalImage.x + originalImage.width, originalImage.y + originalImage.height);
+            const centerX = (sp1.x + sp2.x) / 2 + 100;
+            const centerY = (sp1.y + sp2.y) / 2;
+            const cp = viewport.screenToCanvas(centerX, centerY);
+            const w = img.width, h = img.height;
+
+            const newImageObj = {
+                id: LumenLight.generateId(),
+                name: `outpaint_${Date.now()}.png`,
+                img: img,
+                x: cp.x - w / 2,
+                y: cp.y - h / 2,
+                width: w,
+                height: h,
+                selected: false,
+                source: 'outpaint',
+                prompt: originalImage?.prompt || '',
+                negativePrompt: originalImage?.negativePrompt || '',
+                created: Date.now()
+            };
+            window.canvas.images.images.push(newImageObj);
+            window.canvas.draw();
+            window.socket?.showNotification('扩图完成');
+        };
+        img.onerror = (err) => {
+            console.error('❌ 扩图结果加载失败:', err);
+        };
+        img.src = imageDataUrl;
     });
 
     // ==================== 监听抠图完成事件 ====================

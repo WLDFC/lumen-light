@@ -120,6 +120,9 @@ class PromptNode extends BaseCanvasNode {
         // 技能栏：底部「技能下拉 + 执行按钮」，调聊天模型处理节点文本/参考图
         this.skillBar = new PromptSkillBar(this);
 
+        // 标题双击重命名（基类共用实现，六类节点同一套交互）
+        this.initTitleEditor();
+
         // 挂到画布容器（canvas 元素的父级，即 body），跟随视口变换
         document.body.appendChild(this.el);
     }
@@ -364,7 +367,8 @@ class PromptNode extends BaseCanvasNode {
             y: this.y,
             width: this.width,
             height: this.height,
-            text: this.text
+            text: this.text,
+            ...(this.title ? { title: this.title } : {})
         };
     }
 }
@@ -375,6 +379,7 @@ class PromptNode extends BaseCanvasNode {
 // 直接可见）。布局模式为基类默认的 'world'（世界尺寸布局 + --ns 缩放）
 PromptNode.DEFAULT_WIDTH = 2048;    // 默认宽度（px，与画布 2K 图片同量级）
 PromptNode.DEFAULT_HEIGHT = 2048;   // 默认高度（px）
+PromptNode.DEFAULT_TITLE = 'Prompt'; // 默认标题（双击标题可自定义）
 
 // 将 PromptNode 类暴露到全局作用域
 window.PromptNode = PromptNode;

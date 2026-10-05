@@ -42,6 +42,8 @@ class UpscaleManager {
         this.currentImages = Array.isArray(imageData) ? imageData : [imageData];
         // 移除旧菜单，避免重复创建
         this.removeMenu();
+        // 记住触发按钮：画布平移/缩放时菜单需跟随按钮重定位（见 reposition）
+        this.parentBtn = parentBtn;
 
         // 创建二级菜单容器：用于选择动漫/真实类型
         const typeMenu = document.createElement('div');
@@ -321,6 +323,29 @@ class UpscaleManager {
             this.menuContainer = null;
         }
         // 移除三级菜单
+        if (this.activeScaleMenu) {
+            this.activeScaleMenu.remove();
+            this.activeScaleMenu = null;
+        }
+        this.parentBtn = null;
+    }
+
+    /**
+     * 菜单跟随重定位：画布平移/缩放时工具栏按钮随之移动，而菜单是
+     * fixed 定位挂在 body 上，不重定位就会与按钮脱节、悬停在原地。
+     * 由 ImageToolbar 在 canvasViewportChanged 时机调用（菜单未开时无操作）。
+     * 三级倍数菜单一并收起——它相对类型按钮定位，跟随意义不大，
+     * 鼠标重新悬停类型按钮即可再次出现
+     */
+    reposition() {
+        if (!this.menuContainer || !this.parentBtn) return;
+        if (!document.contains(this.parentBtn)) {   // 工具栏已隐藏：直接收起
+            this.removeMenu();
+            return;
+        }
+        const rect = this.parentBtn.getBoundingClientRect();
+        this.menuContainer.style.top = `${rect.bottom + 4}px`;
+        this.menuContainer.style.left = `${rect.left + rect.width / 2}px`;
         if (this.activeScaleMenu) {
             this.activeScaleMenu.remove();
             this.activeScaleMenu = null;

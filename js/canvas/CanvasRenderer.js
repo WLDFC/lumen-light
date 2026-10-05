@@ -43,6 +43,10 @@ class CanvasRenderer {
         ctx.translate(viewport.offsetX, viewport.offsetY);
         ctx.scale(viewport.scale, viewport.scale);
 
+        // 绘制编组的组体（垫在最底层：组背景必须压在连线与所有成员图片之下，
+        // 这是组画在 canvas 里而不是做成 DOM 节点的根本原因）
+        this.drawGroupBodies();
+
         // 绘制图片之间的连线（置于图片下层，视觉上层级更低）
         this.drawConnections();
 
@@ -83,6 +87,32 @@ class CanvasRenderer {
                 }
             }
 
+            // 编辑笔迹层：非破坏性叠加（图片编辑器保存的涂画内容），
+            // 始终画已加载的原生分辨率笔迹图，与底层图同位置同尺寸；
+            // 图层透明度（editStrokesOpacity）<1 时按 alpha 叠加
+            if (img.editStrokesImg) {
+                const opacity = img.editStrokesOpacity ?? 1;
+                if (opacity >= 1) {
+                    ctx.drawImage(img.editStrokesImg, img.x, img.y, img.width, img.height);
+                } else {
+                    ctx.save();
+                    ctx.globalAlpha = opacity;
+                    ctx.drawImage(img.editStrokesImg, img.x, img.y, img.width, img.height);
+                    ctx.restore();
+                }
+            }
+
+            // 遮罩层：局部重绘遮罩（遮罩灯箱保存）非破坏性叠加，固定半透明
+            // 红色显示（与灯箱内观感一致）。仅影响画布绘制——合成出口
+            // （getCompositeSrc：下载/收藏/加内容）与 Comfy 槽位图的烘焙
+            // 语义各自独立处理，不会把遮罩误当笔迹烘进作品
+            if (img.maskImg) {
+                ctx.save();
+                ctx.globalAlpha = 0.55;
+                ctx.drawImage(img.maskImg, img.x, img.y, img.width, img.height);
+                ctx.restore();
+            }
+
             // 视频对象：绘制播放图标覆盖层（提示双击可播放）
             if (NodeTypes.isVideo(img.source)) {
                 this.drawVideoOverlay(img, viewport.scale);
@@ -107,6 +137,10 @@ class CanvasRenderer {
             }
         }
 
+        // 绘制选中组的顶层描边与四边缩放手柄（放在图片循环之后，
+        // 避免层级更高的成员图片盖住手柄导致无法点击）
+        this.drawGroupOverlays();
+
         // 绘制端口圆点（置于图片上层，保证圆点不被相邻图片遮挡）
         this.drawConnectionDots();
 
@@ -124,6 +158,138 @@ class CanvasRenderer {
 
         // 同步视频播放器覆盖层位置（跟随视口平移/缩放）
         this.canvas.videoManager.syncPlayer();
+    }
+
+    /**
+     * 圆角矩形路径（arcTo 实现，不依赖较新的 ctx.roundRect）。
+     * 半径超组尺寸一半时自动钳制（极小组不会画出畸形路径）。
+     * 仅供组体绘制使用：节点是 DOM（圆角由 CSS border-radius 保证），
+     * 组画在 canvas 上需要手动构路径
+     * @param {CanvasRenderingContext2D} ctx - 绘图上下文
+     * @param {number} x - 左上角 X（世界坐标）
+     * @param {number} y - 左上角 Y
+     * @param {number} w - 宽
+     * @param {number} h - 高
+     * @param {number} r - 圆角半径
+     */
+    roundRectPath(ctx, x, y, w, h, r) {
+        const rr = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rr);
+        ctx.arcTo(x + w, y + h, x, y + h, rr);
+        ctx.arcTo(x, y + h, x, y, rr);
+        ctx.arcTo(x, y, x + w, y, rr);
+        ctx.closePath();
+    }
+
+    /**
+     * 绘制所有编组的组体（最底层）：
+     * 半透明深色面板底 + 标题栏色带 + 灰边框 + 标题文字，
+     * 配色取自节点面板（.text-node：#1b1c21 底、白色半透明标题带、
+     * rgba(128,128,128,0.3) 边框），组选中时边框换成节点青。
+     * 标题栏走节点的 ns 缩放体系（GroupManager.getTitleMetrics 共享度量：
+     * 高 = 48 × ns、字号 = 18 × ns），组与节点在任何缩放级别下观感一致；
+     * 文字超宽时裁剪在标题栏内。
+     */
+    drawGroupBodies() {
+        const groups = this.canvas.groups ? this.canvas.groups.groups : [];
+        if (groups.length === 0) return;
+        const { ctx, viewport, canvas } = this.canvas;
+        const scale = viewport.scale;
+        const dpr = this.canvas.dpr || 1;
+
+        // 视口剔除（与图片剔除同一公式）
+        const margin = 64 / scale;
+        const viewLeft = -viewport.offsetX / scale - margin;
+        const viewTop = -viewport.offsetY / scale - margin;
+        const viewRight = viewLeft + (canvas.width / dpr) / scale + margin * 2;
+        const viewBottom = viewTop + (canvas.height / dpr) / scale + margin * 2;
+
+        for (const g of groups) {
+            if (g.x + g.width < viewLeft || g.x > viewRight ||
+                g.y + g.height < viewTop || g.y > viewBottom) continue;
+
+            // 标题栏度量（世界坐标，ns 缩放，与节点标题栏同款）
+            const metrics = GroupManager.getTitleMetrics(g);
+            // 圆角 = 8px × ns（节点面板圆角参数，node.css border-radius
+            // calc(8px * var(--ns))）；ns 用组自身 titleNS，与标题栏同套缩放
+            const radius = 8 * GroupManager.getTitleNS(g);
+
+            // 组体：半透明节点底色（空处透出画布网格，成员图片画在其上）
+            ctx.fillStyle = 'rgba(27, 28, 33, 0.6)';
+            this.roundRectPath(ctx, g.x, g.y, g.width, g.height, radius);
+            ctx.fill();
+
+            // 标题栏色带：clip 在组圆角路径内再画矩形——顶部两角跟随组
+            // 圆角，色带不会溢出圆角轮廓（节点 header 与面板圆角的同款关系）
+            ctx.save();
+            this.roundRectPath(ctx, g.x, g.y, g.width, g.height, radius);
+            ctx.clip();
+            // 标题栏色带：默认白色半透明（与节点标题栏同语言）；
+            // 组指定了颜色时用对应预设色带（色值唯一出处 GroupManager.COLOR_PRESETS）
+            ctx.fillStyle = (GroupManager.COLOR_PRESETS[g.color] || GroupManager.COLOR_PRESETS['']).band;
+            ctx.fillRect(g.x, g.y, g.width, metrics.height);
+            ctx.restore();
+
+            // 标题文字（超宽裁剪在标题栏内，字号随 ns 缩放）。
+            // 改名期间跳过：输入框底色半透明，画布文字不隐藏会叠字
+            if (!this.canvas.groups.isRenaming(g)) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(g.x, g.y, g.width, metrics.height);
+                ctx.clip();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                ctx.font = `${metrics.font}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+                ctx.textBaseline = 'middle';
+                ctx.textAlign = 'left';
+                ctx.fillText(g.title || GroupManager.DEFAULT_TITLE,
+                             g.x + metrics.inset, g.y + metrics.height / 2 + 1 / scale);
+                ctx.restore();
+            }
+
+            // 未选中的组画灰边框（圆角与组体一致）；
+            // 选中组的描边放到 drawGroupOverlays 顶层绘制
+            if (!g.selected) {
+                ctx.strokeStyle = 'rgba(128, 128, 128, 0.3)';
+                ctx.lineWidth = 1 / scale;
+                this.roundRectPath(ctx, g.x, g.y, g.width, g.height, radius);
+                ctx.stroke();
+            }
+        }
+
+        // 改名输入框逐帧对位（若开着）：一切视觉变化（缩放/平移/拖动）
+        // 最终都汇入 draw，这里是权威同步点，输入框永不与标题栏脱节
+        this.canvas.groups.syncRenameTransform();
+    }
+
+    /**
+     * 绘制选中组的顶层描边与四边缩放手柄（单选组时）。
+     * 选中描边用节点青 #6cebff（与图片/节点选中语言一致）；
+     * 手柄是屏幕恒定尺寸的青色短条，几何由 GroupManager.getEdgeHandleRects
+     * 提供（与命中检测共用，保证所见即可抓）。
+     */
+    drawGroupOverlays() {
+        const groups = this.canvas.groups;
+        if (!groups || groups.selectedIds.size !== 1) return;
+        const group = groups.getSelected()[0];
+        if (!group) return;
+
+        const { ctx } = this.canvas;
+        const scale = this.canvas.viewport.scale;
+
+        // 选中描边（线宽反缩放补偿，屏幕恒定；圆角与组体一致）
+        ctx.strokeStyle = '#6cebffff';
+        ctx.lineWidth = 1.7 / scale;
+        this.roundRectPath(ctx, group.x, group.y, group.width, group.height,
+            8 * GroupManager.getTitleNS(group));
+        ctx.stroke();
+
+        // 四边中点手柄
+        ctx.fillStyle = '#6cebff';
+        for (const h of GroupManager.getEdgeHandleRects(group, scale)) {
+            ctx.fillRect(h.x, h.y, h.w, h.h);
+        }
     }
 
     /**
@@ -263,7 +429,7 @@ class CanvasRenderer {
         const height = Math.abs(end.y - start.y);
 
         // 绘制蓝色边框，与选中图片边框样式一致
-        ctx.strokeStyle = '#3b82f6';
+        ctx.strokeStyle = '#6cebffff';
         ctx.lineWidth = 1.5 / viewport.scale;
         ctx.strokeRect(x, y, width, height);
 

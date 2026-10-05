@@ -3,10 +3,13 @@
  * LumenLight 用户技能路由
  * ==========================================================================
  * 作用：管理 data/skills/ 目录下的用户自定义技能（提示词节点技能栏使用）。
- *   - 一个技能一个 .md 文件（Agent Skills 主流格式）：YAML frontmatter
+ *   - 一个技能一个 .md 文件（Agent Skills 简化形态）：YAML frontmatter
  *     存元数据（id/name/icon/输入开关），正文即发给模型的指令，
  *     用户直接放入/备份/分享文件即可，刷新页面即生效（无需重启后端）；
  *   - 兼容读取旧版 .json 技能文件；同 id 时 .md 优先；
+ *   - 兼容 Anthropic Agent Skills 标准文件夹形态：<文件夹>/SKILL.md
+ *     （id 取文件夹名，frontmatter 写了 id 必须与文件夹名一致；
+ *     技能栏只用指令正文，辅助文件不参与解析，只读不支持上传管理）；
  *   - 与内置技能（js/canvas/nodes/PromptSkillBar.js 的 SKILLS 数组）独立；
  *   - 本层负责字段校验与 id 清洗（防路径穿越），name 截断防超长文件名。
  *
@@ -114,19 +117,30 @@ function createSkillsRouter({ skillsDir }) {
 
     /**
      * GET /
-     * 列出全部用户技能（.md 优先于同名 .json；损坏的文件跳过并在服务端告警）
+     * 列出全部用户技能。两种形态（2026-10-04 起兼容 Anthropic Agent Skills
+     * 文件夹标准）：平铺 .md/.json（.md 优先）+ <文件夹>/SKILL.md（id 取
+     * 文件夹名，frontmatter 写了 id 必须与文件夹名一致；技能栏只用指令
+     * 正文，辅助文件不参与）；损坏的文件跳过并在服务端告警
      */
     router.get('/', async (req, res) => {
         try {
             await ensureDir();
-            const files = (await fs.readdir(skillsDir))
-                .filter((f) => f.endsWith('.md') || f.endsWith('.json'))
+            const entries = await fs.readdir(skillsDir, { withFileTypes: true });
+            const files = entries
+                .filter((e) => e.isFile() &&
+                               (e.name.endsWith('.md') || e.name.endsWith('.json')) &&
+                               e.name.toLowerCase() !== 'readme.md')   // 目录说明文档，不是技能
+                .map((e) => e.name)
                 .sort((a, b) => {
                     const baseA = a.replace(/\.(md|json)$/, '');
                     const baseB = b.replace(/\.(md|json)$/, '');
                     if (baseA !== baseB) return baseA.localeCompare(baseB, 'zh');
                     return a.endsWith('.md') ? -1 : 1;   // 同名时 .md 优先
                 });
+            const dirs = entries
+                .filter((e) => e.isDirectory())
+                .map((e) => e.name)
+                .sort((a, b) => a.localeCompare(b, 'zh'));
 
             const skills = [];
             const seenIds = new Set();
@@ -142,6 +156,29 @@ function createSkillsRouter({ skillsDir }) {
                     skills.push(skill);
                 } catch (e) {
                     console.warn(`跳过无效的用户技能文件 ${file}: ${e.message}`);
+                }
+            }
+            // 文件夹形态（Agent Skills 标准）：SKILL.md frontmatter 解析，
+            // id 落到文件夹名——frontmatter 写了 id 且与文件夹名不一致的跳过
+            for (const dir of dirs) {
+                try {
+                    const skillMdPath = path.join(skillsDir, dir, 'SKILL.md');
+                    const content = await fs.readFile(skillMdPath, 'utf-8');
+                    const parsed = parseSkillMd(content, dir);
+                    const skill = parsed ? sanitizeSkill(parsed) : null;
+                    if (!skill) {
+                        console.warn(`跳过无效的用户技能文件夹 ${dir}: 字段不完整`);
+                        continue;
+                    }
+                    if (skill.id !== dir) {
+                        console.warn(`跳过用户技能文件夹 ${dir}: frontmatter id（${skill.id}）与文件夹名不一致`);
+                        continue;
+                    }
+                    if (seenIds.has(skill.id)) continue;   // 同 id 平铺件优先
+                    seenIds.add(skill.id);
+                    skills.push(skill);
+                } catch (e) {
+                    console.warn(`跳过用户技能文件夹 ${dir}: ${e.message}`);
                 }
             }
             skills.sort((a, b) => a.name.localeCompare(b.name, 'zh'));

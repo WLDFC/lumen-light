@@ -1,0 +1,279 @@
+{
+  "602": {
+    "inputs": {
+      "text": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, low contrast, signature, flexible deformity, abstract, low contrast,score_1, score_2, score_3,score_4,",
+      "clip": [
+        "889",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "负面词"
+    }
+  },
+  "604": {
+    "inputs": {
+      "text": "1girl, solo, green_eyes,  ",
+      "clip": [
+        "889",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "763": {
+    "inputs": {
+      "seed": -1
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "随机种子"
+    }
+  },
+  "806": {
+    "inputs": {
+      "unet_name": "anima\\anima-base-v1.0.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "807": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "808": {
+    "inputs": {
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "862": {
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  },
+  "866": {
+    "inputs": {
+      "kernel_size": 41,
+      "sigma": 22,
+      "mask": [
+        "878",
+        1
+      ]
+    },
+    "class_type": "ImpactGaussianBlurMask",
+    "_meta": {
+      "title": "Gaussian Blur Mask"
+    }
+  },
+  "867": {
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "889",
+        0
+      ]
+    },
+    "class_type": "DifferentialDiffusion",
+    "_meta": {
+      "title": "差异扩散DifferentialDiffusion"
+    }
+  },
+  "868": {
+    "inputs": {
+      "noise_mask": false,
+      "positive": [
+        "604",
+        0
+      ],
+      "negative": [
+        "602",
+        0
+      ],
+      "vae": [
+        "889",
+        2
+      ],
+      "pixels": [
+        "878",
+        0
+      ],
+      "mask": [
+        "866",
+        0
+      ]
+    },
+    "class_type": "InpaintModelConditioning",
+    "_meta": {
+      "title": "内补模型条件"
+    }
+  },
+  "869": {
+    "inputs": {
+      "grow_mask_by": 0,
+      "pixels": [
+        "878",
+        0
+      ]
+    },
+    "class_type": "VAEEncodeForInpaint",
+    "_meta": {
+      "title": "VAE编码（局部重绘）"
+    }
+  },
+  "870": {
+    "inputs": {
+      "float": 0.6000000000000001
+    },
+    "class_type": "Primitive float [Crystools]",
+    "_meta": {
+      "title": "🪛 Primitive float"
+    }
+  },
+  "871": {
+    "inputs": {
+      "mask": [
+        "866",
+        0
+      ]
+    },
+    "class_type": "MaskPreview+",
+    "_meta": {
+      "title": "🔧 Mask Preview"
+    }
+  },
+  "872": {
+    "inputs": {
+      "samples": [
+        "868",
+        2
+      ],
+      "mask": [
+        "866",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "设置Latent噪波遮罩"
+    }
+  },
+  "873": {
+    "inputs": {
+      "seed": 816932377123560,
+      "steps": 30,
+      "cfg": 5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "normal",
+      "denoise": 0.8,
+      "model": [
+        "867",
+        0
+      ],
+      "positive": [
+        "868",
+        0
+      ],
+      "negative": [
+        "868",
+        1
+      ],
+      "latent_image": [
+        "872",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "874": {
+    "inputs": {
+      "samples": [
+        "873",
+        0
+      ],
+      "vae": [
+        "889",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "878": {
+    "inputs": {
+      "slot": "1",
+      "wait_for_image": true,
+      "force_reload": true,
+      "seed": 489603043171059
+    },
+    "class_type": "LumenReceiveImageFromCanvas",
+    "_meta": {
+      "title": "💡 From Canvas (Edit Image)"
+    }
+  },
+  "879": {
+    "inputs": {
+      "auto_send": true,
+      "lumen_target": "",
+      "images": [
+        "874",
+        0
+      ]
+    },
+    "class_type": "LumenSendImageRealtime",
+    "_meta": {
+      "title": "💡 To Canvas (Image)"
+    }
+  },
+  "888": {
+    "inputs": {
+      "auto_send": true,
+      "lumen_target": "",
+      "images": [
+        "871",
+        0
+      ]
+    },
+    "class_type": "LumenSendImageRealtime",
+    "_meta": {
+      "title": "💡 To Canvas (Image)"
+    }
+  },
+  "889": {
+    "inputs": {
+      "ckpt_name": "illustriousXL\\waiNSFWIllustrious_v110.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Checkpoint加载器（简易）"
+    }
+  }
+}
