@@ -218,15 +218,22 @@ class CanvasHistory {
         const videoUrls = objs
             .filter(o => NodeTypes.isVideo(o.source) && o.videoUrl && o.videoUrl.includes('data/videos'))
             .map(o => o.videoUrl);
+        const audioUrls = objs
+            .filter(o => NodeTypes.isAudio(o.source) && o.audioUrl && o.audioUrl.includes('data/audio'))
+            .map(o => o.audioUrl);
 
         const cmd = {
             label: opts.label || '删除',
             videoUrls: opts.fileCleanup === 'skip' ? [] : videoUrls,
+            audioUrls: opts.fileCleanup === 'skip' ? [] : audioUrls,
             undo: () => this._restoreDeleted(entries, groupRefs),
             redo: () => this._deleteEntries(entries, groupRefs)
         };
-        if (cmd.videoUrls.length > 0) {
-            cmd.onEvict = () => { for (const url of cmd.videoUrls) this.onFlushVideoFile?.(url); };
+        if (cmd.videoUrls.length > 0 || cmd.audioUrls.length > 0) {
+            cmd.onEvict = () => {
+                for (const url of cmd.videoUrls) this.onFlushVideoFile?.(url);
+                for (const url of cmd.audioUrls) this.onFlushAudioFile?.(url);
+            };
         }
 
         // 执行删除（与原 Delete 键循环等价：管理器删除 + 节点 DOM 销毁 +

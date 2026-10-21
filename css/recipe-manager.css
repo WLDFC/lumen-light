@@ -2,8 +2,9 @@
  * 提示词收藏页面样式（recipe-manager.css）
  *
  * 作用：定义顶栏"提示词"按钮、全屏提示词收藏弹窗、瀑布流卡片网格、
- *       卡片信息栏（名字 + Copy）、模型角标、删除按钮、空状态提示
- *       的视觉样式。只包含收藏页面本体，弹窗组件样式已按组件拆分。
+ *       卡片信息栏（名字 + Copy）、模型角标、移动选择框壳体、空状态
+ *       提示的视觉样式；批量管理/右键菜单/确认弹窗视觉已迁至 lumen-*.css。
+ *       只包含收藏页面本体，弹窗组件样式已按组件拆分。
  *
  * 配套文件：
  *   js/components/RecipeManager.js   # 收藏页结构与交互逻辑
@@ -252,32 +253,119 @@
     cursor: zoom-in;
 }
 
-/* ===== 删除按钮（卡片右上角） ===== */
+/* ===== 批量管理 / 右键菜单 / 选择圈 ===== */
 
-/* 悬停卡片时才显示删除按钮 */
-.recipe-card:hover .recipe-remove-btn {
-    display: flex;
+/* 视觉已迁至预制件样式（css/lumen-batch.css / lumen-context-menu.css），
+   本档仅保留宿主特有部分：批量模式卡片光标、移动选择框壳体 */
+.recipe-grid.lumen-batch-mode .recipe-card {
+    cursor: pointer;
 }
 
-/* 红色圆形 × 按钮：绝对定位在卡片右上角，默认隐藏 */
-.recipe-remove-btn {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 1;
-    width: 20px;
-    height: 20px;
-    padding: 0;
+/* ===== 移动选择 / 批量删除确认弹窗（共用遮罩骨架） ===== */
+
+/* 覆盖整个收藏弹窗的模态遮罩 */
+.recipe-batch-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1210;
     display: none;
     align-items: center;
     justify-content: center;
+    background: rgba(15, 15, 18, 0.6);
+}
+
+.recipe-batch-overlay.is-open {
+    display: flex;
+}
+
+/* 移动选择面板：标题 + 标签树列表 + 取消 */
+.recipe-move-panel {
+    width: 360px;
+    max-width: calc(100vw - 48px);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* 确认面板：窄一些 */
+.recipe-move-list {
+    flex: 1;
+    min-height: 80px;
+    overflow-y: auto;
+    padding: 8px 12px;
+}
+
+.recipe-move-item {
+    display: block;
+    width: 100%;
+    height: 38px;
+    padding: 0 12px;
     border: 0;
-    border-radius: 50%;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.recipe-move-item:hover {
+    background: rgba(34, 197, 94, 0.14);
+    color: #22c55e;
+}
+
+.recipe-move-list.is-busy {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* 无任何标签时的占位提示 */
+.recipe-move-empty {
+    margin: 0;
+    padding: 8px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+}
+
+/* 底部操作行：取消/删除（确认框）与取消（移动框） */
+.recipe-batch-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 16px 14px;
+}
+
+.recipe-btn {
+    padding: 6px 16px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.recipe-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* 危险主操作（确认删除） */
+.recipe-btn.is-danger {
+    border-color: transparent;
     background: #ef4444;
     color: #fff;
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
+}
+
+.recipe-btn.is-danger:hover {
+    background: rgba(239, 68, 68, 0.85);
 }
 
 /* ===== Copy 复制按钮（卡片底部） ===== */
@@ -451,10 +539,58 @@
     flex-shrink: 0;
 }
 
-/* 排序下拉触发器：底高从 32px 提到 40px，与右侧搜索框同高对齐；
-   其余观感（面板底色/边框/悬停/展开蓝）由 lumen-dropdown.css 的
-   .lumen-dd-icon-btn 提供 */
-.recipe-toolbar-right .lumen-dd-icon-btn {
+/* ===== 工具行动作钮：批量 / 筛选，统一「图标+文字」样式（LoRA 管理器同款） ===== */
+
+/* 批量钮：宿主类 recipe-batch-btn 叠在预制件类 lumen-batch-btn（40×40
+   图标钮）之上。lumen-batch.css 虽在本文件之前加载，但为不依赖加载
+   顺序，一律挂 .recipe-toolbar-right 前缀抬权重；配色对齐本页搜索框
+   （深底灰边，色板同源） */
+.recipe-toolbar-right .recipe-batch-btn {
+    width: auto;                    /* 抵消 .lumen-batch-btn 的固定 40px 宽 */
+    display: flex;
+    align-items: center;
+    gap: 6px;
     height: 40px;
-    border-radius: 10px;    /* 与搜索框同圆角，成组更整体 */
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(27, 28, 33, 1);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.recipe-toolbar-right .recipe-batch-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(128, 128, 128, 0.4);
+    color: #fff;
+}
+/* 批量激活态沿用预制件绿（lumen-batch.css 同值）——置于悬停规则之后，
+   悬停批量中的按钮保持绿色不被统一悬停盖掉 */
+.recipe-toolbar-right .recipe-batch-btn.is-active {
+    border-color: rgba(34, 197, 94, 0.6);
+    background: rgba(34, 197, 94, 0.16);
+    color: #22c55e;
+}
+
+/* 筛选下拉触发器：已从图标钮模式改为文本模式（固定漏斗图标 +「筛选」
+   静态文案，见 LumenDropdown staticIcon 与 RecipeManager setLabel 约定），
+   40px 高与批量钮/搜索框成组等高同圆角；悬停/展开沿用预制件的白叠加
+   语义，在此显式声明以免被上面的基础样式按加载顺序盖掉 */
+.recipe-toolbar-right .recipe-sort-btn {
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(27, 28, 33, 1);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+}
+.recipe-toolbar-right .recipe-sort-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(128, 128, 128, 0.4);
+    color: #fff;
+}
+.recipe-toolbar-right .recipe-sort-btn.lumen-dd-open {
+    background: rgba(255, 255, 255, 0.18);
 }

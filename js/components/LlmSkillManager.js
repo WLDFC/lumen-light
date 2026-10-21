@@ -296,6 +296,9 @@ class LlmSkillManager {
     closePopup() {
         this.isOpen = false;
         if (this._overlay) this._overlay.style.display = 'none';
+        // 广播清单可能变化（启停/上传）：LLM 面板「指定技能」下拉等消费方
+        // 监听刷新；无变更时消费方也只是重拉一次轻量清单
+        document.dispatchEvent(new CustomEvent('llm-skills-changed'));
     }
 
     /**

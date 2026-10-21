@@ -35,8 +35,10 @@ const { v4: uuidv4 } = require('uuid'); // UUID 生成库
 const createComfyRouter = require('./routes/comfy');
 const createWorkflowsRouter = require('./routes/workflows');
 const createCanvasImagesRouter = require('./routes/canvasImages');
+const createCanvasVideoRouter = require('./routes/canvasVideo');
 const createSavesRouter = require('./routes/saves');
 const createVideosRouter = require('./routes/videos');
+const createAudiosRouter = require('./routes/audios');
 const createCanvasBridgeRouter = require('./routes/canvasBridge');
 const createPiAgentRouter = require('./routes/piAgent');
 const PiAgentManager = require('./utils/piAgentManager');
@@ -65,6 +67,8 @@ const SAVES_DIR = path.join(__dirname, 'save');
 const DATA_DIR = path.join(__dirname, 'data');
 // 视频工作区目录（实时保存的临时视频落点，保存/删除时由后端清理）
 const VIDEOS_DIR = path.join(DATA_DIR, 'videos');
+// 音频工作区目录（画布音频文件落点，删除时由后端清理）
+const AUDIOS_DIR = path.join(DATA_DIR, 'audio');
 
 // 图片提示词收藏目录（原图、缩略图和元数据）
 const TAGS_DIR = path.join(__dirname, 'tag');
@@ -138,28 +142,37 @@ const latestWorkflow = {
     timestamp: 0
 };
 
-// 存储画板图片（用于 Edit 工作流，最多 3 个槽位）
-const canvasImages = {
-    1: null,
-    2: null,
-    3: null
-};
+// 存储画板图片（供 Edit / 局部重绘 / 多图编辑工作流取用；上限 9 与
+// LumenReceiveImageFromCanvas.MAX_SLOTS 对齐，未初始化的中间槽位按需
+// 动态落键——对象键写入免预分配，校验在 canvasImages 路由层）
+const MAX_IMAGE_SLOTS = 9;
+const canvasImages = Object.fromEntries(
+    Array.from({ length: MAX_IMAGE_SLOTS }, (_, i) => [i + 1, null])
+);
 
 // 记录每个槽位图片的更新时间戳
-const canvasImagesTimestamp = {
-    1: 0,
-    2: 0,
-    3: 0
-};
+const canvasImagesTimestamp = Object.fromEntries(
+    Array.from({ length: MAX_IMAGE_SLOTS }, (_, i) => [i + 1, 0])
+);
 
 // 遮罩槽位（局部重绘：黑白遮罩图，白=重绘区；与图片槽按位对齐，
 // 由生图提交写入/清空，From Canvas 节点的 mask 输出读取）
-const canvasMasks = {
+const canvasMasks = Object.fromEntries(
+    Array.from({ length: MAX_IMAGE_SLOTS }, (_, i) => [i + 1, null])
+);
+const canvasMasksTimestamp = Object.fromEntries(
+    Array.from({ length: MAX_IMAGE_SLOTS }, (_, i) => [i + 1, 0])
+);
+
+// 视频槽位（引用式：槽位存 {videoUrl, filename} 指向 data/videos/ 已落盘
+// 文件，不搬字节——视频体积大，由 canvasVideo 路由按需 sendFile 流式回传；
+// 与图片槽按位对称，From Canvas (Video Ref) 节点读取）
+const canvasVideos = {
     1: null,
     2: null,
     3: null
 };
-const canvasMasksTimestamp = {
+const canvasVideosTimestamp = {
     1: 0,
     2: 0,
     3: 0
@@ -193,6 +206,11 @@ function broadcastToCanvas(data) {
 /**
  * WebSocket 连接建立时的处理
  */
+// 本次进程的启动标识：连接握手时下发给前端，前端与 localStorage 里的
+// 上次值比对——不一致即「后端重启过而页面还是旧的」，自动刷新页面
+// （部分用户重启后端后忘记 F5，旧页面会带着旧 JS 继续用，这里替他刷新）。
+const BOOT_ID = uuidv4();
+
 wss.on('connection', (ws) => {
     // 观察窗内有连接 = 旧页面（浏览器标签/IDE 内嵌预览）重连：
     // 取消自动开窗，复用旧页面，避免双窗口
@@ -201,6 +219,14 @@ wss.on('connection', (ws) => {
         pendingOpenTimer = null;
         console.log('（跳过自动开窗：检测到旧页面重连，复用该页面）');
     }
+
+    // bootId 握手（首条消息）：旧页面收到与本地记录不同的 bootId 自行刷新，
+    // 与下方「跳过自动开窗」配合——旧页面负责自我更新，新窗口只在没有任何
+    // 可复用页面时才开
+    try {
+        ws.send(JSON.stringify({ type: 'hello', bootId: BOOT_ID }));
+    } catch { /* 连接刚建立即断：忽略 */ }
+
     const clientId = uuidv4();
     console.log('新连接:', clientId);
 
@@ -286,15 +312,28 @@ app.use('/api/canvas-mask', createCanvasImagesRouter({
     canvasImagesTimestamp: canvasMasksTimestamp
 }));
 
+// 视频槽位 API（/api/canvas-video：引用式槽位，与图片槽按位对称，
+// 供 ComfyUI LumenReceiveVideoFromCanvas 节点取画布视频）
+app.use('/api/canvas-video', createCanvasVideoRouter({
+    canvasVideos,
+    canvasVideosTimestamp,
+    videosDir: VIDEOS_DIR
+}));
+
 // Comfy 生图节点 API（/api/comfy-node：模型清单代理 + 节点生图提交）。
-// 与 comfy 路由共享画板槽位与最新提示词存储，保证两条生图链路状态一致
+// 与 comfy 路由共享画板槽位与最新提示词存储，保证两条生图链路状态一致；
+// 视频槽位依赖（canvasVideos/videosDir）供 V2V 工作流提交时写引用
 app.use('/api/comfy-node', createComfyNodeRouter({
     workflowsDir: WORKFLOWS_DIR,
     canvasImages,
     canvasImagesTimestamp,
     canvasMasks,
     canvasMasksTimestamp,
+    canvasVideos,
+    canvasVideosTimestamp,
+    videosDir: VIDEOS_DIR,
     latestPrompts,
+    clients,   // 免节点 history 回流推画布用（与 comfy 路由同一客户端表）
     comfyApiUrl: COMFY_API_URL
 }));
 
@@ -345,6 +384,9 @@ app.use('/api/saves', createSavesRouter({ savesDir: SAVES_DIR, videosDir: VIDEOS
 // 视频工作区管理 API（/api/videos，data/videos 临时视频的删除）
 app.use('/api/videos', createVideosRouter({ videosDir: VIDEOS_DIR }));
 
+// 音频工作区管理 API（/api/audios，画布音频文件的上传与删除）
+app.use('/api/audios', createAudiosRouter({ audiosDir: AUDIOS_DIR }));
+
 // 画布桥接 API（/api/canvas-bridge，pi 等外部 agent 经此操作画布）
 app.use('/api/canvas-bridge', createCanvasBridgeRouter({ clients }));
 
@@ -354,6 +396,9 @@ app.use('/api/runninghub', createRunningHubRouter({ clients, dataDir: DATA_DIR }
 // pi 编码智能体（/api/pi，LLM 窗口的 pi 模式后端）
 const piAgentManager = new PiAgentManager({ projectRoot: __dirname, dataDir: DATA_DIR, clients });
 app.use('/api/pi', createPiAgentRouter({ manager: piAgentManager }));
+// pi 后台任务上报中继（lumen-canvas 扩展 POST → WS 广播给前端任务中心；
+// GET 供页面刷新后补水运行中任务）
+app.use('/api/tasks', require('./routes/tasks')({ clients }));
 // 启动即拉起 pi RPC 进程（与下方 MCP 初始连接同理）：状态灯/agent 模式
 // 开箱即用。此前为惰性启动——首次 prompt 才 spawn，后端重启后 /state
 // 如实报 running:false，状态灯会一直灰到首问。失败不阻塞启动：
@@ -438,6 +483,16 @@ app.use('/api/tags', createTagsRouter({ tagsDir: TAGS_DIR }));
 const createPromptsRouter = require('./routes/prompts');
 app.use('/api/system-prompts', createPromptsRouter({ dataDir: DATA_DIR }));
 
+// Comfy 提示词预设 API（数据落盘 data/comfy-prompts.json，正面/负面两库；
+// ComfyPromptPresets 面板按钮的增删改查与注入数据源）
+const createComfyPromptsRouter = require('./routes/comfyPrompts');
+app.use('/api/comfy-prompts', createComfyPromptsRouter({ dataDir: DATA_DIR }));
+
+// 坐标编辑器草稿 API（数据落盘 data/coordinate-draft.json，全局单份；
+// 编辑器防抖自动保存 + 打开时恢复，见 ADR 018）
+const createCoordinateDraftRouter = require('./routes/coordinateDraft');
+app.use('/api/coordinate-draft', createCoordinateDraftRouter({ dataDir: DATA_DIR }));
+
 // 用户自定义技能 API（/api/skills，数据落盘 data/skills/ 目录，一个技能一个 JSON 文件）
 const createSkillsRouter = require('./routes/skills');
 app.use('/api/skills', createSkillsRouter({ skillsDir: path.join(DATA_DIR, 'skills') }));
@@ -457,6 +512,12 @@ app.use('/api/autosave', createAutosaveRouter({ dir: path.join(DATA_DIR, 'autosa
 // 「添加到资产」的存储端，内容寻址去重；资产库内置标签「我的资产」的数据源）
 const createAssetsRouter = require('./routes/assets');
 app.use('/api/assets', createAssetsRouter({ assetsDir: path.join(DATA_DIR, 'assets') }));
+
+// 备份导出/导入 API（/api/backup，文件菜单「备份导出/导入」入口：
+// 存档 + API 设置 + 聊天记录 + 提示词库打包为 zip 下载 / 从 zip 合并导回，
+// 导入策略见 routes/backup.js 头注——同名存档改名不覆盖、设置按厂商合并）
+const createBackupRouter = require('./routes/backup');
+app.use('/api/backup', createBackupRouter({ savesDir: SAVES_DIR, dataDir: DATA_DIR, tagsDir: TAGS_DIR }));
 
 // ==================== 统一错误处理 ====================
 

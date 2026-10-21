@@ -12,7 +12,7 @@
  *   mode  - 执行模式：'sync'（一次请求等结果）
  *           预留 'task'（异步任务：提交拿 taskId → 轮询取结果，视频模型用）
  *   match(context) → boolean
- *           是否命中本适配器；context: { model, imageList }
+ *           是否命中本适配器；context: { model, imageList, provider }
  *   run(request) → Promise<{ imageSrc: string, reply?: string }>
  *           执行生成并提取结果；request: { model, prompt, size, quality,
  *           images, provider: { name, config }, signal }
@@ -29,10 +29,13 @@
 const editsImageAdapter = require('./editsImageAdapter');
 const chatImageAdapter = require('./chatImageAdapter');
 const generationsImageAdapter = require('./generationsImageAdapter');
+const dashscopeImageAdapter = require('./dashscopeImageAdapter');
 
-// 顺序即优先级：edits / chat 是按模型家族精确匹配的，
+// 顺序即优先级：dashscope 按端点域名精确命中（百炼没有 OpenAI 图像端点，
+// 必须抢在兜底前处理），edits / chat 按模型家族精确匹配，
 // generations 是永远命中的兜底，必须保持在末位
 const adapters = [
+    dashscopeImageAdapter,
     editsImageAdapter,
     chatImageAdapter,
     generationsImageAdapter
@@ -40,7 +43,7 @@ const adapters = [
 
 /**
  * 按模型与请求形态挑选适配器
- * @param {Object} context - { model, imageList }
+ * @param {Object} context - { model, imageList, provider }
  * @returns {Object} 命中的适配器（保证总有返回）
  */
 function pickImageAdapter(context) {

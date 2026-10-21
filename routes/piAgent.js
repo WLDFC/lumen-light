@@ -15,7 +15,9 @@
  *                                扩展经 setActiveTools 移除，下一轮消息生效）
  *   - GET/POST /api/pi/extension-tools ：扩展工具清单注册表（上报/展示）
  *   - GET  /api/pi/provider-config ：LLM 面板模型 → pi provider 注册配置
- *   - GET  /api/pi/attachments ：当前消息附图（扩展 refImages 按 attachment:N 引用取图）
+ *   - GET  /api/pi/attachments ：当前存档最近一条含附图消息的附图（扩展
+ *                                refImages 按 attachment:N 引用取图；不带图
+ *                                的后续消息回退到上一次的，见 piAgentManager）
  * ==========================================================================
  */
 

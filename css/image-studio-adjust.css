@@ -1,0 +1,214 @@
+/**
+ * ==========================================================================
+ * LumenLight 图像编辑器（ImageStudio）样式 —— 调色工具弹窗
+ * ==========================================================================
+ * 自成一档的浮动弹窗样式（与 picker 同拆分先例：一个浮动窗一个文件）：
+ * 标题行（重置/关闭图标）/ 分段 tab（光线·质感）/ 滑块列表 / 底部保存。
+ * 配色遵循《配色美学》：面板 #1b1c21 浮起层、强调蓝 #3b82f6、
+ * 边框 rgba(128,128,128,0.3)、悬停半透明白叠加。
+ * 加载顺序：image-studio.css → image-studio-panel.css →
+ *           image-studio-picker.css → 本文件
+ * 对应组件：js/components/image-studio/StudioAdjustTool.js
+ * ==========================================================================
+ */
+
+/* ==================== 弹窗壳 ==================== */
+
+/* 浮动面板：锚在编辑器覆盖层左上（左工具栏右侧），不挡画布主体。
+   宿主 overlayEl 是 fixed 灯箱，这里 absolute 相对其定位 */
+.is-adjust {
+    position: absolute;
+    left: 62px;
+    top: 56px;
+    width: 248px;
+    z-index: 40;                       /* 高于历史面板(30)，低于通用弹窗 */
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100% - 72px);
+    background: var(--icon-bg, #1b1c21);       /* 浮起层：与面板同色 */
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+
+/* ==================== 标题行 ==================== */
+
+.is-adjust-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 10px 8px 14px;
+    flex: none;
+}
+
+.is-adjust-title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+}
+
+/* 图标按钮（重置/关闭）：与顶栏图标钮同规格的透明底小钮 */
+.is-adjust-icon-btn {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.is-adjust-icon-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.is-adjust-icon-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* ==================== 分段 tab（光线 / 质感） ==================== */
+
+.is-adjust-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 0 12px 8px;
+    padding: 3px;
+    border-radius: 6px;
+    background: #0f0f12;               /* 凹陷层：分段控件的槽 */
+    flex: none;
+}
+
+.is-adjust-tab {
+    flex: 1;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.is-adjust-tab:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* 选中段：面板色浮起 + 强调蓝字（与横竖排分段切换同语义） */
+.is-adjust-tab.active {
+    background: var(--icon-bg, #1b1c21);
+    color: #3b82f6;
+}
+
+.is-adjust-tab svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* ==================== 滑块列表 ==================== */
+
+.is-adjust-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 2px 14px 8px;
+}
+
+.is-adjust-row {
+    padding: 7px 0 3px;
+}
+
+/* 行首：标签居左，数值居右 */
+.is-adjust-row-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.is-adjust-row-line span:first-child {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* 数值输入框：凹陷层小输入框（与字号输入 .is-text-size 同规格语义）。
+   双通道：滑块拖动写入、手动键入回推滑块；隐藏原生 spinner（深色
+   主题下过亮，与生图节点数值框同处理），宽度刚好容 3 位数 */
+.is-adjust-num {
+    width: 46px;
+    height: 22px;
+    padding: 0 5px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 4px;
+    background: #0f0f12;
+    color: #fff;
+    font-size: 12px;
+    font-family: monospace;
+    text-align: right;
+    outline: none;
+}
+
+.is-adjust-num:focus {
+    border-color: #3b82f6;
+}
+
+.is-adjust-num::-webkit-outer-spin-button,
+.is-adjust-num::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.is-adjust-row input[type="range"] {
+    width: 100%;
+    accent-color: #3b82f6;
+}
+
+/* ==================== 底部操作行 ==================== */
+
+.is-adjust-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+    flex: none;
+}
+
+.is-adjust-hint {
+    flex: 1;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);           /* 说明文字：半透明白 */
+}
+
+/* 保存：主按钮（强调蓝，生成按钮同款规格） */
+.is-adjust-save {
+    height: 30px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 6px;
+    background: #3b82f6;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.is-adjust-save:hover {
+    background: #2563eb;
+}

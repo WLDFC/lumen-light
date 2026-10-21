@@ -184,6 +184,16 @@ class UpscaleManager {
         // 标记为处理中状态
         this.isProcessing = true;
 
+        // 任务中心登记：逐张处理为一个任务，进度随完成数推进
+        // （后端 Real-ESRGAN 无中止通道，不提供停止；定位落到第一张源图）
+        const total = this.currentImages.length;
+        const taskRef = window.taskRegistry?.register({
+            kind: 'upscale',
+            label: `${type === 'anime' ? '动漫' : '真实'} ${scale}x 放大`,
+            total,
+            locateTarget: this.currentImages[0]
+        });
+
         try {
             // 显示处理中提示 toast
             this.showProcessingToast(`${type === 'anime' ? '动漫' : '真实'} ${scale}x 放大中 (${this.currentImages.length} 张)...`);
@@ -247,6 +257,14 @@ class UpscaleManager {
                     console.error(`第 ${i + 1} 张图片放大失败:`, itemError);
                     failCount++;
                 }
+                taskRef?.update({ done: i + 1 });
+            }
+
+            // 任务中心结算：全失败=红驻留，部分失败=完成附注
+            if (taskRef) {
+                if (successCount === 0) taskRef.end('failed', '全部放大失败');
+                else taskRef.end('done', failCount > 0
+                    ? `成功 ${successCount}/${total}，失败 ${failCount}` : `完成 ${successCount} 张`);
             }
 
             // 根据成功/失败数量显示提示
@@ -258,10 +276,13 @@ class UpscaleManager {
         } catch (error) {
             // 捕获网络或后端错误，显示错误提示
             console.error('放大失败:', error);
+            taskRef?.end('failed', error.message);
             this.showErrorToast('放大失败: ' + error.message);
         } finally {
             // 无论成功或失败，都释放处理中状态
             this.isProcessing = false;
+            // 兜底结算：异常早退时任务不许悬挂在运行态
+            if (taskRef?.isRunning()) taskRef.end('failed', '放大中断');
         }
     }
 

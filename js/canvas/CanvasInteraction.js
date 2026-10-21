@@ -140,6 +140,12 @@ class CanvasInteraction {
             return;
         }
 
+        // 音频对象：双击打开原生控件播放器（委托给 CanvasAudioManager）
+        if (NodeTypes.isAudio(clicked.source)) {
+            c.audioManager.showPlayer(clicked);
+            return;
+        }
+
         // 图片对象持有原生分辨率的 HTMLImageElement，其 src 即为大图地址
         const lightbox = window.llmChat && window.llmChat.lightbox;
         if (lightbox && clicked.img && clicked.img.src) {
@@ -756,6 +762,11 @@ class CanvasInteraction {
             if (!this._dragMoved && c.dragTarget &&
                 NodeTypes.isVideo(c.dragTarget.source)) {
                 c.videoManager.showPlayer(c.dragTarget);
+            }
+            // 音频卡片单击：弹出就地播放器（与视频同一交互语义）
+            if (!this._dragMoved && c.dragTarget &&
+                NodeTypes.isAudio(c.dragTarget.source)) {
+                c.audioManager.showPlayer(c.dragTarget);
             }
         }
 

@@ -34,8 +34,20 @@ function createCanvasBridgeRouter({ clients }) {
     const pending = new Map();
     let bridgeSeq = 0;
 
-    /** 需要路由到单一客户端的写命令（广播会重复执行） */
-    const MUTATING_COMMANDS = new Set(['drop_image', 'drop_video', 'delete_media', 'clear_media', 'build_graph']);
+    /**
+     * 需要路由到单一客户端的写命令（广播会重复执行）。
+     * 注意：新增加画布命令时必须对照此处归类——写命令漏登会广播到全部
+     * 标签页造成重复执行（如双开页面触发生成会跑两次）
+     */
+    const MUTATING_COMMANDS = new Set([
+        'drop_image', 'drop_video', 'delete_media', 'clear_media', 'build_graph',
+        // 节点运维 / 撤销 / 媒体整理 / 提示词写入 / 存档（写语义：改画布内容或触发落图）
+        'node_update', 'node_delete', 'node_run', 'edge_disconnect',
+        'history_step', 'media_arrange', 'media_rename',
+        'set_prompts', 'archive_save'
+    ]);
+    // view_focus / select_set 为纯查看辅助（只动视口与选中集，不改内容，
+    // 重复执行幂等无害），归入读命令广播，多标签容错
     /** 心跳新鲜度阈值：超过视为页面失去响应 */
     const FRESH_MS = 10 * 1000;
 

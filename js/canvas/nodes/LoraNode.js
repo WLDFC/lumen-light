@@ -8,7 +8,8 @@
  *
  * 堆栈与注入（与 Comfy 生图节点的分工）：
  *   - 节点内是 LoRA 条目列表（可不断"+ 添加 LoRA"堆叠），每条含文件下拉
- *    （选空 = 此条不生效，故无需启用开关）、模型强度（strength_model）、
+ *    （选空 = 此条不生效）、启用勾选框（与面板叠加区同语义：取消勾选 =
+ *     提交时跳过，不影响已填的强度值）、模型强度（strength_model）、
  *     CLIP 强度（strength_clip）；
  *   - 提交时 ComfyGenNode 经 ImagePipeline.collectLoras 收集链上全部生效
  *     条目，由后端 injectLoraChain 图拼接注入工作流（动态创建 LoraLoader
@@ -43,13 +44,19 @@ class LoraNode extends BaseCanvasNode {
         this.height = options.height || LoraNode.DEFAULT_HEIGHT;
 
         // LoRA 条目（可堆叠）。每条独立 id 供增删定位；
-        // file 为空视为未配置/不生效（提交时过滤），因此无需启用开关
+        // file 为空视为未配置/不生效（提交时过滤）；enabled 缺省视为启用
+        // （兼容未写该字段的旧存档，与面板叠加区条目同语义）
         this.entries = (Array.isArray(options.entries) ? options.entries : []).map((e) => ({
             id: e.id || LumenLight.generateId(),
             file: e.file || '',
             strengthModel: LoraNode._clampStrength(e.strengthModel, 1),
-            strengthClip: LoraNode._clampStrength(e.strengthClip, 1)
+            strengthClip: LoraNode._clampStrength(e.strengthClip, 1),
+            enabled: e.enabled !== false
         }));
+
+        // 高度自适应下限：创建/存档恢复时的高度——自适应只在内容超过它时
+        // 向上生长，删除条目回缩到它为止，用户既有几何不被吃掉
+        this._heightFloor = this.height;
 
         // LoRA 文件清单（来自 /api/comfy-node/models 的 loras 类别）
         this.loraFiles = [];
@@ -80,6 +87,12 @@ class LoraNode extends BaseCanvasNode {
                 <div class="text-node-port text-node-port-out" title="输出端口：连接 Comfy 生图节点"></div>
             </div>
             <div class="image-gen-form">
+                <!-- 触发词按钮行：条目区左上角（管理整个节点的触发词），
+                     lora 条目框随之整体下移让位 -->
+                <div class="lora-triggers-row">
+                    <button type="button" class="lora-triggers-btn"
+                            title="管理此节点 LoRA 的触发词（开关/权重，自动写入链上提示词节点末尾）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7.01"/></svg>触发词</button>
+                </div>
                 <div class="lora-entries"></div>
                 <button type="button" class="lora-add-btn" title="添加一条 LoRA">+ 添加 LoRA</button>
             </div>
@@ -131,16 +144,22 @@ class LoraNode extends BaseCanvasNode {
         bindPort(this.portInEl, 'in');
         bindPort(this.portOutEl, 'out');
 
-        // 条目事件委托：文件切换 / 强度修改
-        // （文件选空 = 此条不生效，因此无需启用开关）
+        // 条目事件委托：启用开关 / 文件切换 / 强度修改
+        // （文件选空 = 此条不生效；启用开关取消勾选 = 提交时跳过）
         this.entriesEl.addEventListener('change', (e) => {
             const entryEl = e.target.closest('.lora-entry');
             if (!entryEl) return;
             const entry = this.entries.find((en) => en.id === entryEl.dataset.entryId);
             if (!entry) return;
 
-            if (e.target.classList.contains('lora-file-select')) {
+            if (e.target.classList.contains('comfy-lora-enable-input')) {
+                // 启用开关：就地改状态与置灰态，不重建 DOM（与面板叠加区一致）
+                entry.enabled = e.target.checked;
+                entryEl.classList.toggle('is-off', !entry.enabled);
+                this._emitStackChanged();
+            } else if (e.target.classList.contains('lora-file-select')) {
                 entry.file = e.target.value;
+                this._emitStackChanged();
             } else if (e.target.classList.contains('lora-strength-model')) {
                 entry.strengthModel = LoraNode._clampStrength(e.target.value, entry.strengthModel);
                 e.target.value = entry.strengthModel;
@@ -157,6 +176,7 @@ class LoraNode extends BaseCanvasNode {
             const entryEl = delBtn.closest('.lora-entry');
             this.entries = this.entries.filter((en) => en.id !== entryEl.dataset.entryId);
             this.renderEntries();
+            this._emitStackChanged();
         });
 
         // 添加按钮：追加一条空条目（文件下拉待选）
@@ -165,12 +185,27 @@ class LoraNode extends BaseCanvasNode {
             this.addEntry();
         });
 
+        // 触发词按钮：唤出触发词管理器（画布模式——条目下拉/写入目标均为
+        // 本节点语境，监听方为 LoraTriggerManager）
+        const triggersBtn = this.el.querySelector('.lora-triggers-btn');
+        if (triggersBtn) {
+            triggersBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.dispatchEvent(new CustomEvent('lumen-lora-node-triggers-open', {
+                    detail: { node: this }
+                }));
+            });
+        }
+
         // 滚轮规则（与 ComfyGenNode 一致）：节点浮在 canvas 上方，wheel
         // 到不了画布层，必须在此转发缩放；交互控件（下拉/输入/按钮）放行
         // 原生行为。漏掉这个监听会导致悬停在节点任意位置（含边缘/状态栏）
-        // 时滚轮缩放失效
+        // 时滚轮缩放失效。条目列表内容超高时同样放行——此时滚轮应滚动
+        // 列表而非缩放画布
         this.el.addEventListener('wheel', (e) => {
             if (e.target.closest('select, button, input, textarea')) return;
+            const list = e.target.closest('.lora-entries');
+            if (list && list.scrollHeight > list.clientHeight) return;
             e.preventDefault();
             this.canvas.interaction.handleWheel(e);
         }, { passive: false });
@@ -186,9 +221,11 @@ class LoraNode extends BaseCanvasNode {
             id: LumenLight.generateId(),
             file: '',
             strengthModel: 1,
-            strengthClip: 1
+            strengthClip: 1,
+            enabled: true
         });
         this.renderEntries();
+        this._emitStackChanged();
     }
 
     /**
@@ -201,16 +238,18 @@ class LoraNode extends BaseCanvasNode {
             id: LumenLight.generateId(),
             file: file || '',
             strengthModel: 1,
-            strengthClip: 1
+            strengthClip: 1,
+            enabled: true
         });
         this.renderEntries();
+        this._emitStackChanged();
     }
 
     /**
      * 重建条目列表 DOM（条目数量/增删时全量重建；输入修改走事件直改不重建）。
-     * 结构与 Comfy 生图节点同款节奏：标签在上、控件在下——
-     * 「lora」+ 文件下拉（可选空 = 此条不生效，故无需启用开关），
-     * 下方「模型强度」「CLIP强度」两个独立输入框（复用 comfy-param-pair）
+     * 结构与面板叠加区同款节奏：文件下拉（可选空 = 此条不生效）+ 启用
+     * 勾选框 + 删除钮，下方「模型强度」「CLIP强度」两个独立输入框
+     * （复用 comfy-param-pair）
      */
     renderEntries() {
         if (this.entries.length === 0) {
@@ -222,19 +261,13 @@ class LoraNode extends BaseCanvasNode {
         }
 
         this.entriesEl.innerHTML = this.entries.map((entry) => `
-            <div class="lora-entry" data-entry-id="${LumenLight.escapeHtml(entry.id)}">
+            <div class="lora-entry${entry.enabled === false ? ' is-off' : ''}" data-entry-id="${LumenLight.escapeHtml(entry.id)}">
                 <div class="image-gen-row">
                     <div class="image-gen-label">lora</div>
                     <div class="lora-entry-head">
-                        <select class="llm-model-select lora-file-select" title="LoRA 文件（选空则此条不生效）">
-                            <option value="" ${entry.file ? '' : 'selected'}>-- 选择 LoRA 文件 --</option>
-                            ${this.loraFiles.map((f) =>
-                                `<option value="${LumenLight.escapeHtml(f)}" ${f === entry.file ? 'selected' : ''}>${LumenLight.escapeHtml(f)}</option>`
-                            ).join('')}
-                            ${entry.file && !this.loraFiles.includes(entry.file)
-                                ? `<option value="${LumenLight.escapeHtml(entry.file)}" selected>${LumenLight.escapeHtml(entry.file)}</option>`
-                                : ''}
-                        </select>
+                        <div class="llm-model-select lora-file-select lfs-host" data-entry-id="${LumenLight.escapeHtml(entry.id)}" title="LoRA 文件（选空则此条不生效，点开看封面）"></div>
+                        <input type="checkbox" class="comfy-lora-enable-input"
+                               title="勾选后此条 LoRA 生效；取消勾选则提交时跳过（不影响已填的强度值）"${entry.enabled === false ? '' : ' checked'}>
                         <button type="button" class="lora-entry-delete" title="删除此 LoRA">✕</button>
                     </div>
                 </div>
@@ -254,6 +287,56 @@ class LoraNode extends BaseCanvasNode {
                 </div>
             </div>
         `).join('');
+
+        // LoRA 封面选择器初始化：挂载 div 冒充 select（class/data-entry-id
+        // 原样保留，change 委托与 e.target.value 零改动兼容）
+        this.entriesEl.querySelectorAll('.lfs-host').forEach((el) => {
+            const entry = this.entries.find((en) => en.id === el.dataset.entryId);
+            new LoraFileSelect(el, {
+                files: this.loraFiles,
+                value: entry ? entry.file : '',
+                allowEmpty: true,
+                emptyLabel: '-- 选择 LoRA 文件 --'
+            });
+        });
+
+        // 条目数量变化 → 节点高度自适应（添加 LoRA 自动长高、删除自动回缩）
+        this._autoFitHeight();
+    }
+
+    /**
+     * 内容自适应高度：量取内容自然高度直接写回 this.height 并应用变换——
+     * 添加 LoRA 节点自动长高、删除自动回缩，不出滚动条。
+     * 量测关键：临时解除 flex 收缩（form flex:1 1 0 + min-height:0 在
+     * auto 高容器里会塌缩成 0，直接量 scrollHeight 只剩固定件的高度，
+     * 节点永远不长高——上一版正是栽在这里），把表单与条目列表置为
+     * 内容尺寸后 el.scrollHeight 才是真实自然高度；world 布局下布局
+     * 像素=世界像素（transform 不影响布局）。下限为 _heightFloor
+     * （创建/存档时的高度），删除条目回缩到它为止
+     */
+    _autoFitHeight() {
+        const el = this.el;
+        if (!el || !el.isConnected) return;
+        const form = el.querySelector('.image-gen-form');
+        const list = this.entriesEl;
+        const prevH = el.style.height;
+        const prevForm = form ? form.style.flex : '';
+        const prevList = list.style.flex;
+        const prevListOv = list.style.overflowY;
+        el.style.height = 'auto';
+        if (form) form.style.flex = '0 0 auto';
+        list.style.flex = '0 0 auto';
+        list.style.overflowY = 'visible';
+        const natural = el.scrollHeight;
+        el.style.height = prevH;
+        if (form) form.style.flex = prevForm;
+        list.style.flex = prevList;
+        list.style.overflowY = prevListOv;
+        if (!natural) return;
+        const next = Math.max(natural, this._heightFloor || LoraNode.DEFAULT_HEIGHT);
+        if (next === this.height) return;
+        this.height = next;
+        this.updateTransform();
     }
 
     /**
@@ -271,18 +354,91 @@ class LoraNode extends BaseCanvasNode {
             this.lorasConnected = false;
             this.loraFiles = [];
         }
+        // 清单就绪后自动补归一（ADR 028 决策四）：离线期间投递的条目按
+        // 原路径入栈，清单到位后回扫唯一文件名匹配的条目就地更正
+        const healed = window.LoraSendPopup?.healEntries?.(this.entries, this.loraFiles);
+        if (healed > 0) {
+            console.info(`[LoRA节点] ${healed} 只历史条目已按 ComfyUI 清单自动更正路径`);
+            window.socket?.showNotification?.(`${healed} 只历史 LoRA 已自动更正为 ComfyUI 清单路径`, 4000);
+        }
         this.renderEntries();
+        // 清单就绪/补归一后通知触发词管理器：异步完成时存档恢复与连线
+        // 均已就绪，正好作为画布侧托管块的初始同步时机
+        this._emitStackChanged();
     }
 
     /**
      * 获取生效中的 LoRA 条目（提交注入用；供 ImagePipeline.collectLoras 消费）。
-     * 文件选空 = 此条不生效，因此无启用开关
+     * 文件选空或勾选框取消启用的条目不生效（enabled 缺省视为启用，兼容
+     * 未写该字段的旧存档；与面板 ComfyParamRows.getLoras 同语义）
      * @returns {Array<{file: string, strengthModel: number, strengthClip: number}>}
      */
     getEnabledLoras() {
         return this.entries
-            .filter((e) => e.file)
+            .filter((e) => e.file && e.enabled !== false)
             .map((e) => ({ file: e.file, strengthModel: e.strengthModel, strengthClip: e.strengthClip }));
+    }
+
+    /**
+     * 内容缩放系数钉死为 4.0，与 Comfy 生图节点同款字号（其 design 布局
+     * 下 ns = 2048/512 = 4.0 恒定）。基类按 min(宽,高)/DESIGN_BASE 计算——
+     * 本节点高度随条目自适应增长，跟随计算会让字号越加越大（实测
+     * 多条目时 4.0 → 6.7+，用户看到的「太粗」即此），必须与高度解耦
+     * @returns {number}
+     */
+    get ns() {
+        return LoraNode.CONTENT_NS;
+    }
+
+    /**
+     * 链上上游提示词节点（触发词块的写入目标候选）。复用
+     * ImagePipeline.collectUpstreamPromptNodes 的遍历语义：从本节点沿入边
+     * 向上 BFS、穿过提示词/LoRA 节点，输出"离本节点由远到近"——
+     * 末位即最近的一个，作为默认写入目标
+     * @returns {Object[]} 提示词节点数组（无上游提示词时为空数组）
+     */
+    getUpstreamPromptNodes() {
+        return this._pipeline().collectUpstreamPromptNodes(this.id);
+    }
+
+    /**
+     * 按 id 查画布对象（提示词节点等；canvas.images.images 实为
+     * 全画布对象数组——图片与节点混存，ImagePipeline 同源约定）
+     * @param {string} id
+     * @returns {Object|undefined}
+     */
+    findCanvasObject(id) {
+        return (this.canvas.images.images || []).find((o) => o.id === id);
+    }
+
+    /** 构建管线实例（与 ComfyGenNode._pipeline 同策略：每次新建保证最新连线） */
+    _pipeline() {
+        return new ImagePipeline(
+            this.canvas.connections.connections,
+            this.canvas.images.images
+        );
+    }
+
+    /**
+     * 本节点条目/文件变化通知（LoraTriggerManager 监听）：触发词托管块
+     * 按本节点语境幂等重算。监听方做存活校验，节点删除后的残留事件无害
+     */
+    _emitStackChanged() {
+        document.dispatchEvent(new CustomEvent('lumen-lora-node-changed', {
+            detail: { node: this }
+        }));
+    }
+
+    /**
+     * 销毁（节点删除/撤销重建）：先通知触发词管理器把本节点的托管块从
+     * 目标提示词节点摘除并清书签（撤销删除重建节点时构造链路会自动
+     * 重新同步回来），再走基类清理
+     */
+    destroy() {
+        document.dispatchEvent(new CustomEvent('lumen-lora-node-removed', {
+            detail: { node: this }
+        }));
+        super.destroy();
     }
 
     // ==================== 存档 ====================
@@ -320,13 +476,14 @@ class LoraNode extends BaseCanvasNode {
 
 // ==================== 类常量 ====================
 // DEFAULT_* 为节点默认尺寸（world 布局，world 坐标）；布局常量继承自基类。
-// 内容字号/间距随 --ns 缩放：本节点覆写 DESIGN_BASE 为 384，
-// 使 ns = min(2048, 1536) / 384 = 4.0，与 Comfy 生图节点（2048/512 = 4.0）
-// 的排版完全一致——否则同为 2048 宽时本节点字号会小 25%
-LoraNode.DESIGN_BASE = 384;
+// 内容缩放不走基类 min(宽,高)/DESIGN_BASE（高度自适应会带动字号漂移），
+// 钉死在本类 CONTENT_NS（覆写 get ns()）；DESIGN_BASE 仅保留基类接口缺省
+LoraNode.CONTENT_NS = 4.0;        // 内容缩放：与 Comfy 生图节点（2048/512=4.0）同款字号
+LoraNode.DESIGN_BASE = 512;
 LoraNode.DEFAULT_WIDTH = 2048;    // 与提示词节点同宽量级
 LoraNode.DEFAULT_TITLE = 'LoRA Stack'; // 默认标题（双击标题可自定义）
-LoraNode.DEFAULT_HEIGHT = 1536;   // 纵向留多条条目的空间，超出由列表区滚动
+LoraNode.DEFAULT_HEIGHT = 1536;   // 创建时的高度兼自适应下限（_heightFloor）；
+                                  // 条目超出时节点自动长高（_autoFitHeight）
 
 // 将类暴露到全局作用域
 window.LoraNode = LoraNode;

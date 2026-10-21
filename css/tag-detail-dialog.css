@@ -114,13 +114,21 @@
     margin-top: 12px;
 }
 
-/* 提示词标题行：左侧"提示词"文字 + 右侧 Copy 按钮；
-   与上方参考图槽位拉开同样距离（8 gap + 12 = 20px） */
+/* 提示词标题行：左侧"提示词"文字 + 右侧按钮组（Copy 左移让位，「写入」
+   占右角）；与上方参考图槽位拉开同样距离（8 gap + 12 = 20px） */
 .tag-detail-prompt-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     margin-top: 12px;
+}
+
+/* 标题行右侧按钮组：Copy + 写入（写入是 LumenDropdown 触发器，文案/箭头
+   由预制件管理，宿主只管外观） */
+.tag-detail-prompt-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 /* "名字" / "模型" / "提示词" 标签文字 */
@@ -346,8 +354,11 @@
     background: rgba(255, 255, 255, 0.18);
 }
 
-/* Copy 按钮：透明底，成功后变绿 */
-.tag-detail-copy-btn {
+/* Copy / 写入按钮：同款小胶囊（写入按钮兼作 LumenDropdown 触发器，其
+   button.lumen-dd-trigger 默认透明底无边框——挂 .tag-detail-prompt-actions
+   前缀抬权重盖掉；成功后变绿两钮共用 is-copied） */
+.tag-detail-prompt-actions .tag-detail-copy-btn,
+.tag-detail-prompt-actions .tag-detail-write-btn {
     padding: 4px 12px;
     border: 0;
     border-radius: 6px;
@@ -357,13 +368,20 @@
     cursor: pointer;
 }
 
-.tag-detail-copy-btn:hover {
+.tag-detail-prompt-actions .tag-detail-copy-btn:hover,
+.tag-detail-prompt-actions .tag-detail-write-btn:hover {
     background: rgba(255, 255, 255, 0.18);
 }
 
-.tag-detail-copy-btn.is-copied {
+.tag-detail-prompt-actions .is-copied {
     background: #22c55e;
     color: #fff;
+}
+
+/* 「写入」下拉菜单（挂 body、fixed 定位）：lumen-dropdown.css 默认 z 1200
+   会被本弹窗遮罩（1500）压住——抬到 1600，高于详情弹窗、仍低于灯箱（2000） */
+.tag-detail-menu {
+    z-index: 1600;
 }
 
 /* 提示词多行编辑框：占据面板剩余高度 */

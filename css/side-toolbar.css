@@ -15,8 +15,9 @@
     top: 50%;                      /* 垂直居中 */
     transform: translateY(-50%);   /* 配合 top:50% 实现垂直居中 */
     width: 48px;                   /* 宽度 48 像素 */
-    height: 160px;                 /* 高度 160 像素 */
-    box-sizing: border-box;        /* 让 padding 计入 60×200 尺寸内 */
+    /* 高度自适应按钮数（上传/资产库/任务中心/移开被遮挡共 4+ 个，
+       曾固定 160px——第 4 个按钮溢出裁切） */
+    box-sizing: border-box;        /* 让 padding 计入尺寸内 */
     background-color: rgba(27, 28, 33, 0.80); /* 深色背景，透明度与图片工具栏一致 */
     backdrop-filter: blur(10px);    /* 毛玻璃效果，与图片工具栏一致 */
     -webkit-backdrop-filter: blur(10px); /* Safari/Chrome 兼容前缀 */

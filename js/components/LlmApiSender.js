@@ -195,14 +195,31 @@ class LlmApiSender {
             thinkingEl.parentElement.classList.remove('thinking');
 
             if (response.ok && result.status === 'ok' && result.imageUrl) {
+                // 生成参数记录（溯源/生成同款）：positive 存原始提示词（不含
+                // 风格模板——重放时按当前启用状态重新拼接），随拖拽落画布
+                // 盖章、随图块进 _genParams（F5 恢复重绑后拖出仍带记录）。
+                // 无画布来源节点（sourceNodeId=null）= 聊天窗口来源，
+                // 回填由 GenReplay 走聊天窗口路径
+                const genInfo = window.GenRecord ? GenRecord.forApi({
+                    positive: prompt,
+                    model,
+                    provider: selection.provider,
+                    size: effectiveSize,
+                    quality,
+                    ratio,
+                    tier,
+                    refCount: images.length,
+                    sourceTitle: '聊天窗口',
+                    node: null
+                }) : null;
                 const img = document.createElement('img');
                 img.className = 'llm-msg-image';
                 img.src = result.imageUrl;
                 img.alt = '生成的图片';
                 img.onclick = () => chat.lightbox.open(result.imageUrl);
-                LlmImageDrag.attach(img, { prompt });
+                LlmImageDrag.attach(img, { prompt, genInfo });
                 // 用"图片 + 操作栏"块整体替换占位气泡，不残留空文本气泡
-                const block = this.buildGeneratedImageBlock(img, { prompt, images, ratio, tier, quality });
+                const block = this.buildGeneratedImageBlock(img, { prompt, images, ratio, tier, quality, genInfo });
                 thinkingEl.parentElement.replaceWith(block);
 
                 // 不加入历史，因为图像生成不支持多轮对话
@@ -262,7 +279,9 @@ class LlmApiSender {
     /**
      * 构造生成图片的完整展示块：图片（含悬停删除）+ 底部操作栏
      * @param {HTMLImageElement} imgEl - 已绑定灯箱/拖拽事件的图片元素
-     * @param {Object} requestParams - 原始请求参数 { prompt, images, ratio, tier, quality }，供重新生成复用
+     * @param {Object} requestParams - 原始请求参数 { prompt, images, ratio,
+     *   tier, quality, genInfo? }，供重新生成复用（genInfo 为生成参数记录，
+     *   随块进 _genParams 持久化，F5 恢复重绑后拖出画布仍带记录）
      * @returns {HTMLDivElement} 展示块容器
      */
     buildGeneratedImageBlock(imgEl, requestParams) {

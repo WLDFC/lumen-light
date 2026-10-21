@@ -298,7 +298,7 @@ function createLlmRouter({ dataDir }) {
 
             // 挑选协议适配器并执行（适配器失败时抛带可读 message 的错误，
             // 由下方 catch 统一回传前端）
-            const adapter = pickImageAdapter({ model, imageList });
+            const adapter = pickImageAdapter({ model, imageList, provider: { name: providerName, config } });
             const result = await adapter.run({
                 model,
                 prompt,

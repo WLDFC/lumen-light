@@ -1,0 +1,53 @@
+/**
+ * 通用右键菜单预制件样式（lumen-context-menu.css）
+ *
+ * 作用：LumenContextMenu 组件的视觉——光标处 fixed 菜单（深色面板、
+ *       圆角、阴影），条目悬停提亮，危险项悬停转红。
+ *
+ * 配色遵循项目深色主题色板：
+ *   面板 #1b1c21，边框 rgba(128,128,128,0.3)，删除红 #ef4444。
+ *
+ * 使用方：js/components/LumenContextMenu.js（收藏页卡片右键、LoRA 卡片右键）
+ */
+
+/* fixed 菜单：JS 按 clientX/Y 定位并做视口内回退 */
+.lumen-ctx-menu {
+    position: fixed;
+    z-index: 1250;   /* 高于收藏/LoRA 弹窗 1200 与弹窗内遮罩 1210，低于灯箱 2000 */
+    display: none;
+    min-width: 150px;
+    padding: 6px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.lumen-ctx-menu.is-open {
+    display: block;
+}
+
+.lumen-ctx-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.lumen-ctx-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* 危险项（删除）悬停转红 */
+.lumen-ctx-item.is-danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}

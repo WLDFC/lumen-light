@@ -187,7 +187,9 @@ class LlmHistoryController {
         chat.messagesEl.querySelectorAll('.llm-msg-image').forEach((img) => {
             const genParams = genParamsOf(img.closest('.llm-gen-block'));
             img.addEventListener('click', () => chat.lightbox.open(img.src));
-            LlmImageDrag.attach(img, genParams ? { prompt: genParams.prompt || '' } : {});
+            LlmImageDrag.attach(img, genParams
+                ? { prompt: genParams.prompt || '', genInfo: genParams.genInfo || null }
+                : {});
         });
 
         // 图片删除按钮（悬停 ×）

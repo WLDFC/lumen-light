@@ -28,7 +28,11 @@ const LumenLight = {
         connectionDotRadius: 5,       // 端口圆点半径
         connectionDotGap: 5,          // 圆点与图片边缘的固定间距（需求：5 像素）
         connectionDotHitPadding: 4,   // 端口圆点命中容差（小圆点更易抓取）
-        connectionLineWidth: 2.5,       // 连线线宽
+        connectionLineWidth: 14,        // 连线线宽（世界坐标：随画布等比缩放，与内容相对粗细恒定——
+                                        //   同 Daily Driver 的 SVG-in-scaled-container 方案；
+                                        //   用户常用低缩放，2026-11 定为 14）
+        connectionMinScreenWidth: 0,   // 线宽屏幕下限（0=关闭，纯等比；上一档 1.5 曾致低缩放段
+                                        //   相对变粗，与 DD 观感不符）
         connectionHitTolerance: 12    // 连线点击命中容差（用于点击断开，屏幕像素）
     },
     
@@ -109,6 +113,36 @@ const LumenLight = {
     },
 
     /**
+     * 按名称纯识别视频生成模型（type=auto/未标记时的共享口径）。
+     * 关键词清单与 LlmVideoGen.isVideoModel 的自动识别分支同源
+     * @param {string} modelId - 纯模型 ID（不含厂商复合键）
+     * @returns {boolean}
+     */
+    looksLikeVideoModel(modelId) {
+        const keywords = ['seedance', 'video', 'i2v', 't2v', 'kling', 'runway', 'pika', 'minimax'];
+        const lower = String(modelId || '').toLowerCase();
+        return keywords.some((k) => lower.includes(k));
+    },
+
+    /**
+     * 模型用途分类——LLM 窗口三分类（Agent/图片生成/视频生成）与画布
+     * API 生图节点、GenInfoPopup 模型清单共用的统一口径：
+     * 手动类型标记优先（image/video/chat），auto/未标记按关键词自动识别
+     * （视频先于图像判定，与 LlmChat.loadModels 的归类顺序一致）。
+     * @param {{id: string, type?: string}} model - collectConfiguredModels 条目
+     * @returns {'image'|'video'|'chat'}
+     */
+    classifyModel(model) {
+        if (model?.type === 'image') return 'image';
+        if (model?.type === 'video') return 'video';
+        if (model?.type === 'chat') return 'chat';
+        const id = String(model?.id || '');
+        if (LumenLight.looksLikeVideoModel(id)) return 'video';
+        if (LumenLight.looksLikeImageModel(id)) return 'image';
+        return 'chat';
+    },
+
+    /**
      * 聚合所有「已配置」（有端点和 Key）厂商的模型列表。
      * 多厂商并存的前端基础：对话/生图/技能的模型下拉框都从这里取数据，
      * 请求时显式携带厂商名，后端直接路由到对应厂商（见 routes/llm.js）。
@@ -137,6 +171,9 @@ const LumenLight = {
             providerCount++;
             const list = Array.isArray(config.models) ? config.models : [];
             for (const entry of list) {
+                // 模型行开关关闭（enabled === false）的模型全局隐藏：
+                // 所有下拉（对话/生图/视频/技能栏）一律不出现
+                if (typeof entry === 'object' && entry && entry.enabled === false) continue;
                 const id = typeof entry === 'string' ? entry : entry?.id;
                 if (!id) continue;
                 const key = LumenLight.modelKey(name, id);

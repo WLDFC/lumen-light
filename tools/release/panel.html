@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>LumenLight 发版面板</title>
+<style>
+  :root {
+    --bg: #0d0d10; --panel: #16161a; --border: #2a2a30; --text: #e8e8ea;
+    --dim: #8a8a92; --accent: #4a7dff; --green: #2ea043; --red: #e5534b; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 22px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .kv { color: var(--dim); font-size: 13px; }
+  .kv b { color: var(--text); font-weight: 600; }
+  .ver { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 99px; font-size: 12px; border: 1px solid var(--border); }
+  .badge.ok { color: #7ee28a; border-color: #2ea04355; }
+  .badge.warn { color: #f0c674; border-color: #d2992255; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 18px; font-size: 14px; cursor: pointer; font-family: inherit;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:disabled { background: #33343a; color: #77787f; cursor: not-allowed; }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .progress { height: 8px; background: #26262c; border-radius: 99px; overflow: hidden; margin: 10px 0 4px; display: none; }
+  .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #4a7dff, #7aa2ff); transition: width .4s; }
+  pre.log {
+    background: #101014; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; margin: 12px 0 0; max-height: 340px; overflow: auto;
+    font: 12px/1.7 Consolas, monospace; color: #b9bac2; white-space: pre-wrap; word-break: break-all;
+    display: none;
+  }
+  .dirty-list { color: var(--warn); font-size: 12px; margin-top: 8px; white-space: pre-line; line-height: 1.8; }
+  .hint { color: var(--dim); font-size: 12px; margin-top: 10px; }
+  a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>LumenLight 发版面板</h1>
+  <div class="sub">打包更新包 → 上传 GitHub Release（凭据取自本机 git 凭据管理器）· <a href="http://localhost:8080/" target="_blank">工作台(8080)</a></div>
+
+  <div class="card">
+    <div class="row">
+      <span class="ver" id="ver">--</span>
+      <span class="badge" id="dirtyBadge">检查中…</span>
+      <span style="flex:1"></span>
+      <button class="ghost" id="btnRefresh">刷新状态</button>
+    </div>
+    <div class="dirty-list" id="dirtyList" style="display:none"></div>
+    <div class="hint" id="packInfo"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="btnPack">① 打包更新包</button>
+      <button id="btnUpload" disabled>② 上传更新包（<span id="tagText">--</span>）</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnPackFull" class="ghost">③ 打包完整安装包（慢，含运行时）</button>
+      <button id="btnUploadFull" class="ghost" disabled>④ 上传完整安装包</button>
+      <a id="relLink" href="#" target="_blank" style="display:none;font-size:13px">查看 Release 页 ↗</a>
+    </div>
+    <div class="progress" id="prog"><i id="progBar"></i></div>
+    <div class="hint" id="progText"></div>
+    <pre class="log" id="log"></pre>
+  </div>
+
+  <div class="card">
+    <div class="hint" style="margin:0">
+      流程提醒：改 <b>package.json</b> 的 version → VS Code 提交推送 → 打包 → 上传。<br>
+      <b>更新包</b>（几 MB）：只含代码清单，日常发版用——不含 data/save/tag 用户数据与 runtime/pi/models 大文件；<br>
+      <b>完整安装包</b>（数百 MB）：给新用户的解压即用包 = 更新包范围 + runtime/pi/models/node_modules/Real-ESRGAN，只在依赖或运行时变更时重打。
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const logEl = $('log');
+  let version = '';
+
+  // 防呆：以 file:// 双击打开时接口必然不可达，直接指路正确入口
+  if (location.protocol === 'file:') {
+    $('ver').textContent = '打开方式不对';
+    const badge = $('dirtyBadge');
+    badge.textContent = '本页面需经后端服务打开：http://localhost:8080/tools/release/panel.html';
+    badge.className = 'badge warn';
+    $('btnPack').disabled = true;
+    return;
+  }
+
+  function logLine(text) {
+    logEl.style.display = 'block';
+    logEl.textContent += text + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function setBusy(b) {
+    for (const id of ['btnPack', 'btnUpload', 'btnPackFull', 'btnUploadFull']) $(id).disabled = b;
+    if (!b) refresh();
+  }
+
+  async function pack(full) {
+    setBusy(true);
+    logEl.textContent = '';
+    logLine(full ? '正在打包完整安装包（大目录多文件，可能要几分钟）…' : '正在打包更新包…');
+    $('prog').style.display = 'block';
+    $('progBar').style.width = '0%';
+    $('progText').textContent = '打包中…';
+    try {
+      const r = await fetch('/api/release-tools/package' + (full ? '?full=1' : ''), { method: 'POST' });
+      const j = await r.json();
+      (j.output || []).forEach(logLine);
+      logLine(j.ok ? '—— 打包完成 ——' : '—— 打包失败 ——');
+      $('progText').textContent = j.ok ? '✓ 打包完成' : '✗ 打包失败';
+    } catch (e) {
+      logLine('[请求异常] ' + e.message);
+      $('progText').textContent = '✗ 请求异常';
+    }
+    setBusy(false);
+  }
+
+  function upload(full) {
+    if (!version) return;
+    setBusy(true);
+    logEl.textContent = '';
+    $('prog').style.display = 'block';
+    $('progBar').style.width = '0%';
+    $('progText').textContent = '连接上传通道…';
+    const es = new EventSource('/api/release-tools/upload?tag=v' + encodeURIComponent(version) + (full ? '&full=1' : ''));
+    es.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === 'line') {
+        logLine(m.text);
+        // 工具输出的进度行（\r 多帧累积在同一消息里，取最后一帧）：
+        //   已传 12.3/45.6 MB（27.0%，8.12 MB/s）
+        const frames = [...m.text.matchAll(/已传 ([\d.]+)\/([\d.]+) MB（([\d.]+)%/g)];
+        if (frames.length) {
+          const last = frames[frames.length - 1];
+          $('progBar').style.width = Math.min(parseFloat(last[3]), 100) + '%';
+          $('progText').textContent = '已传 ' + last[1] + ' / ' + last[2] + ' MB';
+        }
+        if (/^上传\s/.test(m.text)) $('progText').textContent = m.text.trim();
+      } else if (m.type === 'done') {
+        logLine('—— ' + m.text + ' ——');
+        $('progBar').style.width = '100%';
+        $('progText').textContent = '✓ ' + m.text;
+        es.close(); setBusy(false);
+      } else if (m.type === 'error') {
+        logLine('[错误] ' + m.text);
+        $('progText').textContent = '✗ ' + m.text;
+        es.close(); setBusy(false);
+      }
+    };
+    es.onerror = () => {
+      logLine('[连接中断] 上传可能仍在后台进行，稍后重新点「上传」即可（同名附件自动覆盖）。');
+      $('progText').textContent = '连接中断';
+      es.close(); setBusy(false);
+    };
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/release-tools/status');
+      const s = await r.json();
+      version = s.version;
+      $('ver').textContent = 'v' + (version || '?');
+      $('tagText').textContent = 'v' + version;
+      const dirty = s.dirty || [];
+      const badge = $('dirtyBadge');
+      if (dirty.length) {
+        badge.textContent = '工作区有未提交改动（' + dirty.length + '）';
+        badge.className = 'badge warn';
+        $('dirtyList').style.display = 'block';
+        // git porcelain 状态码 → 人话（XY 两字母：X=暂存区，Y=工作区）
+        const CODES = { M: '修改', A: '新增', D: '删除', R: '重命名', C: '复制', '?': '未跟踪', '!': '忽略' };
+        const pretty = dirty.slice(0, 20).map((line) => {
+          const p = line.slice(3);
+          const x = line[0], y = line[1];
+          const xy = (x === '?' || x === '!') ? x : ((x !== ' ' ? x : '') + (y !== ' ' ? y : ''));
+          const label = [...new Set(xy.split('').map((c) => CODES[c] || c))].join('+') || '修改';
+          return '【' + label + '】' + p;
+        });
+        $('dirtyList').textContent = pretty.join('\n') + (dirty.length > 20 ? '\n…（其余 ' + (dirty.length - 20) + ' 项略）' : '');
+      } else {
+        badge.textContent = '工作区干净';
+        badge.className = 'badge ok';
+        $('dirtyList').style.display = 'none';
+      }
+      const zip = (s.files || []).find((f) => f.name === 'lumen-update.zip');
+      const full = s.fullZip;
+      const parts = [];
+      if (zip && zip.exists) {
+        parts.push('更新包 ' + (zip.size / 1048576).toFixed(2) + ' MB，打包版本 v' + (s.packagedVersion || '?') +
+          (s.packagedVersion && s.packagedVersion !== version ? '（与当前版本不一致，建议重新打包）' : ''));
+        $('btnUpload').disabled = false;
+      } else {
+        $('btnUpload').disabled = true;
+      }
+      if (full) {
+        parts.push('完整包 ' + full.name + '（' + (full.size / 1048576).toFixed(0) + ' MB）');
+        $('btnUploadFull').disabled = false;
+      } else {
+        $('btnUploadFull').disabled = true;
+      }
+      $('packInfo').textContent = parts.length ? 'dist 已有产物：' + parts.join('；') : 'dist 暂无产物，请先打包。';
+    } catch (e) {
+      $('ver').textContent = '加载失败';
+      const badge = $('dirtyBadge');
+      badge.textContent = '后端未连上：' + e.message + '（后端重启中会这样，几秒后自动重试）';
+      badge.className = 'badge warn';
+      setTimeout(refresh, 4000);
+    }
+  }
+
+  $('btnRefresh').onclick = refresh;
+
+  $('btnPack').onclick = () => pack(false);
+  $('btnPackFull').onclick = () => pack(true);
+  $('btnUpload').onclick = () => upload(false);
+  $('btnUploadFull').onclick = () => upload(true);
+
+  refresh();
+})();
+</script>
+</body>
+</html>

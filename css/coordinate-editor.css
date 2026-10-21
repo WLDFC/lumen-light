@@ -1,0 +1,763 @@
+/**
+ * ==========================================================================
+ * 坐标编辑器样式（CoordinateEditor 专用）
+ * ==========================================================================
+ * 窗口壳复用 recipe-manager.css 的 recipe-dialog 全屏弹窗骨架
+ * （recipe-dialog-panel / header / close），本档只补内部排布：
+ *   - coord-dialog 并排窗口壳：右缘留白（--coord-gap）露出 Comfy/LLM 面板
+ *     同屏操作，拖拽手柄可调；窄屏（<1500px）媒体查询回落全屏模态
+ *   - coord-body：左侧设置面板（coord-side）+ 中央画布舞台（coord-stage）
+ *     + 右侧输出面板（coord-out-side，与左栏同宽）
+ *   - coord-side 左栏：整体描述（coord-sec-summary）与元素卡片列表
+ *     （coord-item）按 2:1 分摊剩余高度，元素列表内部滚动
+ *   - coord-out-side 右栏：画幅/模式三选置顶（设一次不常动，迁来给左栏
+ *     描述腾地方）+ AI 文案与编译 JSON 共用输出框（coord-sec-ai-out flex:1）
+ *   - coord-footer：AI 写提示词 / 模型·技能下拉 / 编译 / 复制 / 写入面板 / 新建
+ * 配色沿用项目色板：边框 rgba(128,128,128,.3)、输入底 #1b1c21、
+ * 悬浮蓝 rgba(120,170,255,*)，磁吸粉线与 StudioMoveTool 同款 #ff7ab8。
+ * 加载顺序：须在 recipe-manager.css 之后（本档不覆盖其规则，仅并存）。
+ * ==========================================================================
+ */
+
+/* ==================== 头部补充：状态文字 ==================== */
+
+.coord-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.coord-status {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 480px;
+}
+.coord-status.is-error {
+    color: #ff8080;
+}
+
+/* ==================== 并排窗口壳：右缘留白给 Comfy/LLM 面板 ==================== */
+
+/* 覆盖 recipe-dialog 的 inset:0 右缘——弹窗锚左，右侧留出 --coord-gap 像素
+   露出下层应用（画布右侧的提示词/LLM 面板），可同时操作编辑器与面板。
+   宽屏（≥1500px）生效；默认留白由编辑器按面板实际宽度对齐（见
+   _defaultGap），拖拽右缘可调并存 localStorage */
+.coord-dialog {
+    right: var(--coord-gap, 552px);
+    /* 高度对齐右侧面板：prompt-panel-container 为 top:5/bottom:5 固定定位，
+     这里的上下留边必须与它同值（改面板留边时同步此处） */
+    padding-top: 5px;
+    padding-bottom: 5px;
+    /* 左留边同为 5px：recipe-dialog 基类的 24px 会在左缘露一条遮罩带，
+     与右侧面板距窗缘的 5px 不对称（用户视觉反馈） */
+    padding-left: 5px;
+    /* 右侧零留白：内层面板右边线即弹窗边界——保留壳的 24px 右 padding
+       会露出一条深色遮罩带（形似粗阴影）夹在面板与露出区之间 */
+    padding-right: 0;
+}
+
+/* 右缘拖拽手柄：悬停/拖拽高亮。并排形态下弹窗右 padding 为 0，
+   手柄贴内层面板（recipe-dialog-panel，用户看到的窗口边线）右缘即可 */
+.coord-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 9px;
+    cursor: col-resize;
+    touch-action: none;
+    z-index: 5;
+}
+.coord-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 2px;
+    width: 3px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.15s;
+}
+.coord-resize-handle:hover::after,
+.coord-resize-handle.dragging::after {
+    background: rgba(120, 170, 255, 0.55);
+}
+
+/* 窄屏回落全屏（三栏编辑器 + 侧面板放不下，恢复模态形态） */
+@media (max-width: 1499px) {
+    .coord-dialog {
+        right: 0;
+    }
+    .coord-resize-handle {
+        display: none;
+    }
+}
+
+/* ==================== 主体：左面板 + 舞台 ==================== */
+
+.coord-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.coord-side {
+    width: 308px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    padding: 14px;
+    overflow-y: auto;
+    border-right: 1px solid rgba(128, 128, 128, 0.25);
+    /* 纵排 flex：左栏「整体描述」自适应吃掉画幅/模式迁出后的剩余高度
+       （coord-sec-summary flex:1）；右栏本就纵排，同规则共用 */
+    display: flex;
+    flex-direction: column;
+}
+
+/* 右侧输出面板：与左栏同宽同款滚动（窄屏适配随 .coord-side 一起缩）；
+   border 换到左侧——它在舞台右边。AI 文案区占满剩余高度，编译 JSON 固定在底部 */
+.coord-out-side {
+    border-right: none;
+    border-left: 1px solid rgba(128, 128, 128, 0.25);
+    display: flex;
+    flex-direction: column;
+}
+
+.coord-sec-ai-out {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 14px;
+}
+
+.coord-out-note {
+    color: rgba(255, 255, 255, 0.28);
+    font-size: 11px;
+}
+
+/* AI 文案留档：只读、随区滚动（与 coord-summary 同款观感，不可拉伸） */
+.coord-ai-out {
+    flex: 1;
+    min-height: 120px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: #1b1c21;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12.5px;
+    line-height: 1.5;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+}
+.coord-ai-out:focus {
+    border-color: rgba(120, 170, 255, 0.55);
+}
+
+.coord-sec {
+    margin-bottom: 18px;
+    flex-shrink: 0;   /* 纵排 flex 面板里各节不被压缩（只有 summary 弹性伸缩） */
+}
+
+.coord-sec-title {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+}
+.coord-dim-note {
+    color: rgba(255, 255, 255, 0.28);
+    font-size: 11px;
+}
+
+/* ---- 画幅：宽/高输入 + 预设下拉 ---- */
+
+.coord-dims {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.coord-dim-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.coord-dim-field input,
+.coord-preset {
+    height: 30px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+}
+.coord-dim-field input {
+    width: 72px;
+    font-family: Consolas, 'Courier New', monospace;
+}
+.coord-dim-field input:focus,
+.coord-preset:focus {
+    border-color: rgba(120, 170, 255, 0.55);
+}
+.coord-preset {
+    flex: 1;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+}
+
+/* ---- 模式三选（分段按钮）+ 模式说明 ---- */
+
+.coord-modes {
+    display: flex;
+    gap: 6px;
+}
+
+.coord-mode-btn {
+    flex: 1;
+    height: 30px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.coord-mode-btn:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.35);
+}
+.coord-mode-btn.active {
+    background: rgba(120, 170, 255, 0.16);
+    border-color: rgba(120, 170, 255, 0.55);
+    color: #fff;
+}
+
+.coord-mode-desc {
+    margin-top: 7px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+/* ---- 整体描述 ----
+   画幅/模式迁去右栏后，本节是左栏第一节：与元素区按 2:1 分摊剩余高度
+   （描述约占扩张部分的三分之二），元素多时回落 min-height */
+
+.coord-sec-summary {
+    flex: 2 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.coord-summary {
+    flex: 1;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 96px;
+    padding: 8px 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.5;
+    font-family: inherit;
+    resize: none;   /* 尺寸由 flex 接管，手动拉伸与它打架 */
+    outline: none;
+}
+.coord-summary:focus {
+    border-color: rgba(120, 170, 255, 0.55);
+}
+.coord-summary::placeholder,
+.coord-item-caption::placeholder,
+.coord-item-text::placeholder,
+.coord-item-title::placeholder,
+.coord-ai-out::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+}
+
+/* ---- 元素卡片列表 ----
+   与整体描述按 1:2 分摊剩余高度：列表内部滚动，「添加元素」钉在本节底 */
+
+.coord-sec-items {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.coord-sec-items .coord-items {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.coord-sec-items .coord-add-item {
+    flex-shrink: 0;
+}
+
+.coord-item-count {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.coord-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.coord-item {
+    border: 1px solid rgba(128, 128, 128, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 8px 10px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.coord-item:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+.coord-item.selected {
+    border-color: rgba(120, 170, 255, 0.6);
+    background: rgba(120, 170, 255, 0.06);
+}
+
+.coord-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 7px;
+}
+
+.coord-item-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.coord-item-num {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    min-width: 10px;
+}
+
+.coord-item-label {
+    height: 26px;
+    padding: 0 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+}
+
+/* 景别下拉（编辑器侧辅助：选了把词织进描述，编译前剥离） */
+.coord-item-shot {
+    height: 26px;
+    max-width: 78px;
+    padding: 0 4px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 6px;
+    background: rgba(27, 28, 33, 0.7);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+}
+
+.coord-item-del {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+}
+.coord-item-del:hover {
+    color: #ff8080;
+    background: rgba(255, 128, 128, 0.1);
+}
+
+/* 图层顺序按钮（LumenDropdown 图标按钮模式接管内部结构，外壳同删除钮；
+   无 margin-left——紧挨删除钮，删除钮的 auto margin 把两个都推到行尾）。
+   组件的 .lumen-dd-icon-btn 默认 34×32（LoRA 管理器工具行尺寸），此处
+   压回与折叠/删除钮同规格：24×24 透明底无边框，图标 13px 对齐邻钮 */
+.coord-item-layer {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+.coord-item-layer.lumen-dd-icon-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+}
+.coord-item-layer.lumen-dd-icon-btn .lumen-dd-icon {
+    width: 13px;
+    height: 13px;
+}
+/* 菜单展开中：保持透明壳（组件的三类选择器会盖回面板底色+蓝框） */
+.coord-item-layer.lumen-dd-icon-btn.lumen-dd-open {
+    background: rgba(120, 170, 255, 0.12);
+    border: none;
+    color: #cfe4ff;
+}
+
+/* 折叠开关（外壳同图层钮，收起态箭头转向右）：
+   卡片默认折叠只露头部行+标题框，描述/文字/坐标行隐藏 */
+.coord-item-fold {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+.coord-item-fold:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* 眼睛钮（隐藏/显示舞台框）：auto margin 从删除钮移到此处，
+   眼睛+删除成对贴行尾；隐藏框的卡片圆点/编号变暗示意 */
+.coord-item-eye {
+    margin-left: auto;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+.coord-item-eye:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+.coord-item.is-hidden .coord-item-dot,
+.coord-item.is-hidden .coord-item-num,
+.coord-item.is-hidden .coord-item-title {
+    opacity: 0.35;
+}
+.coord-item-fold svg {
+    transition: transform 0.15s ease;
+}
+.coord-item.collapsed .coord-item-fold svg {
+    transform: rotate(-90deg);
+}
+.coord-item.collapsed .coord-item-caption,
+.coord-item.collapsed .coord-item-text,
+.coord-item.collapsed .coord-item-bbox {
+    display: none;
+}
+.coord-item-layer:hover,
+.coord-item-layer.lumen-dd-open {
+    color: #cfe4ff;
+    background: rgba(120, 170, 255, 0.12);
+}
+
+/* 图层动作菜单（挂 body）：窄选项不换行 */
+.coord-layer-menu {
+    min-width: 170px;
+}
+
+.coord-item-caption {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 12.5px;
+    line-height: 1.45;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+    margin-bottom: 6px;
+}
+.coord-item-caption:focus,
+.coord-item-title:focus,
+.coord-item-text:focus,
+.coord-bbox-n:focus {
+    border-color: rgba(120, 170, 255, 0.55);
+}
+
+/* 框标题输入（编辑器侧元数据：舞台标签显示，编译前剥离） */
+.coord-item-title {
+    width: 100%;
+    box-sizing: border-box;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 12.5px;
+    outline: none;
+    margin-bottom: 6px;
+}
+
+.coord-item-text {
+    width: 100%;
+    box-sizing: border-box;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 12.5px;
+    outline: none;
+    margin-bottom: 6px;
+}
+
+.coord-item-bbox {
+    display: flex;
+    gap: 4px;
+}
+.coord-bbox-n {
+    width: 0;
+    flex: 1;
+    height: 26px;
+    padding: 0 5px;
+    box-sizing: border-box;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 5px;
+    background: rgba(27, 28, 33, 0.7);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11.5px;
+    font-family: Consolas, 'Courier New', monospace;
+    outline: none;
+}
+
+.coord-add-item {
+    width: 100%;
+    height: 32px;
+    margin-top: 2px;
+    border: 1px dashed rgba(128, 128, 128, 0.4);
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.coord-add-item:hover {
+    border-color: rgba(120, 170, 255, 0.55);
+    color: #fff;
+    background: rgba(120, 170, 255, 0.06);
+}
+
+/* ---- 中央舞台 ---- */
+
+.coord-stage-wrap {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    background: #141519;
+    overflow: hidden;
+}
+
+.coord-stage {
+    position: absolute;
+    inset: 0;
+    display: block;
+    touch-action: none;   /* 指针拖拽自己管，禁浏览器手势 */
+}
+
+.coord-stage-hint {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 14px;
+    border-radius: 999px;
+    background: rgba(20, 21, 26, 0.75);
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.42);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+/* ==================== 编译尺寸提醒（输出框下方小字） ==================== */
+
+.coord-json-note {
+    margin-top: 6px;
+    flex-shrink: 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* ==================== 底部操作行 ==================== */
+
+.coord-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid rgba(128, 128, 128, 0.25);
+    flex-shrink: 0;
+}
+
+/* 左组：AI 按钮 + 模型/技能下拉触发器（LumenDropdown 接管，参考 LLM 面板
+   的 llm-model-select 同款观感，高度与本弹窗底栏按钮对齐 34px） */
+.coord-footer-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.coord-model-select.lumen-dd-trigger,
+.coord-skill-select.lumen-dd-trigger {
+    height: 34px;
+    padding: 0 10px;
+    min-width: 120px;
+    max-width: 280px;
+    flex: 0 1 auto;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: #fff;
+}
+.coord-model-select.lumen-dd-trigger:hover,
+.coord-skill-select.lumen-dd-trigger:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* 模型/技能下拉菜单（挂 body，向上弹）：比触发器宽，长名称不截断 */
+.coord-model-menu {
+    min-width: 300px;
+}
+.coord-skill-menu {
+    min-width: 260px;
+}
+
+.coord-footer-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* AI 写提示词：主操作按钮（悬浮蓝高亮档） */
+.coord-ai-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(120, 170, 255, 0.4);
+    background: rgba(120, 170, 255, 0.14);
+    color: #cfe4ff;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.coord-ai-btn svg {
+    width: 15px;
+    height: 15px;
+}
+.coord-ai-btn:hover:not(:disabled) {
+    background: rgba(120, 170, 255, 0.24);
+    border-color: rgba(120, 170, 255, 0.65);
+    color: #fff;
+}
+.coord-ai-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+.coord-ai-btn.running svg {
+    animation: coord-spin 1s linear infinite;
+}
+@keyframes coord-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* 编译 / 复制 / 写入面板 / 新建：次级按钮 */
+.coord-compile-btn,
+.coord-copy-btn,
+.coord-panel-btn,
+.coord-new-btn {
+    height: 34px;
+    padding: 0 13px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.coord-compile-btn:hover:not(:disabled),
+.coord-copy-btn:hover:not(:disabled),
+.coord-panel-btn:hover:not(:disabled),
+.coord-new-btn:hover:not(:disabled) {
+    background: rgba(120, 170, 255, 0.12);
+    border-color: rgba(120, 170, 255, 0.35);
+    color: #fff;
+}
+.coord-compile-btn:disabled,
+.coord-copy-btn:disabled,
+.coord-panel-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* ==================== 窄屏适配 ==================== */
+
+@media (max-width: 1100px) {
+    .coord-side {
+        width: 260px;
+    }
+    .coord-status {
+        max-width: 240px;
+    }
+}

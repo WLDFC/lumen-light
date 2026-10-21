@@ -2,8 +2,9 @@
  * 提示词收藏页左侧模型标签栏样式（recipe-models-sidebar.css）
  *
  * 作用：定义收藏弹窗内容区左侧 220px 标签栏的视觉样式——
- *       标题行（"模型" + 新建按钮）、标签列表（独立滚动）、
- *       标签条目（主体点击筛选 + 悬停显示删除 ×）、行内新建输入框。
+ *       标题行（"模型" + 新建按钮）、标签列表（独立滚动，层级树形态）、
+ *       标签条目（折叠箭头 + 主体点击筛选 + 悬停显示 ＋新建子标签/×删除）、
+ *       行内新建输入框（根级贴底通栏，子级随深度缩进）。
  *
  * 配套文件：
  *   js/components/RecipeManager.js   # 侧栏结构与交互逻辑
@@ -169,4 +170,80 @@
 
 .recipe-models-input:focus {
     border-color: #22c55e;
+}
+
+/* ===== 层级树（子标签缩进 / 折叠箭头 / 子级新建） ===== */
+
+/* 子标签整行右移（悬停高亮与操作钮一起缩进，层级感更明确） */
+.recipe-models-item.is-depth-1 { margin-left: 18px; }
+.recipe-models-item.is-depth-2 { margin-left: 36px; }
+
+/* 折叠箭头：仅父标签显示，展开时转向下（▸ 旋转 90°） */
+.recipe-models-caret {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    margin-right: 2px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 0.15s, background 0.12s, color 0.12s;
+}
+
+.recipe-models-caret:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.recipe-models-item.is-open .recipe-models-caret {
+    transform: rotate(90deg);
+}
+
+/* 叶子标签的箭头占位：宽度与真箭头一致，保持各条目名字左对齐 */
+.recipe-models-caret-spacer {
+    flex-shrink: 0;
+    width: 22px;
+    margin-right: 2px;
+}
+
+/* 子级新建按钮：悬停条目时与删除钮并排淡入 */
+.recipe-models-child-btn {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    margin-left: 4px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.recipe-models-item:hover .recipe-models-child-btn {
+    display: flex;
+}
+
+.recipe-models-child-btn:hover {
+    background: rgba(34, 197, 94, 0.85);
+    color: #fff;
+}
+
+/* 子级新建输入框：随所在层级右移（缩进量与宽度折减在 JS 里内联设置） */
+.recipe-models-input.is-child {
+    margin-top: 2px;
+    margin-bottom: 2px;
 }

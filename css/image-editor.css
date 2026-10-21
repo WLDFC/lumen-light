@@ -295,29 +295,8 @@
    白圈 + 内外黑晕双描边：舞台空白区是纯黑背景，单色圈（尤其 fx 原本的
    黑圈）在黑底上不可见；黑白互补在任何底色上都可辨。中心点用于低缩放
    下圈径只剩几 px 时的定位（34% 缩放 × 粗细 14 ≈ 5px） */
-.ie-cursor {
-    position: fixed;
-    transform: translate(-50%, -50%);
-    border: 1px solid rgba(255, 255, 255, 0.9);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(0, 0, 0, 0.9);
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.15);
-    pointer-events: none;
-    z-index: 5;
-}
-
-.ie-cursor::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 3px;
-    height: 3px;
-    margin: -1.5px 0 0 -1.5px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.95);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9);
-}
+/* 笔刷光标圈已不设 DOM 元素：直接画在 ImageStudio 的 selCanvas 覆盖层
+   上（ImageStudio._redrawCursorOverlay），原 .ie-cursor 样式已移除 */
 
 /* ==================== 丢弃确认框 ==================== */
 .ie-confirm {

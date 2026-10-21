@@ -35,9 +35,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化左侧工具栏（画布左侧垂直工具栏，含本地上传图片入口）
     new SideToolbar(window.canvas);
 
+    // 初始化被遮挡对象移开工具（左侧工具栏追加按钮：扫描被盖住 ≥90% 的
+    // 图片/视频/音频并移到就近空位，合并一步撤销；见 js/components/OcclusionTool.js）
+    window.occlusionTool = new OcclusionTool(window.canvas);
+
     // 初始化本地资产库（顶栏右侧文件夹按钮，标签绑定本地文件夹，
     // 资产可拖拽/单击添加到画布；见 js/components/AssetLibrary.js）
     window.assetLibrary = new AssetLibrary();
+
+    // 初始化任务中心（左侧工具栏列表按钮弹出：任务序列/停止/定位/角标；
+    // 数据源为 window.taskRegistry 登记表，见 js/components/TaskCenter.js）
+    window.taskCenter = new TaskCenter();
 
     // 初始化 LoRA 管理窗口（顶栏右侧按钮：左文件夹/右封面网格，置顶星标；
     // 数据源 /api/lora，见 js/components/LoraManager.js 与 routes/lora.js）
@@ -47,12 +55,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // 挂到 window 上供 RealtimeSaveManager 等后续组件复用其 serializer 与 currentSave
     window.saveManager = new SaveManager(window.canvas);
 
+    // 初始化备份导出/导入管理器（文件菜单「备份导出/导入」弹窗与流程编排；
+    // 聊天记录经 IndexedDB 全量导出/替换导入，见 js/components/BackupManager.js）
+    window.backupManager = new BackupManager();
+
     // 初始化配方管理器（顶栏配方按钮与收藏窗口）
     new RecipeManager();
 
     // 初始化工作流编辑器（顶栏 Comfy 按钮：左列表右节点图，全参数编辑，
     // 修改直接写回 workflows/*.json；见 js/components/WorkflowEditor.js）
     window.workflowEditor = new WorkflowEditor();
+
+    // 初始化坐标编辑器（顶栏「坐标编辑」按钮：bbox 布局编辑 + AI 补文案 +
+    // 编译导出 MOSS/Flux3 坐标提示词；见 js/components/CoordinateEditor.js）
+    window.coordinateEditor = new CoordinateEditor();
 
     // 初始化设置管理器
     window.settingsManager = new SettingsManager();
@@ -73,6 +89,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化技能库管理器（面板头部按钮 + 弹窗，查阅/启停 pi 技能库；
     // 在系统提示词之后初始化，按钮插入顺序形成「系统提示词-技能库-清空-收起」）
     window.llmSkillManager = new LlmSkillManager();
+
+    // 初始化 Comfy 提示词预设管理器（三个提示词区标题栏入口按钮 + 管理弹窗
+    // + 一键注入，数据落 data/comfy-prompts.json；仅 Comfy 模式可见的区域，
+    // 不随面板模式切换显隐）
+    window.comfyPromptPresets = new ComfyPromptPresets();
 
     // 初始化全局占位图管理器（面板与两类生图节点的占位图统一走这一份实现）
     window.placeholderManager = new PlaceholderManager(window.canvas);

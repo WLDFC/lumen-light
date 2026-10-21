@@ -115,3 +115,66 @@ describe('CanvasConnections.add 既有规则不回归', () => {
         expect(cc.add('ph', 'cgen')).toBeNull();
     });
 });
+
+describe('CanvasConnections.hitTest 采样折线命中', () => {
+    // 水平长曲线：锚点 (100,50)→(1000,50)（两端图片各 100×100）
+    const makeHitCanvas = () => makeCanvas([
+        { id: 'a', source: 'comfy', x: 0, y: 0, width: 100, height: 100 },
+        { id: 'b', source: 'comfy', x: 1000, y: 0, width: 100, height: 100 }
+    ]);
+    const makeHitConnections = () => {
+        const cc = new CanvasConnections(makeHitCanvas());
+        cc.add('a', 'b');
+        return cc;
+    };
+
+    test('长曲线两个采样点之间的位置也能命中（无采样盲区）', () => {
+        const cc = makeHitConnections();
+        expect(cc.connections).toHaveLength(1);
+        // 点取在旧 24 点采样的两采样点正中（间隔 37.5px）、偏离曲线 5px：
+        // 旧的按采样点判距约 19px 超容差点不到，按折线段判距=5px 命中
+        expect(cc.hitTest(568.75, 55)).not.toBeNull();
+    });
+
+    test('远离曲线的坐标不误命中', () => {
+        const cc = makeHitConnections();
+        expect(cc.hitTest(568.75, 70)).toBeNull();
+    });
+});
+
+describe('CanvasConnections API 视频节点连线规则', () => {
+    // 视频节点 + 提示词节点 + 图片 + LoRA 节点的混合画布
+    const makeVideoCanvas = () => makeCanvas([
+        { id: 'v', source: 'video-gen-node' },
+        { id: 'p1', source: 'prompt-node' },
+        { id: 'img1', source: 'comfy' },
+        { id: 'lora1', source: 'lora-node' }
+    ]);
+
+    test('提示词节点可连入视频节点（文生视频）', () => {
+        const cc = new CanvasConnections(makeVideoCanvas());
+        expect(cc.add('p1', 'v')).not.toBeNull();
+    });
+
+    test('图片直连视频节点被拒：首帧图必须先连入提示词节点', () => {
+        const cc = new CanvasConnections(makeVideoCanvas());
+        expect(cc.add('img1', 'v')).toBeNull();
+        // LoRA 连入与 LoRA→API 生图同规则放行（文本透传语义，无害）
+        expect(cc.add('lora1', 'v')).not.toBeNull();
+    });
+
+    test('视频节点单入：新入线静默替换旧入线', () => {
+        const cc = new CanvasConnections(makeVideoCanvas());
+        expect(cc.add('p1', 'v')).not.toBeNull();
+        expect(cc.add('img1', 'p1')).not.toBeNull();   // 图片连提示词节点作首帧素材
+        expect(cc.add('img1', 'v')).toBeNull();        // 直连仍被拒
+        const ins = cc.connections.filter((c) => c.toId === 'v');
+        expect(ins).toHaveLength(1);
+        expect(ins[0].fromId).toBe('p1');
+    });
+
+    test('视频节点无输出端口，不能作为连线起点', () => {
+        const cc = new CanvasConnections(makeVideoCanvas());
+        expect(cc.add('v', 'p1')).toBeNull();
+    });
+});

@@ -158,6 +158,8 @@ class CanvasRenderer {
 
         // 同步视频播放器覆盖层位置（跟随视口平移/缩放）
         this.canvas.videoManager.syncPlayer();
+        // 同步音频播放器覆盖层位置（同上）
+        this.canvas.audioManager?.syncPlayer();
     }
 
     /**
@@ -248,11 +250,28 @@ class CanvasRenderer {
                 ctx.restore();
             }
 
-            // 未选中的组画灰边框（圆角与组体一致）；
+            // 聚集区角标：标题栏右端「聚集」字样（青色，与激活描边同语言；
+            // 改名期间跳过——输入框覆盖整个标题栏，与标题文字同理）
+            if (g.collect && !this.canvas.groups.isRenaming(g)) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(g.x, g.y, g.width, metrics.height);
+                ctx.clip();
+                ctx.fillStyle = 'rgba(108, 235, 255, 0.9)';
+                ctx.font = `${metrics.font}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+                ctx.textBaseline = 'middle';
+                ctx.textAlign = 'right';
+                ctx.fillText('聚集', g.x + g.width - metrics.inset,
+                             g.y + metrics.height / 2 + 1 / scale);
+                ctx.restore();
+            }
+
+            // 未选中的组画灰边框（圆角与组体一致）；聚集编组换青色描边
+            // 作激活态识别（配标题栏右端「聚集」角标）；
             // 选中组的描边放到 drawGroupOverlays 顶层绘制
             if (!g.selected) {
-                ctx.strokeStyle = 'rgba(128, 128, 128, 0.3)';
-                ctx.lineWidth = 1 / scale;
+                ctx.strokeStyle = g.collect ? 'rgba(108, 235, 255, 0.85)' : 'rgba(128, 128, 128, 0.3)';
+                ctx.lineWidth = (g.collect ? 2 : 1) / scale;
                 this.roundRectPath(ctx, g.x, g.y, g.width, g.height, radius);
                 ctx.stroke();
             }
@@ -308,7 +327,6 @@ class CanvasRenderer {
         if (connections.connections.length === 0) return;
 
         const scale = viewport.scale;
-        ctx.lineWidth = LumenLight.config.connectionLineWidth / scale;
         ctx.lineCap = 'round';
 
         for (const conn of connections.connections) {
@@ -324,10 +342,13 @@ class CanvasRenderer {
 
             // 悬停高亮：红色提示可点击断开；普通连线为不透明青色（与选中边框同色系）。
             // 使用不透明颜色：半透明色在边缘与背景混色，会让线条看起来发虚。
+            // 线宽用世界坐标（不除以 scale）——随内容等比缩放，与图片的相对粗细恒定；
+            // 缩放很小时钳一条屏幕下限（connectionMinScreenWidth）防发丝线。
             const isHovered = this.canvas.hoverConnection === conn;
             ctx.strokeStyle = isHovered ? '#ff5555' : '#6cebff';
-            ctx.lineWidth = (isHovered ? LumenLight.config.connectionLineWidth + 1
-                                       : LumenLight.config.connectionLineWidth) / scale;
+            const baseWidth = isHovered ? LumenLight.config.connectionLineWidth + 1
+                                        : LumenLight.config.connectionLineWidth;
+            ctx.lineWidth = Math.max(baseWidth, LumenLight.config.connectionMinScreenWidth / scale);
 
             ctx.beginPath();
             ctx.moveTo(p[0].x, p[0].y);
@@ -405,7 +426,8 @@ class CanvasRenderer {
             : CanvasConnections.getBezierPoints(endPoint, fromPoint, scale);
 
         ctx.strokeStyle = '#6cebff';
-        ctx.lineWidth = LumenLight.config.connectionLineWidth / scale;
+        ctx.lineWidth = Math.max(LumenLight.config.connectionLineWidth,
+                                 LumenLight.config.connectionMinScreenWidth / scale);
         ctx.lineCap = 'round';
 
         ctx.beginPath();

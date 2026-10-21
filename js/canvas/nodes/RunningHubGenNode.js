@@ -617,6 +617,16 @@ class RunningHubGenNode extends BaseCanvasNode {
         // 云端未知，占位回退 1024；真实结果按原始尺寸落在占位图中心）
         this.isGenerating = true;
         this._pending = { expected: count, done: 0 };
+        this._taskFailedCount = 0;
+
+        // 任务中心登记：云端任务没有停止通道（平台侧无取消接口），
+        // 仅查看进度与定位；失败按任务计数，收尾时统一结算
+        this._taskRef = window.taskRegistry?.register({
+            kind: 'rh',
+            label: positive || 'RunningHub 生成',
+            total: count,
+            locateTarget: this
+        });
         this.generateBtn.disabled = true;
         this.generateBtn.textContent = count > 1 ? `生成中 0/${count}` : '生成中';
 
@@ -631,6 +641,24 @@ class RunningHubGenNode extends BaseCanvasNode {
             .filter((p) => p && p.type !== 'image' && /^(noise_)?seed$/i.test(p.fieldName))
             .map((p) => `${p.nodeId}:${p.fieldName}`);
         const baseValues = this.params.getValues();
+
+        // 生成参数记录（溯源/生成同款）：随占位图绑定到回图（imageObj.genInfo，
+        // GenInfoPopup 展示与回填）——非图片参数按「label + 本轮提交值」出清单
+        this._activeGenInfo = window.GenRecord ? GenRecord.forRh({
+            positive,
+            negative,
+            resourceKind: this.resourceKind,
+            resourceId: this.resourceId,
+            resourceName: this.resourceName,
+            instanceType: this.instanceType,
+            paramList: paramDefs
+                .filter((p) => p && p.type !== 'image')
+                .map((p) => ({
+                    label: p.label || p.fieldName,
+                    value: baseValues[`${p.nodeId}:${p.fieldName}`] ?? ''
+                })),
+            node: this
+        }) : null;
 
         // 并发提交：平台 API 支持并发，N 个任务同时运行（浏览器同域连接
         // 上限 6，超出部分由浏览器自行排队，提交接口轻量无碍）
@@ -685,6 +713,12 @@ class RunningHubGenNode extends BaseCanvasNode {
                 this.removePlaceholder(handles[handles.length - 1]);
             }
             if (submitted === 0 || this._pending.done >= this._pending.expected) {
+                // 一张都没提交出去：任务中心按失败驻留
+                if (submitted === 0) {
+                    this._taskRef?.end('failed',
+                        `提交失败：${failed[0]?.reason?.message || '未知错误'}`);
+                    this._taskRef = null;
+                }
                 this.removePlaceholder();
                 this._finishGeneration();
                 return;
@@ -704,6 +738,8 @@ class RunningHubGenNode extends BaseCanvasNode {
         this._watchdog = setTimeout(() => {
             if (!this.isGenerating) return;
             window.socket?.showNotification?.('RunningHub 长时间未响应，已停止等待', 8000);
+            this._taskRef?.end('failed', '云端任务长时间未响应');
+            this._taskRef = null;
             this.removePlaceholder();
             this._finishGeneration();
         }, RunningHubGenNode.WATCHDOG_TIMEOUT);
@@ -713,11 +749,25 @@ class RunningHubGenNode extends BaseCanvasNode {
      * 结束本轮生成：复位按钮与状态
      */
     _finishGeneration() {
+        // 任务中心结算：全失败=红驻留，部分失败=完成附注，正常=完成
+        if (this._taskRef) {
+            const p = this._pending;
+            const failedN = this._taskFailedCount || 0;
+            if (p && failedN >= p.expected) {
+                this._taskRef.end('failed', `${p.expected} 个云端任务全部失败`);
+            } else if (p && failedN > 0) {
+                this._taskRef.end('done', `完成 ${p.expected - failedN}/${p.expected}，失败 ${failedN}`);
+            } else {
+                this._taskRef.end('done', p && p.expected > 1 ? `完成 ${p.expected} 个` : '');
+            }
+            this._taskRef = null;
+        }
         if (this._watchdog) {
             clearTimeout(this._watchdog);
             this._watchdog = null;
         }
         this.isGenerating = false;
+        this._activeGenInfo = null;
         this.generateBtn.disabled = false;
         this.generateBtn.textContent = '生成';
     }
@@ -804,6 +854,7 @@ class RunningHubGenNode extends BaseCanvasNode {
     onGenerationFailed(message) {
         if (!this.isGenerating) return;   // 迟到的失败消息，忽略
         window.socket?.showNotification?.(`RunningHub 任务失败：${message}`, 8000);
+        this._taskFailedCount++;
         this._onTaskSettled();
     }
 
@@ -816,6 +867,7 @@ class RunningHubGenNode extends BaseCanvasNode {
             return;
         }
         this._pending.done++;
+        this._taskRef?.update({ done: this._pending.done });
         if (this._pending.done < this._pending.expected) {
             this.generateBtn.textContent =
                 this._pending.expected > 1
@@ -876,7 +928,8 @@ class RunningHubGenNode extends BaseCanvasNode {
                 name: `rh_gen_${Date.now()}.png`,
                 source: 'runninghub',
                 prompt: prompt,
-                negativePrompt: negativePrompt
+                negativePrompt: negativePrompt,
+                genInfo: this._activeGenInfo || null
             }
         ).catch((err) => {
             console.error('RunningHub 节点落图失败:', err);
@@ -905,6 +958,7 @@ class RunningHubGenNode extends BaseCanvasNode {
                 source: 'runninghub',
                 prompt: prompt,
                 negativePrompt: negativePrompt,
+                ...(this._activeGenInfo ? { genInfo: this._activeGenInfo } : {}),
                 created: Date.now()
             });
             this.canvas.draw();

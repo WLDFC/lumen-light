@@ -148,6 +148,25 @@ function injectPromptsToWorkflow(workflow, positive, negative) {
         }
     } else {
         console.log('  ❌ 未找到文本编码节点！支持的类型: CLIPTextEncode, CLIPTextEncodeFlux, TextEncodeQwenImageEditPlus 等');
+
+        // 兜底：字面 prompt 字符串输入的节点（如 MiniMax H3 的
+        // RHMiniMaxH3FL2VAEncode / MiniMaxH3ReferenceToVideo——类名不含
+        // TextEncode，但有独立的 prompt 输入承载正面提示词）。
+        // 只注入正面（这类节点没有负面提示词对位概念）；prompt 输入是
+        // 连线数组时跳过（上游已有文本来源，注入会破坏连线语义）
+        const promptInputNodes = [];
+        for (const nodeId in workflow) {
+            const inputs = workflow[nodeId].inputs || {};
+            if (typeof inputs.prompt === 'string') promptInputNodes.push(nodeId);
+        }
+        if (promptInputNodes.length > 0) {
+            for (const nodeId of promptInputNodes) {
+                workflow[nodeId].inputs.prompt = positive;
+                console.log(`  ✅ 兜底注入正面提示词到节点 ${nodeId}.prompt: ${positive.substring(0, 50)}...`);
+            }
+        } else {
+            console.log('  ⚠️ 也没有带 prompt 输入的节点，提示词未注入（模板内可能内嵌了提示词）');
+        }
     }
 
     // 注入随机种子到工作流
@@ -182,8 +201,11 @@ function injectRandomSeed(workflow) {
         const inputs = node.inputs || {};
 
         // 查找任何有 seed 输入的节点，为每个节点注入不同的随机种子
-        // 这样可以让多个 KSampler / Seed 节点保持独立随机，和直接在 ComfyUI 中运行一致
-        if (inputs.seed !== undefined) {
+        // 这样可以让多个 KSampler / Seed 节点保持独立随机，和直接在 ComfyUI 中运行一致。
+        // 注意：连线输入（["节点id", 槽位] 数组）必须跳过——覆盖成字面量会
+        // 架空上游种子节点（如 rgthree Seed），破坏工作流作者的连线设计；
+        // 随机性由上游字面 seed（-1 等）在本函数被随机化来保证
+        if (inputs.seed !== undefined && !Array.isArray(inputs.seed)) {
             const nodeSeed = generateRandomSeed();
             inputs.seed = nodeSeed;
             console.log(`  🎲 注入随机种子 ${nodeSeed} 到节点 ${nodeId} (${classType})`);
@@ -392,9 +414,10 @@ function applyWorkflowOverrides(workflow, overrides) {
  * 注入画布 LoRA 堆栈到工作流（图拼接，追加语义）
  *
  * 语义（与 Comfy 生图节点的分工）：
- *   - 模板内嵌的 LoraLoader 由 Comfy 生图节点的 LoRA 行管理（文件选择 +
- *     启用开关；未启用时经 applyWorkflowOverrides 注入强度 0），本函数
- *     不碰它们——加速 lora 等功能性模板 lora 默认照常生效；
+ *   - 模板内嵌的 LoraLoader 由参数行 UI 管理（画布节点 = 独立 LoRA 行；
+ *     右侧面板 = 并入 LoRA 叠加区条目，文件/强度/启停经 overrides 注入，
+ *     删除的条目已在前置的 bypass 步骤剔除出图），本函数不碰它们——
+ *     加速 lora 等功能性模板 lora 默认照常生效；
  *   - 画布 LoRA 节点堆栈是增量补充：以 LoraLoader 节点链动态创建并追加在
  *     模型/CLIP 信号链的最末端（后应用的叠加在先应用的上面），模型/CLIP
  *     的全部消费方改指向链尾；

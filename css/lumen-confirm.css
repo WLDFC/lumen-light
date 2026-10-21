@@ -1,0 +1,85 @@
+/**
+ * 通用确认弹窗预制件样式（lumen-confirm.css）
+ *
+ * 作用：LumenConfirmDialog 组件的视觉——全屏遮罩 + 居中小面板
+ *       （标题/说明小字/取消+危险确认按钮）。收藏页与 LoRA 管理器的
+ *       删除、移动类危险操作确认共用。
+ *
+ * 配色遵循项目深色主题色板：
+ *   面板 #1b1c21，边框 rgba(128,128,128,0.3)，删除红 #ef4444。
+ */
+
+/* 覆盖宿主弹窗的模态遮罩（fixed 全屏，盖过 1200 级弹窗自身） */
+.lumen-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1210;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 15, 18, 0.6);
+}
+
+.lumen-confirm-overlay.is-open {
+    display: flex;
+}
+
+/* 确认面板：窄幅，标题 + 可选说明 + 按钮行 */
+.lumen-confirm-panel {
+    width: 320px;
+    max-width: calc(100vw - 48px);
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.lumen-confirm-title {
+    margin: 0;
+    padding: 14px 16px 10px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+/* 补充说明小字（无 note 时由 JS 隐藏） */
+.lumen-confirm-note {
+    margin: 0;
+    padding: 0 16px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+}
+
+/* 按钮行：取消 + 危险确认，右对齐 */
+.lumen-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 16px 14px;
+}
+
+.lumen-btn {
+    padding: 6px 16px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.lumen-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* 危险主操作（确认删除） */
+.lumen-btn.is-danger {
+    border-color: transparent;
+    background: #ef4444;
+    color: #fff;
+}
+
+.lumen-btn.is-danger:hover {
+    background: rgba(239, 68, 68, 0.85);
+}

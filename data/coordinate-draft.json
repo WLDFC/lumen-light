@@ -1,0 +1,60 @@
+{
+  "draft": {
+    "width": 832,
+    "height": 1216,
+    "bbox_coord_space": "abs",
+    "bbox_format": "xyxy",
+    "summary": {
+      "caption": "",
+      "canvas": "multi_panel"
+    },
+    "items": [
+      {
+        "label": "character",
+        "caption": "The poster's main subject, a young girl in a school uniform shown from mid-thigh up and filling the vertical spine of the frame, her torso squared slightly off-axis while her face turns toward the camera; fine strands of hair catch a thin rim light along the edges, the uniform's fabric folds and collar seams rendered with soft specular sheen, gentle shadow modelling across her features from the single side light, set against a defocused grey-blue backdrop.",
+        "bbox": [
+          80,
+          0,
+          753,
+          1216
+        ],
+        "cid": 0
+      },
+      {
+        "label": "object",
+        "caption": "A midground layer centered on the girl's upper body and waist-up area, where her torso, arms and uniform details read most sharply; the background extends from this same layer as a defocused environment with soft bokeh glows and a hint of airborne particle texture, a cool grey-blue base threaded with one warm highlight, light raking in from one side of the frame to leave gentle rim light along her shoulder line and hair tips, creating the shallow depth of field and atmospheric negative space typical of a movie poster.",
+        "bbox": [
+          0,
+          449,
+          832,
+          1216
+        ],
+        "shot": "中景",
+        "cid": 1
+      },
+      {
+        "label": "object",
+        "caption": "The upper-left background zone, a defocused field of cool grey-blue tone where large soft bokeh discs and drifting dust motes float out of focus, edges melted into smooth gradients with no hard detail, brightest where the raking light spills in from that side and falling into deeper shadow toward the frame's outer corner.",
+        "bbox": [
+          0,
+          109,
+          454,
+          675
+        ],
+        "cid": 2
+      },
+      {
+        "label": "object",
+        "caption": "The mid-right background zone, a defocused passage of darker grey-blue air punctuated by a few small warm bokeh glows and a subtle spray of luminous particles, everything heavily blurred so it reads as pure atmosphere behind the girl's shoulder, with the warm accent balancing the otherwise cool palette.",
+        "bbox": [
+          447,
+          297,
+          832,
+          849
+        ],
+        "cid": 3
+      }
+    ]
+  },
+  "savedAt": 1793523348209
+}

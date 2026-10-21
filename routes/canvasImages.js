@@ -1,7 +1,9 @@
 /**
  * ==========================================================================
  * 画板图片槽位管理路由
- * 作用：管理供 ComfyUI Edit 节点读取的画板图片槽位，支持 1-3 号槽位：
+ * 作用：管理供 ComfyUI Edit / 多图编辑节点读取的画板图片槽位，
+ *       支持 1-9 号槽位（上限与 LumenReceiveImageFromCanvas.MAX_SLOTS
+ *       对齐，扩容两处同步改）：
  *   1. 保存图片到指定槽位
  *   2. 获取指定槽位的图片
  *   3. 清除指定槽位的图片
@@ -9,6 +11,10 @@
  */
 
 const express = require('express');
+
+// 槽位上限（与 lumen_nodes/LumenReceiveImageFromCanvas.MAX_SLOTS 对齐；
+// 遮罩槽 /api/canvas-mask 复用本工厂，校验随之同步）
+const MAX_IMAGE_SLOTS = 9;
 
 /**
  * 创建画板图片槽位管理路由
@@ -23,16 +29,16 @@ function createCanvasImagesRouter(options) {
 
     /**
      * POST /api/canvas-image/:slot
-     * 保存画板图片到指定槽位（1-3）
+     * 保存画板图片到指定槽位（1-9）
      */
     router.post('/:slot', async (req, res) => {
         const slot = parseInt(req.params.slot);
         console.log(`📥 POST /api/canvas-image/${slot}`);
 
-        if (slot < 1 || slot > 3) {
+        if (slot < 1 || slot > MAX_IMAGE_SLOTS) {
             return res.status(400).json({
                 status: 'error',
-                message: '槽位必须是 1-3'
+                message: `槽位必须是 1-${MAX_IMAGE_SLOTS}`
             });
         }
 
@@ -85,10 +91,10 @@ function createCanvasImagesRouter(options) {
         console.log(`\n📤 [${requestId}] GET /api/canvas-image/${slot}`);
         console.log(`  当前槽位${slot}图片长度: ${canvasImages[slot]?.length || 'null'}, 时间戳: ${canvasImagesTimestamp[slot]}`);
 
-        if (slot < 1 || slot > 3) {
+        if (slot < 1 || slot > MAX_IMAGE_SLOTS) {
             return res.status(400).json({
                 status: 'error',
-                message: '槽位必须是 1-3'
+                message: `槽位必须是 1-${MAX_IMAGE_SLOTS}`
             });
         }
 

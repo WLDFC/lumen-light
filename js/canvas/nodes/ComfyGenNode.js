@@ -347,6 +347,18 @@ class ComfyGenNode extends BaseCanvasNode {
     }
 
     /**
+     * 收集连线进链路的画布视频引用（详见 ImagePipeline.collectVideos）。
+     * 提交时随请求发给后端写 canvas-video 槽位——与"图片连线写图片槽"
+     * 同一机制：视频对象连进本节点或上游提示词节点即被收集，
+     * 按连线顺序按位对齐视频槽位（工作流含
+     * LumenReceiveVideoFromCanvas 时后端才写入）
+     * @returns {string[]} videoUrl 数组（指向 data/videos/ 文件的引用）
+     */
+    collectVideos() {
+        return this._pipeline().collectVideos(this.id);
+    }
+
+    /**
      * 收集链路上游 LoRA 节点的堆栈（详见 ImagePipeline.collectLoras）
      * @returns {Array<{file: string, strengthModel: number, strengthClip: number}>}
      */
@@ -396,9 +408,55 @@ class ComfyGenNode extends BaseCanvasNode {
         const images = payloads.map((p) => p.image);
         const masks = payloads.map((p) => p.mask);
 
+        // 连线的画布视频引用随请求发后端写视频槽位（V2V 工作流经
+        // LumenReceiveVideoFromCanvas 拉取；纯图片工作流由后端跳过）。
+        // 引用式：只传 videoUrl 不搬字节，视频本体经槽位 /file 端点流式取回
+        const videos = this.collectVideos();
+
+        // 免节点 LoadImage 直注：工作流没有画布取图节点时，连线图按
+        // 「节点 id 升序」映射进原生 LoadImage（连线图 1 → 第 1 个，
+        // 少连的节点保持 ComfyUI 侧已选图不碰）；有取图节点走槽位
+        // 链路，不组映射（一个工作流一条输入通道）
+        let imageMapping = null;
+        if (images.length > 0 && this.workflowJson) {
+            const scan = window.ComfyParamScanner?.scanLoadImageInputs?.(this.workflowJson);
+            if (scan && !scan.hasReceiveNode && scan.loadImageIds.length > 0) {
+                imageMapping = {};
+                const pairs = Math.min(scan.loadImageIds.length, images.length);
+                for (let i = 0; i < pairs; i++) {
+                    imageMapping[scan.loadImageIds[i]] = i;
+                }
+            }
+        }
+
         // 链路上游 LoRA 节点堆栈（提交时由后端 injectLoraChain 图拼接注入，
         // 追加在模板内嵌 lora 之后——模板 lora 由本节点的 LoRA 行管理）
         const loras = this.collectLoras();
+
+        // 生成参数记录（溯源/生成同款）：随占位图绑定到回图（imageObj.genInfo，
+        // GenInfoPopup 展示与回填）——存面板可读摘要（null = 工作流模板值），
+        // 主模型取第一个 checkpoint/unet 加载器当前值
+        const checkpointLoader = (this.params.detected?.loaders || [])
+            .find((l) => l.kind === 'checkpoint' || l.kind === 'unet');
+        this._activeGenInfo = window.GenRecord ? GenRecord.forComfy({
+            positive,
+            negative,
+            workflowId: this.workflowId,
+            workflowName: this.workflowSelect?.selectedOptions?.[0]?.text || '',
+            params: {
+                steps: this.params.state.steps,
+                cfg: this.params.state.cfg,
+                sampler: this.params.state.sampler,
+                sizeW: this.params.state.sizeW,
+                sizeH: this.params.state.sizeH,
+                denoise: this.params.state.denoise
+            },
+            model: checkpointLoader
+                ? (this.params.state.models[checkpointLoader.nodeId] || checkpointLoader.current || '')
+                : '',
+            loras,
+            node: this
+        }) : null;
 
         const hasBatch = this.params.hasBatchInput();
         const count = hasBatch ? this.params.state.count : 1;
@@ -422,6 +480,16 @@ class ComfyGenNode extends BaseCanvasNode {
         this.generateBtn.disabled = true;
         this.generateBtn.textContent = count > 1 ? `生成中 0/${count}` : '生成中';
         this.stopControl.begin();
+
+        // 任务中心登记：一轮 N 张为一个任务，进度在 WS 回图处推进。
+        // 停止与节点 X 同一内核，定位聚焦本节点
+        this._taskRef = window.taskRegistry?.register({
+            kind: 'comfy',
+            label: positive || 'Comfy 生成',
+            total: count,
+            onStop: () => this.stopControl.abort(),
+            locateTarget: this
+        });
 
         let res = null;
         if (this.params.state.sizeW !== null && this.params.state.sizeH !== null) {
@@ -464,7 +532,9 @@ class ComfyGenNode extends BaseCanvasNode {
                         loras,
                         target: this.id,
                         images,
-                        masks
+                        masks,
+                        videos,
+                        ...(imageMapping ? { imageMapping } : {})
                     })
                 });
                 const result = await response.json();
@@ -472,6 +542,18 @@ class ComfyGenNode extends BaseCanvasNode {
                     throw new Error(result.message || '未知错误');
                 }
                 submitted++;
+                // 免节点双通道的如实上报：图片没有生效（无 LoadImage 可注入/
+                // 多个无法定位/上传失败/映射条目被跳过）只在第一张提交时
+                // 提示一次，不逐张刷屏
+                if (i === 0 && result.imageInject &&
+                    (result.imageInject.mode === 'none' || result.imageInject.mode === 'ambiguous')) {
+                    window.socket?.showNotification?.(`⚠️ ${result.imageInject.detail}`, 10000);
+                }
+                if (i === 0 && result.imageInject && result.imageInject.mode === 'mapped' &&
+                    ((Array.isArray(result.imageInject.skipped) && result.imageInject.skipped.length > 0) ||
+                     (Array.isArray(result.imageInject.placeholders) && result.imageInject.placeholders.length > 0))) {
+                    window.socket?.showNotification?.(`⚠️ ${result.imageInject.detail}`, 10000);
+                }
                 if (result.promptId) {
                     this._submittedPromptIds.push(result.promptId);
                 }
@@ -479,6 +561,12 @@ class ComfyGenNode extends BaseCanvasNode {
         } catch (error) {
             this._submitting = false;
             console.error('Comfy 生图节点提交失败:', error);
+            // 一张都没提交出去：任务中心按失败驻留（有部分入队则走
+            // 正常收尾路径，按完成/预期附注结算）
+            if (submitted === 0) {
+                this._taskRef?.end('failed', `提交失败：${error.message}`);
+                this._taskRef = null;
+            }
             const remaining = count - submitted;
             window.socket?.showNotification?.(
                 `第 ${submitted + 1} 张提交失败：${error.message}` +
@@ -549,6 +637,8 @@ class ComfyGenNode extends BaseCanvasNode {
         this._watchdog = setTimeout(() => {
             if (!this.isGenerating) return;
             window.socket?.showNotification?.('ComfyUI 长时间未响应，已停止等待', 8000);
+            this._taskRef?.end('failed', 'ComfyUI 长时间未响应');
+            this._taskRef = null;
             this.removePlaceholder();
             this._finishGeneration();
         }, ComfyGenNode.WATCHDOG_TIMEOUT);
@@ -558,12 +648,24 @@ class ComfyGenNode extends BaseCanvasNode {
      * 结束本轮生成：复位按钮与计数状态（占位图清理由落图/失败路径自行处理）
      */
     _finishGeneration() {
+        // 任务中心结算：停止=中性（已完成部分附注），正常=完成
+        if (this._taskRef) {
+            const p = this._pending;
+            if (this.stopControl.aborted) {
+                this._taskRef.end('stopped',
+                    p && p.received > 0 ? `已完成 ${p.received}/${p.expected}` : '已停止');
+            } else {
+                this._taskRef.end('done', p && p.expected > 1 ? `完成 ${p.received}/${p.expected}` : '');
+            }
+            this._taskRef = null;
+        }
         if (this._watchdog) {
             clearTimeout(this._watchdog);
             this._watchdog = null;
         }
         this.isGenerating = false;
         this._pending = null;
+        this._activeGenInfo = null;
         this.stopControl.end();
         this.generateBtn.disabled = false;
         this.generateBtn.textContent = '生成';
@@ -594,6 +696,7 @@ class ComfyGenNode extends BaseCanvasNode {
         }
 
         this._pending.received++;
+        this._taskRef?.update({ done: this._pending.received });
         this.generateBtn.textContent =
             `生成中 ${this._pending.received}/${this._pending.expected}`;
 
@@ -601,6 +704,60 @@ class ComfyGenNode extends BaseCanvasNode {
             window.socket?.showNotification?.(
                 this._pending.expected > 1
                     ? `生成完成，共 ${this._pending.expected} 张` : '生成完成', 8000);
+            this._finishGeneration();
+        }
+    }
+
+    /**
+     * 接收生成的视频（V2V 工作流经 LumenSendVideoToCanvas 回流，带
+     * lumen_target 定向到本节点）。行为对齐 RunningHubGenNode 同名方法：
+     * 移除一个本节点占位图、视频落占位图中心；计数达预期即完成收尾
+     * （与 receiveGeneratedImage 共用 _pending 计数——图视频混合回流的
+     * 工作流两者都能推进进度）
+     * @param {string} videoUrl - 视频 URL（data/videos/xxx.mp4）
+     * @param {Object} [promptMeta] - 提示词元数据（预留，与图片回流同形）
+     */
+    receiveGeneratedVideo(videoUrl, promptMeta = {}) {
+        if (!this._pending) return;   // 非生成态的迟到消息，忽略
+
+        this._armWatchdog();          // 收到新视频 = 有进展，重置无进展看门狗
+
+        const videoManager = window.canvas?.videoManager;
+        if (!videoManager) {
+            console.error('画布视频管理器未初始化，无法落 Comfy 视频');
+            window.socket?.showNotification?.('视频管理器未初始化，无法落视频', 4000);
+            return;
+        }
+
+        // 本节点名下占位图先进先出消费一个，视频落其中心（无占位图时
+        // 由视频管理器自适应落位）
+        const handle = window.placeholderManager.getByOwner(this)[0];
+        let center;
+        if (handle) {
+            const ph = handle.imageObj;
+            center = { centerX: ph.x + ph.width / 2, centerY: ph.y + ph.height / 2 };
+            window.placeholderManager.remove(handle);
+        }
+
+        videoManager.addVideo('/' + String(videoUrl).replace(/^\//, ''), {
+            name: String(videoUrl).split('/').pop(),
+            ...(center || {})
+        }).then(() => {
+            window.socket?.showNotification?.('视频已生成', 8000);
+        }).catch((err) => {
+            console.error('Comfy 视频落画布失败:', err);
+            window.socket?.showNotification?.('视频落画布失败', 4000);
+        });
+
+        // 进度推进与完成判定（与图片回流同一套计数）
+        this._pending.received++;
+        this._taskRef?.update({ done: this._pending.received });
+        this.generateBtn.textContent =
+            `生成中 ${this._pending.received}/${this._pending.expected}`;
+        if (this._pending.received >= this._pending.expected) {
+            window.socket?.showNotification?.(
+                this._pending.expected > 1
+                    ? `生成完成，共 ${this._pending.expected} 个` : '生成完成', 8000);
             this._finishGeneration();
         }
     }
@@ -653,7 +810,8 @@ class ComfyGenNode extends BaseCanvasNode {
                 name: `comfy_gen_${Date.now()}.png`,
                 source: 'comfy',
                 prompt: prompt,
-                negativePrompt: negativePrompt
+                negativePrompt: negativePrompt,
+                genInfo: this._activeGenInfo || null
             }
         ).catch((err) => {
             console.error('Comfy 生图节点落图失败:', err);
@@ -682,6 +840,7 @@ class ComfyGenNode extends BaseCanvasNode {
                 source: 'comfy',
                 prompt: prompt,
                 negativePrompt: negativePrompt,
+                ...(this._activeGenInfo ? { genInfo: this._activeGenInfo } : {}),
                 created: Date.now()
             });
             this.canvas.draw();

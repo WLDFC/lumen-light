@@ -11,15 +11,16 @@
  * 加一个常量 + 把它归入对应的谓词集合。
  *
  * 类型语义速查：
- *   - 面板节点 isPanelNode：提示词/文本/LoRA/三类生图节点。DOM 元素浮在画布上，
+ *   - 面板节点 isPanelNode：提示词/文本/LoRA/四类生成节点。DOM 元素浮在画布上，
  *     统一走 updateTransform + setSelected 同步、contains 命中、toJSON 存档、
  *     自由宽高缩放；canvas 层跳过绘制
- *   - 端口节点 hasDomPorts：提示词/LoRA/三类生图节点。状态栏有 DOM 端口圆点，
+ *   - 端口节点 hasDomPorts：提示词/LoRA/四类生成节点。状态栏有 DOM 端口圆点，
  *     连线锚点与端口坐标取自节点的 getPortPoint()（文本节点无端口）
  *   - LoRA 节点 isLoraNode：可堆叠的 LoRA 组合，左右双端口（文本透传），
  *     右端口只能连向 LoRA/生图节点（作用范围传递）
- *   - 生图节点 isGenNode：三类生图节点。无输出端口、左端口只收提示词、
- *     单入替换规则
+ *   - 生成节点 isGenNode：四类生成节点（API 生图/Comfy 生图/RunningHub/
+ *     API 视频）。无输出端口、单入替换规则；左端口收提示词，API 视频节点
+ *     额外接收画布图片作首帧（图生视频，见 isValidLink 的视频分支）
  *   - 真实画布图片 isRealCanvasImage：有图像数据的非节点、非占位图对象，
  *     可作为内容/参考图参与连线、显示缩放控制点、入存档
  * ==========================================================================
@@ -34,8 +35,10 @@ const NodeTypes = {
         IMAGE_GEN_NODE: 'image-gen-node',
         COMFY_GEN_NODE: 'comfy-gen-node',
         RUNHUB_GEN_NODE: 'runhub-gen-node',
+        VIDEO_GEN_NODE: 'video-gen-node',
         GENERATION_PLACEHOLDER: 'generation-placeholder',
-        VIDEO: 'video'
+        VIDEO: 'video',
+        AUDIO: 'audio'
     },
 
     /** 提示词节点（可串链的合并器） */
@@ -68,11 +71,17 @@ const NodeTypes = {
         return source === NodeTypes.SOURCE.RUNHUB_GEN_NODE;
     },
 
-    /** 生图节点集合（三类）：无输出端口，左端口单入替换 */
+    /** API 视频生成节点（文生视频/图生视频，任务提交+轮询链路） */
+    isVideoGenNode(source) {
+        return source === NodeTypes.SOURCE.VIDEO_GEN_NODE;
+    },
+
+    /** 生成节点集合（四类）：无输出端口，左端口单入替换 */
     isGenNode(source) {
         return NodeTypes.isImageGenNode(source) ||
                NodeTypes.isComfyGenNode(source) ||
-               NodeTypes.isRunHubGenNode(source);
+               NodeTypes.isRunHubGenNode(source) ||
+               NodeTypes.isVideoGenNode(source);
     },
 
     /** 面板节点集合：DOM 元素，跳过 canvas 绘制，走节点专属交互/存档链路 */
@@ -98,6 +107,11 @@ const NodeTypes = {
     /** 视频对象（画布上显示首帧封面，双击播放/暂停） */
     isVideo(source) {
         return source === NodeTypes.SOURCE.VIDEO;
+    },
+
+    /** 音频对象（画布上显示自绘音频卡片，单击弹原生控件播放器） */
+    isAudio(source) {
+        return source === NodeTypes.SOURCE.AUDIO;
     },
 
     /**

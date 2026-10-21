@@ -1,3 +1,19 @@
+# ===========================================================================
+# LumenReceiveImageFromCanvas —— 从 LumenLight 画板取图送入工作流（画板 → ComfyUI）
+# ===========================================================================
+# 用途：Edit / 局部重绘 / 多图编辑工作流。画板端把选定的图片（base64）
+# 写入 1-9 号槽位（随工作流提交自动写入），本节点按槽位编号取图。
+#
+# 遮罩（mask）语义与 ComfyUI LoadImage 同约定：透明像素 = 1 = 重绘区。
+# 搭配 LumenLight 遮罩灯箱：涂抹过遮罩的图片以 RGBA 提交（遮罩区域
+# 透明），本节点的 mask 输出可直接接 VAE Encode for Inpainting /
+# SetLatentNoiseMask。
+# mask 来源两级：优先读专用遮罩槽 /api/canvas-mask/:slot（黑白图，
+# 白=重绘区，由前端遮罩灯箱随提交写入），槽位为空时回退 alpha 派生。
+#
+# 依赖：requests + numpy + PIL + torch（ComfyUI 环境自带）。
+# ===========================================================================
+
 import requests
 import numpy as np
 from PIL import Image
@@ -14,17 +30,37 @@ class LumenReceiveImageFromCanvas:
     SetLatentNoiseMask；无 alpha 通道的图片 mask 全 0（保留全图）。
     """
 
+    # LumenLight 后端图片槽位接口（与后端同机部署，端口硬编码
+    # 与其余三个 Lumen 节点保持一致）：GET /api/canvas-image/{slot}
+    # 取图、/api/canvas-mask/{slot} 取遮罩槽（见 receive/_fetch_mask_from_slot）
+
+    # 槽位上限（与后端 canvasImages 槽位校验、面板槽位扫描钳制对齐；
+    # 多图编辑模型可能引用多张画布图，扩容只改这一个数字——
+    # 三处同源：本节点 slot 枚举、routes/canvasImages.js 校验、
+    # PromptPanel.collectContentSlots 扫描钳制）
+    MAX_SLOTS = 9
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "slot": (["1", "2", "3"], {"default": "1"}),
+                # 槽位编号：画板提交工作流时把选定图片写入对应槽位，
+                # 模板里靠编号取用（面板槽位按 Receive 节点出现顺序
+                # 1..N 对位写入，N 个取图节点请把 slot 依次设为 1..N）
+                "slot": ([str(i) for i in range(1, cls.MAX_SLOTS + 1)], {"default": "1"}),
+                # 等待模式：True=槽位暂空时最长等 30s（提交即跑的常规场景，
+                # 容忍画板端图片上传在途）；False=只等 5s 快速失败
                 "wait_for_image": ("BOOLEAN", {"default": True}),
+                # 强制重新加载：True=不读本地缓存每次都重新拉取槽位
                 "force_reload": ("BOOLEAN", {"default": True, "label": "强制重新加载"}),
+                # 随机种子：ComfyUI 不重跑输入值未变的节点，改 seed 即
+                # 强制本节点重新执行（手动刷新用，不参与逻辑）
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "label": "随机种子（强制刷新）"}),
             }
         }
-    
+
+    # 双输出：image 供重绘/编辑主链路；mask 供 inpainting 链路
+    # （接 VAE Encode for Inpainting / SetLatentNoiseMask）
     RETURN_TYPES = ("IMAGE", "MASK")
     RETURN_NAMES = ("image", "mask")
     FUNCTION = "receive"
@@ -55,7 +91,18 @@ class LumenReceiveImageFromCanvas:
             return None
 
     def receive(self, slot, wait_for_image, force_reload=True, seed=0):
-        """从画板获取指定槽位的图片（mask 优先读专用遮罩槽，回退 alpha 派生）"""
+        """ComfyUI 执行入口：从画板获取指定槽位的图片
+        （mask 优先读专用遮罩槽，回退 alpha 派生）。
+
+        参数:
+            slot:           槽位编号（"1".."9"，与画板端面板槽位按序对位）
+            wait_for_image: 等待策略（30s / 5s）
+            force_reload:   是否强制重新拉取
+            seed:           随机种子（仅用于强制刷新节点执行，不参与逻辑）
+        返回:
+            (image, mask) —— 取不到时返回 512×512 空白图 + 全 0 遮罩
+            （图片场景保留空兜底以兼容旧工作流；视频节点无兜底是刻意差异）
+        """
         print(f"\n📥 Lumen: Requesting image from slot {slot}...")
         print(f"  🔄 Force reload: {force_reload}, Seed: {seed}")
 

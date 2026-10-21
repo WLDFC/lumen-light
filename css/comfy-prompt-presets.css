@@ -1,0 +1,286 @@
+/* ==========================================================================
+   LumenLight Comfy 提示词预设样式
+   对应组件：js/components/ComfyPromptPresets.js
+   骨架与配色遵循 llm-system-prompt.css 同款（底层 #0f0f12、面板 #1b1c21、
+   强调 #3b82f6/#60a5fa——项目《配色美学》色板）
+   ========================================================================== */
+
+/* ---------- 负面提示词标题栏的「提示词」独立按钮 ----------
+   与 LORA 叠加栏的「触发词」按钮同款结构（lora-trigger.css，ADR 035）：
+   cpp-topbar = 标题条（flex:1 近乎通栏，只为按钮让出一小截）+ 按钮在
+   栏外右侧独立成钮；stretch 等高——按钮高度始终跟随标题条，顶底对齐。
+   作用域带 #comfyContent 提权（与参考实现同因：同优先级规则竞争） */
+#comfyContent .cpp-topbar {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+
+#comfyContent .cpp-topbar .collapsible-header {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#comfyContent .cpp-topbar-btn {
+    display: inline-flex;
+    align-items: center;
+    align-self: stretch;
+    gap: 5px;
+    padding: 0 11px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);        /* 次要文字档（配色美学文字层级） */
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.4;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.15s ease;
+}
+
+#comfyContent .cpp-topbar-btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+}
+
+#comfyContent .cpp-topbar-btn:hover {
+    border-color: rgba(128, 128, 128, 0.4);
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- 弹窗遮罩与对话框 ---------- */
+.cpp-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.cpp-dialog {
+    width: 620px;
+    max-width: 92vw;
+    max-height: 86vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- 头部：标题 + 两库页签 + 关闭 ---------- */
+.cpp-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cpp-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.cpp-tabs {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.cpp-tab {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.cpp-tab:hover {
+    color: #ffffff;
+}
+
+.cpp-tab.active {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+.cpp-close {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+}
+
+.cpp-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+/* ---------- 预设列表 + 新建 ---------- */
+.cpp-toolbar {
+    display: flex;
+    gap: 8px;
+}
+
+.cpp-list {
+    flex: 1;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #0f0f12;
+    color: #ffffff;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+}
+
+.cpp-new {
+    flex-shrink: 0;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+}
+
+.cpp-new:hover {
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* ---------- 主模型参照行（当前工作流第一个 checkpoint，无则隐藏） ---------- */
+.cpp-model-hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    /* 超长 checkpoint 路径截断，不撑破弹窗 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---------- 名称与内容编辑区 ---------- */
+.cpp-name {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #0f0f12;
+    color: #ffffff;
+    font-size: 13px;
+    outline: none;
+}
+
+.cpp-name:focus,
+.cpp-content:focus,
+.cpp-list:focus {
+    border-color: #3b82f6;
+}
+
+.cpp-content {
+    min-height: 280px;
+    padding: 10px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #0f0f12;
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+}
+
+/* ---------- 底部操作区 ----------
+   提示行独占一行（flex 拉满换行），第二行 = 注入组 + 编辑动作。
+   注入是本弹窗的主按钮：强调蓝描边；入口预定向的目标钮高亮实底 */
+.cpp-footer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.cpp-hint {
+    flex: 1 1 100%;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.cpp-inject-group {
+    display: flex;
+    gap: 8px;
+    margin-right: auto;
+}
+
+.cpp-footer button {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.cpp-footer button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.cpp-footer .cpp-delete {
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.cpp-footer .cpp-delete:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.cpp-footer .cpp-update:hover:not(:disabled),
+.cpp-footer .cpp-saveas:hover {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* 注入钮（主按钮）：强调蓝描边；is-default = 入口预定向目标，实底高亮 */
+.cpp-footer .cpp-inject {
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.5);
+    font-weight: 500;
+}
+
+.cpp-footer .cpp-inject:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.15);
+}
+
+.cpp-footer .cpp-inject.is-default {
+    background: rgba(59, 130, 246, 0.28);
+    color: #93c5fd;
+}

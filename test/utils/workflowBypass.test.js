@@ -143,6 +143,26 @@ describe('applyBypass', () => {
         expect(out['3'].inputs.model).toEqual(['1', 0]);
     });
 
+    test('离线兜底表：LoraLoader 双信号（model+clip）直通不断链', () => {
+        const wf = {
+            '1': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'a.safetensors' } },
+            '2': { class_type: 'LoraLoader', inputs: { lora_name: 'x.safetensors', strength_model: 0.8, strength_clip: 1, model: ['1', 0], clip: ['1', 1] } },
+            '3': { class_type: 'KSampler', inputs: { model: ['2', 0], positive: ['p', 0], negative: ['n', 0], latent_image: ['l', 0] } },
+            '4': { class_type: 'CLIPTextEncode', inputs: { text: 'hi', clip: ['2', 1] } },
+            'p': { class_type: 'CLIPTextEncode', inputs: { text: 'pos', clip: ['4', 0] } },
+            'n': { class_type: 'CLIPTextEncode', inputs: { text: 'neg', clip: ['1', 1] } },
+            'l': { class_type: 'EmptyLatentImage', inputs: {} }
+        };
+        // classInfo 传空（离线）：LoraLoader 有 model/clip 两个连接输入，
+        // 同名启发式会失效——内置兜底表（LoraLoader: model=MODEL, clip=CLIP）
+        // 保证两条信号链都直通到 Checkpoint 输出，下游不断链
+        const out = applyBypass(wf, ['2'], {});
+        expect(out['2']).toBeUndefined();
+        expect(out['3'].inputs.model).toEqual(['1', 0]);   // MODEL 链回 checkpoint
+        expect(out['4'].inputs.clip).toEqual(['1', 1]);    // CLIP 链回 checkpoint
+        expect(out['3'].inputs.positive).toEqual(['p', 0]); // 其余连线不受影响
+    });
+
     test('成环引用按断链处理，不无限递归', () => {
         const wf = {
             '1': { class_type: 'CLIPTextEncode', inputs: { text: 'hi', clip: ['2', 0] } },

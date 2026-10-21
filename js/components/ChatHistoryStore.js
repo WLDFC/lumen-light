@@ -110,6 +110,58 @@ class ChatHistoryStore {
             }
         });
     }
+
+    /**
+     * 全量导出（备份用）：读取库内全部快照记录
+     * @returns {Promise<Array<{key, html, gen, usage?, savedAt}>>} 打不开库时返回 []
+     */
+    async exportAll() {
+        const db = await this._open();
+        if (!db) return [];
+        return new Promise((resolve) => {
+            try {
+                const request = db.transaction(this.storeName, 'readonly')
+                    .objectStore(this.storeName).getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => resolve([]);
+            } catch {
+                resolve([]);
+            }
+        });
+    }
+
+    /**
+     * 整库替换导入（备份导入用）：清空现有记录后写入备份包带来的记录。
+     * 备份导入弹窗已显式警告替换语义，这里不做合并——
+     * 聊天记录是「当前对话状态」，两条时间线合并没有意义。
+     * @param {Array<{key, html, gen?, usage?, savedAt?}>} records - 备份包内的记录
+     * @returns {Promise<number>} 实际写入条数（打不开库时返回 0）
+     */
+    async importReplace(records) {
+        const db = await this._open();
+        if (!db || !Array.isArray(records)) return 0;
+        const valid = records.filter(r => r && typeof r.key === 'string' && typeof r.html === 'string');
+        return new Promise((resolve) => {
+            try {
+                const tx = db.transaction(this.storeName, 'readwrite');
+                const store = tx.objectStore(this.storeName);
+                store.clear();
+                for (const r of valid) {
+                    store.put({
+                        key: r.key,
+                        html: r.html,
+                        gen: r.gen || {},
+                        usage: r.usage || null,
+                        savedAt: r.savedAt || Date.now()
+                    });
+                }
+                tx.oncomplete = () => resolve(valid.length);
+                tx.onerror = () => resolve(0);
+            } catch {
+                resolve(0);
+            }
+        });
+    }
 }
 
 // 暴露到全局作用域

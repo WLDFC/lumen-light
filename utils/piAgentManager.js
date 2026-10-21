@@ -33,6 +33,9 @@ const PROBE_TIMEOUT_MS = 5 * 1000;
 /** 连续真实 RPC 超时达到此次数判定 pi 疑似卡死，广播 pi_unresponsive
  *  交前端人工决策（程序不再自动杀进程）；期间任何 stdout 活动清零计数 */
 const RPC_FAIL_NOTIFY = 3;
+/** 附图登记表的存档数上限（LRU 语义）：附图以 base64 常驻内存，
+ *  多存档长会话下封顶防膨胀，最久未用的存档条目先淘汰 */
+const ATT_ARCHIVE_MAX = 12;
 /** 同上但针对探测（get_state 健康查询）：探测超时在 pi 忙时较常见，
  *  阈值必须高于真实命令；历史上探测与真实命令共用计数，忙轮中可能误判 */
 const PROBE_FAIL_NOTIFY = 6;
@@ -76,7 +79,11 @@ class PiAgentManager {
         this._unresponsiveNotified = false;  // 已广播疑似卡死，恢复时据此广播 pi_responsive 回绿
         this.logFile = path.join(dataDir, 'pi', 'agent.log');
         this._fp = null;          // spawn 时的 API 设置指纹（变化则重启）
-        this.lastAttachments = [];   // 当前消息附图 data URL 列表（extension 按 attachment:N 引用）
+        // 会话级附图登记：archiveKey -> 最近一条含附图消息的附图列表
+        // （扩展工具按 attachment:N 引用，解析见 getAttachments）。
+        // 附图引用不再"只活一条消息"：用户发图后追问参数（如"放大 2x"）
+        // 是多轮常态，下一条消息不带图时引用必须仍然命中
+        this.attachmentsByArchive = new Map();
     }
 
     // ==================== 配置读写 ====================
@@ -158,6 +165,9 @@ class PiAgentManager {
                 apiKeyEnv: envKey,
                 models: (cfg.models || [])
                     .filter((m) => {
+                        // 面板模型行开关关闭（enabled === false）的全局隐藏：
+                        // 同样不注册给 pi（与前端下拉过滤口径一致）
+                        if (m.enabled === false) return false;
                         const t = m.type || 'auto';
                         if (t === 'image' || t === 'video') return false;  // 图像/视频模型不进 pi
                         if (t === 'chat') return true;
@@ -170,7 +180,11 @@ class PiAgentManager {
                     // pi 的 registerProvider 要求模型带全 schema（input/cost/
                     // contextWindow/maxTokens 必填）：缺 input 数组时 pi 内部
                     // 调 model.input.includes(...) 直接崩（undefined.includes）。
-                    // 设置里若自带这些字段则透传覆盖默认值
+                    // 设置里若自带这些字段则透传覆盖默认值。
+                    // contextWindow 默认 307200（300K）：2026-10-28 由 128K 上调
+                    // （用户拍板，主力模型均为大窗口）；对实际窗口更小的模型
+                    // 代价是自动压缩不触发、靠 API 溢出兜底——已知窗口的模型
+                    // 应在设置→API「编辑」弹窗里设准
                     .map((m) => ({
                         id: m.id,
                         name: m.displayName || m.id,
@@ -178,7 +192,7 @@ class PiAgentManager {
                         api: 'openai-completions',
                         input: ['text', 'image'],
                         cost: m.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                        contextWindow: m.contextWindow || 131072,
+                        contextWindow: m.contextWindow || 307200,
                         maxTokens: m.maxTokens || 8192
                     }))
             });
@@ -529,6 +543,7 @@ class PiAgentManager {
             this._writeJson(this.mapFile, this.sessionMap);
             this.currentArchiveKey = null;
             this._wipeSessionsDir(null);
+            this._clearAttachments();
             return;
         }
         await this.send({ type: 'new_session' });
@@ -542,6 +557,14 @@ class PiAgentManager {
         this.currentModel = null;
         // 删除旧会话文件（保留刚建的新会话——pi 可能尚未落盘，按路径保留）
         this._wipeSessionsDir(st && st.sessionFile ? st.sessionFile : null);
+        // 会话推倒重来，附图引用一并作废（旧会话上下文已删，引用旧图
+        // 只会让模型编辑一张它"不记得"的图）
+        this._clearAttachments();
+    }
+
+    /** 清空全部附图登记（清屏/重置会话用：清屏语义为推倒重来，所有存档） */
+    _clearAttachments() {
+        this.attachmentsByArchive.clear();
     }
 
     /**
@@ -612,16 +635,23 @@ class PiAgentManager {
             queued = err.message === 'pi 命令超时';
         }
 
-        // 记录本条消息的附图，供扩展 canvas_run_llm_image 按 attachment:N 引用：
-        // 附图只存在于消息级上下文、不在画布上，没有引用时模型只能靠猜
-        // "画布上哪张是附图"（实测猜错过、编辑了无关的图）
-        this.lastAttachments = Array.isArray(images) ? images.slice() : [];
+        // 附图登记（扩展工具按 attachment:N 引用）：附图只存在于消息级
+        // 上下文、不在画布上，没有引用时模型只能靠猜"画布上哪张是附图"
+        // （实测猜错过、编辑了无关的图）。
+        // 登记粒度是"最近一条含附图的消息"且按存档隔离：本条不带图时
+        // 不覆盖旧值——发图→追问参数的下一轮，attachment:N 仍解析到
+        // 上次的图（回退语义见 getAttachments）
+        const { archiveKey, hasNewImages } = this._registerPromptAttachments(archive, images);
+        const lastAtts = this.attachmentsByArchive.get(archiveKey) || [];
 
         // 消息尾部显式声明附图引用，杜绝模型自行猜测映射
         let finalMessage = message;
-        if (this.lastAttachments.length) {
-            const n = this.lastAttachments.length;
+        if (hasNewImages) {
+            const n = images.length;
             finalMessage += `\n\n[系统注记：本消息含 ${n} 张附图，按顺序在工具 refImages 中引用为 attachment:1…attachment:${n}；基于附图的编辑必须使用这些引用，不要按画布图片名猜测]`;
+        } else if (lastAtts.length) {
+            const n = lastAtts.length;
+            finalMessage += `\n\n[系统注记：本消息无新附图；此前随消息发送的附图仍然有效，可继续用 attachment:1…attachment:${n} 引用最近一次发送的附图]`;
         }
 
         const cmd = {
@@ -634,9 +664,14 @@ class PiAgentManager {
         return { accepted: true, queued };
     }
 
-    /** 当前消息的附图引用列表（扩展 canvas_run_llm_image 按 attachment:N 取图） */
+    /** 附图引用列表（扩展按 attachment:N 取图）：返回当前存档最近一条
+     *  含附图消息的附图——本条消息带图时即本条的（prompt 已覆盖登记），
+     *  不带图时回退到上一次的，"发图→追问参数"的第二轮引用不再落空。
+     *  按 currentArchiveKey 隔离，不跨存档串图 */
     getAttachments() {
-        return this.lastAttachments.map((item, i) => {
+        const key = this.currentArchiveKey || '__unsaved__';
+        const list = this.attachmentsByArchive.get(key) || [];
+        return list.map((item, i) => {
             // 前端发来的是 pi 图片对象 { type:'image', data, mimeType }（见 LlmPiAgent.js），
             // 旧实现当字符串处理会把对象原样透传，扩展再传给 /api/llm/generate-image
             // 时报“参考图格式错误（仅支持 base64 data URL）”。这里统一归一成 data URL。
@@ -647,6 +682,23 @@ class PiAgentManager {
             const m = /^data:([^;,]+)[;,]/.exec(typeof dataUrl === 'string' ? dataUrl : '');
             return { ref: `attachment:${i + 1}`, mediaType: m ? m[1] : 'image/png', dataUrl };
         });
+    }
+
+    /** prompt 附图登记：本条带图 → 覆盖该存档登记（重插 Map 尾部 = 最近
+     *  使用，总量按 ATT_ARCHIVE_MAX 封顶、最久未用的存档先淘汰）；
+     *  不带图 → 保留旧值供 getAttachments 回退。返回注记构造所需信息 */
+    _registerPromptAttachments(archive, images) {
+        const archiveKey = archive || '__unsaved__';
+        const hasNewImages = Array.isArray(images) && images.length > 0;
+        if (hasNewImages) {
+            this.attachmentsByArchive.delete(archiveKey);
+            this.attachmentsByArchive.set(archiveKey, images.slice());
+            while (this.attachmentsByArchive.size > ATT_ARCHIVE_MAX) {
+                const oldest = this.attachmentsByArchive.keys().next().value;
+                this.attachmentsByArchive.delete(oldest);
+            }
+        }
+        return { archiveKey, hasNewImages };
     }
 
     /** 中止当前推理（用户点停止按钮）：完整语义为「清队列 + 掐 bash + 中止」。

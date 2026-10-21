@@ -12,7 +12,8 @@
  *     order 序号用于区分顺序（提交 API 时按 order 升序排列）
  *   - to 端允许多条入线（不同来源图片各自连入），但同一对 (fromId, toId)
  *     只允许一条连线，重复连接会被拒绝，避免视觉与数据双重冗余
- *   - 例外——生图节点（image-gen/comfy-gen）单入：入线只保留最新一条，
+     *   - 例外——生成节点（image-gen/comfy-gen/runhub-gen/video-gen）单入：
+     *     入线只保留最新一条，
  *     新提示词连线直接静默替换原有入线（ComfyUI 习惯），换线即换链
  *
  * 坐标体系：
@@ -171,8 +172,8 @@ class CanvasConnections {
         // （含生图节点——把同一条线重拖一次视为无效操作，不动原线）
         if (this.connections.some(c => c.fromId === fromId && c.toId === toId)) return null;
 
-        // 生图节点单入：已有提示词入线时，新连线直接静默替换（ComfyUI 习惯）。
-        // 生图节点左端口只收提示词（isValidLink 已禁止图片连入），
+        // 生成节点单入：已有入线时，新连线直接静默替换（ComfyUI 习惯）。
+        // 生成节点左端口只收提示词（isValidLink 已禁止图片连入），
         // 入线即"当前提示词链末端"，换线等于换整条链；
         // LoRA 节点同为单入（一条提示词/LoRA 上游链）；
         // 存档恢复在 clear 之后逐条 add，数组为空不会触发本分支
@@ -236,8 +237,11 @@ class CanvasConnections {
 
     /**
      * 检测画布坐标是否命中连线（用于点击删除）
-     * 采用采样法：沿贝塞尔曲线取若干点，判断坐标到采样点的距离。
-     * 采样步长做了反视口缩放补偿，缩放越小采样越密，命中判定稳定。
+     * 采用采样折线法：沿贝塞尔曲线取采样点，判定坐标到相邻采样点
+     * 连线段（而非采样点本身）的距离——折线段首尾相接覆盖整条曲线，
+     * 命中走廊连续无盲区（对照：按采样点判距会在长曲线的采样点之间
+     * 留下点不到的死区）。采样数随曲线长度自适应：控制多边形周长估算
+     * 曲线长度，每 ~15px（世界坐标）一个采样点，长短曲线命中均匀一致。
      * @param {number} canvasX - 画布 X 命中
      * @param {number} canvasY - 画布 Y 命中
      * @returns {Object|null} 命中的连线对象，未命中返回 null
@@ -250,9 +254,12 @@ class CanvasConnections {
             LumenLight.config.connectionHitTolerance
         ) / scale;
 
+        // 本轮命中的 id→图片 查找表（对全部连线复用，替代逐条 find）
+        const imgById = new Map(this.canvas.images.images.map((img) => [img.id, img]));
+
         for (const conn of this.connections) {
-            const fromImg = this.canvas.images.images.find(img => img.id === conn.fromId);
-            const toImg = this.canvas.images.images.find(img => img.id === conn.toId);
+            const fromImg = imgById.get(conn.fromId);
+            const toImg = imgById.get(conn.toId);
             if (!fromImg || !toImg) continue;
 
             const p = CanvasConnections.getBezierPoints(
@@ -261,18 +268,52 @@ class CanvasConnections {
                 scale
             );
 
-            // 三次贝塞尔曲线采样检测
-            const samples = 24;
-            for (let i = 0; i <= samples; i++) {
+            const samples = Math.min(64, Math.max(24,
+                Math.ceil(CanvasConnections._polygonLength(p) / 15)));
+
+            let prevX = p[0].x, prevY = p[0].y;
+            for (let i = 1; i <= samples; i++) {
                 const t = i / samples;
                 const x = this._bezier(t, p[0].x, p[1].x, p[2].x, p[3].x);
                 const y = this._bezier(t, p[0].y, p[1].y, p[2].y, p[3].y);
-                if (Math.hypot(canvasX - x, canvasY - y) <= tolerance) {
+                if (CanvasConnections._distToSegment(
+                    canvasX, canvasY, prevX, prevY, x, y) <= tolerance) {
                     return conn;
                 }
+                prevX = x; prevY = y;
             }
         }
         return null;
+    }
+
+    /**
+     * 控制多边形周长（贝塞尔曲线长度的上界估算，采样数自适应用）
+     * @param {Array<{x: number, y: number}>} p - 四个控制点 [p0, cp1, cp2, p1]
+     * @returns {number}
+     */
+    static _polygonLength(p) {
+        return Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y) +
+               Math.hypot(p[2].x - p[1].x, p[2].y - p[1].y) +
+               Math.hypot(p[3].x - p[2].x, p[3].y - p[2].y);
+    }
+
+    /**
+     * 点到线段的最短距离（垂足参数钳制在 [0,1]——落在线段外时取端点距离）
+     * @param {number} px - 点 X
+     * @param {number} py - 点 Y
+     * @param {number} ax - 线段起点 X
+     * @param {number} ay - 线段起点 Y
+     * @param {number} bx - 线段终点 X
+     * @param {number} by - 线段终点 Y
+     * @returns {number}
+     */
+    static _distToSegment(px, py, ax, ay, bx, by) {
+        const vx = bx - ax, vy = by - ay;
+        const wx = px - ax, wy = py - ay;
+        const L2 = vx * vx + vy * vy;
+        let t = L2 ? (wx * vx + wy * vy) / L2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(px - (ax + t * vx), py - (ay + t * vy));
     }
 
     /**

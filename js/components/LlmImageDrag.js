@@ -118,7 +118,9 @@ class LlmImageDrag {
                 isPlaceholder: false,
                 source: 'llm',
                 prompt: metadata.prompt || '',
-                negativePrompt: metadata.negativePrompt || ''
+                negativePrompt: metadata.negativePrompt || '',
+                // 生成参数记录（溯源/生成同款）：聊天生图块拖出时随图盖章
+                ...(metadata.genInfo ? { genInfo: metadata.genInfo } : {})
             });
             window.canvas.draw();
         };

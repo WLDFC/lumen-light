@@ -24,7 +24,7 @@ data/assets/
 data/workflow-layouts.json
 
 # 持久化设置（含各厂商 API Key 与网页桥接配置，仅本地保存，不入版本库；
-# 注意基线历史中仍有旧版本，将来若添加远程仓库请先轮换各厂商 Key）
+# 经 git log --all 核实从未进过任何提交，历史无 Key 泄露，ADR 052）
 data/settings.json
 
 # 视频生成缓存（临时下载的视频文件，不属于代码）
@@ -42,3 +42,39 @@ pi/
 # MCP 服务器运行时（用户自挂的 MCP 虚拟环境，300MB 级，万级小文件；
 # 随发行包分发、不入 git——与 pi/ 同策略）
 /mcp/
+
+# Python 编译缓存（ComfyUI 自定义节点目录运行时生成，不属于源码）
+__pycache__/
+*.pyc
+
+# 提示词收藏数据（用户个人收藏原图/缩略图/sidecar/元数据，同 /save/ 需锚定根目录）
+/tag/
+
+# 音频工作区（画布音频文件，用户数据）
+data/audio/
+
+# 内置 Node 运行时（发行包随包分发、不入 git，与 pi/ 同策略）
+/runtime/
+
+# 根目录临时调试脚本（py 与 js 同约定，一次性调试用）
+tmp_run_anima.py
+
+# 本会话智能体工作产物（计划文档等，不属于项目内容）
+.zcode/
+
+# LoRA 个人元数据与缓存（备注/Civitai 拉取记录/哈希缓存，运行时生成或个人数据）
+data/lora-meta.json
+data/lora-hashes.json
+
+# RunningHub 平台快照 diff 基准（拉取的个人工作流全文，个人数据）
+data/rh-snapshots.json
+
+# 设计文档不入公开仓库（项目结构/ADR/架构篇仅本地保留）；截图目录保留供 README 引用
+/docs/*
+!/docs/images/
+
+# 打包产物（make-update-package.js 输出：更新 zip + version.json，上传 Release 用）
+/dist/
+
+# 在线更新前的旧版本代码备份（update.bat 写入）
+data/update-backup/

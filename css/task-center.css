@@ -1,0 +1,271 @@
+/* ==================== 任务中心窗口 ==================== */
+/* 左侧工具栏「任务中心」按钮弹出的非模态窗口：宽度与资产库一致
+   （300px）、高度为可用列的一半、壳配色与资产库完全一致。
+   位置由 JS 在每次打开时动态计算（TaskCenter._positionNearButton）：
+   水平贴工具栏右侧、垂直对齐按钮中心并钳制在视口内——CSS 的
+   left/top 只是打开前的占位初值。 */
+
+.task-center {
+    position: fixed;
+    left: 62px;                    /* 占位初值：实际由 JS 按按钮位置覆写 */
+    top: 50%;                      /* 同上（未定位前的兜底，垂直居中） */
+    width: 300px;                  /* 与资产库窗口同宽 */
+    height: calc((100vh - 156px) / 2); /* 可用列(顶栏56+底部让位100)的一半 */
+    display: none;                 /* .show 切换显隐（与资产库一致） */
+    flex-direction: column;
+    background: #101014;           /* 与资产库同底色 */
+    border: 1px solid rgba(128, 128, 128, 0.25); /* 与资产库同描边 */
+    border-radius: 12px;           /* 与右侧面板/资产库一致 */
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);   /* 与资产库同阴影 */
+    z-index: 1150;                 /* 高于左侧工具栏(1100)，低于文件菜单(1200)，与资产库同档 */
+    overflow: hidden;
+}
+
+.task-center.show {
+    display: flex;
+}
+
+/* ==================== 头部 ==================== */
+
+.task-center-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    flex-shrink: 0;
+}
+
+.task-center-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.task-center-header-spacer {
+    flex: 1;
+}
+
+.task-center-icon-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.task-center-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+/* ==================== 列表体 ==================== */
+
+.task-center-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px;
+    display: flex;                 /* 纵向堆叠行；空态提示借 margin:auto 垂直居中 */
+    flex-direction: column;
+}
+
+.task-center-empty {
+    margin: auto;                  /* 整列窗口下空态居中，不显得荒 */
+    padding: 18px 14px;
+    font-size: 12px;
+    color: #6b7280;
+    text-align: center;
+    line-height: 1.6;
+}
+
+/* 单行：主列（上=图标+标签+耗时，下=状态+定位）+ 行尾 ✕ */
+.task-center-row {
+    padding: 7px 8px;
+    border-radius: 7px;
+    display: flex;             /* 主列 + 行尾按钮横向排列 */
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+}
+
+.task-center-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.task-center-main {
+    flex: 1;
+    min-width: 0;              /* 允许标签列收缩省略 */
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+/* 行尾 ✕：复用 GenStopControl 预制件（node.css 的 .gen-stop-btn，暗红
+   灭置/点亮红底白叉两态与画布生图节点完全一致）——此处只做对齐与
+   尺寸适配：预制件尺寸走 --ns 缩放变量（节点上下文），任务中心固定
+   26px、svg 16px。暗色态即不可点（预制件 disabled），点亮态=取消/清除 */
+.task-center-row-x {
+    flex-shrink: 0;
+    margin-top: 1px;           /* 与首行文字对齐 */
+    --ns: 1;                   /* 预制件 calc(16px * var(--ns)) 的基准 */
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+}
+
+/* 结算着色：done/stopped 变灰（TTL 内可见，到点由注册表移除）、
+   failed 红、running 常态 */
+.task-center-row.is-done,
+.task-center-row.is-stopped {
+    opacity: 0.55;
+}
+
+.task-center-row-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.task-center-kind {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: #9ca3af;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.task-center-label {
+    flex: 1;
+    font-size: 12px;
+    color: #e5e7eb;
+    white-space: nowrap;      /* 超长省略，全文看 title */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.task-center-elapsed {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: #6b7280;
+    font-variant-numeric: tabular-nums;   /* 秒表跳动不抖动 */
+}
+
+.task-center-row-bottom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding-left: 23px;       /* 与图标后文字对齐 */
+}
+
+.task-center-status {
+    flex: 1;
+    font-size: 11px;
+    color: #9ca3af;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* 状态色分档 */
+.task-center-row.is-running .task-center-status { color: #ff7ab8; }
+.task-center-row.is-done .task-center-status,
+.task-center-row.is-stopped .task-center-status { color: #9ca3af; }
+.task-center-row.is-failed .task-center-status { color: #f87171; }
+.task-center-row.is-failed .task-center-label { color: #fca5a5; }
+
+/* 运行中呼吸圆点 */
+.task-center-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ff7ab8;
+    flex-shrink: 0;
+    animation: taskCenterPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes taskCenterPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+/* 行内动作钮（停止/定位/清除） */
+.task-center-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.task-center-act {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.task-center-act svg {
+    width: 13px;
+    height: 13px;
+    display: block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.task-center-act:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+/* ==================== 工具栏按钮与角标 ==================== */
+
+.task-center-btn {
+    position: relative;       /* 角标定位上下文 */
+}
+
+.task-center-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #3b82f6;      /* 运行数：项目主按钮蓝 */
+    color: #ffffff;
+    font-size: 10px;
+    line-height: 15px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.task-center-badge.has-failures {
+    background: #ef4444;      /* 未读失败优先红显 */
+}

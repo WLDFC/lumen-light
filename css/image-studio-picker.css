@@ -1,0 +1,208 @@
+/**
+ * ==========================================================================
+ * LumenLight 图像编辑器（ImageStudio）样式 —— 画布选图弹窗
+ * ==========================================================================
+ * 自 image-studio.css 拆出（拆分契约见主文件头）：顶栏「文件 → 从画布
+ * 选择图片…」的多选弹窗——遮罩/主体壳/瀑布流网格/勾选角标/底部操作行。
+ * 加载顺序：image-studio.css → image-studio-panel.css → 本文件
+ * 对应组件：js/components/image-studio/StudioImport.js
+ * ==========================================================================
+ */
+
+/* ==================== 画布选图弹窗（+ 下拉 → 从画布选择） ==================== */
+.is-picker-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+/* hidden 属性对抗上面的 display:flex（弹窗默认隐藏） */
+.is-picker-mask[hidden] {
+    display: none;
+}
+
+/* 中央长方形主体：面板层 #1b1c21 + 通用边框 + 阴影 */
+.is-picker {
+    width: 720px;
+    max-width: 80vw;
+    height: 520px;
+    max-height: 76vh;
+    display: flex;
+    flex-direction: column;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+
+.is-picker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    flex: none;
+}
+
+.is-picker-title {
+    font-size: 14px;
+    color: #fff;
+}
+
+.is-picker-close {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+}
+
+.is-picker-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.is-picker-close svg {
+    width: 15px;
+    height: 15px;
+}
+
+/* 滚动容器与瀑布流分离（同 recipe-manager 的 .recipe-cards-area 方案）：
+ * 多列元素自身当滚动容器时 Chrome 列分片会失效（全部内容横排成一行），
+ * 必须让父级滚动、瀑布流自然生长 */
+.is-picker-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* 缩略图瀑布流：CSS 多列（同 recipe-manager.css 的 .recipe-grid 方案），
+ * 卡片保持原始宽高比、高低交错；先填满一列再进下一列 */
+.is-picker-grid {
+    column-count: 4;
+    column-gap: 10px;
+    padding: 14px 16px;
+}
+
+.is-picker-item {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    margin-bottom: 10px;        /* 列内卡片间距（多列布局不用 gap） */
+    padding: 0;
+    break-inside: avoid;        /* 禁止卡片被拆到两列 */
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);      /* 卡片内层底色 */
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.is-picker-item:hover {
+    border-color: rgba(128, 128, 128, 0.4);     /* 悬停加强边框 */
+}
+
+/* 选中：强调蓝描边（呼应节点/图片选中框语义） */
+.is-picker-item.selected {
+    outline: 2px solid #3b82f6;
+    outline-offset: -2px;
+}
+
+.is-picker-item img {
+    width: 100%;
+    height: auto;               /* 保持原始宽高比完整显示（瀑布流关键） */
+    display: block;
+}
+
+/* 勾选角标：选中时出现的蓝色圆点对勾 */
+.is-picker-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 20px;
+    height: 20px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: #3b82f6;
+    border-radius: 50%;
+    color: #fff;
+}
+
+.is-picker-item.selected .is-picker-badge {
+    display: flex;
+}
+
+.is-picker-badge svg {
+    width: 12px;
+    height: 12px;
+}
+
+.is-picker-empty {
+    column-span: all;
+    padding: 48px 0;
+    text-align: center;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);            /* 空状态提示文字 */
+}
+
+.is-picker-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+    flex: none;
+}
+
+.is-picker-count {
+    margin-right: auto;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.is-picker-cancel,
+.is-picker-ok {
+    height: 32px;
+    padding: 0 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.is-picker-cancel {
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: transparent;
+    color: #fff;
+}
+
+.is-picker-cancel:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.is-picker-ok {
+    border: none;
+    background: #3b82f6;                        /* 主按钮强调蓝 */
+    color: #fff;
+}
+
+.is-picker-ok:hover {
+    background: #2563eb;
+}
+
+.is-picker-ok:disabled {
+    opacity: 0.6;
+    cursor: default;
+}

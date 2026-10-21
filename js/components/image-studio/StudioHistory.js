@@ -80,6 +80,7 @@ class StudioHistory {
                 layer.tx = Number(spec.x) || 0;
                 layer.ty = Number(spec.y) || 0;
                 layer.tscale = Number(spec.scale) > 0 ? Number(spec.scale) : 1;
+                layer.flipX = !!spec.flipX;
                 layer.empty = !spec.paint;
                 const paintJob = studio._loadInto(layer.paintCv, spec.paint);
                 jobs.push(paintJob);

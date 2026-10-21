@@ -45,34 +45,70 @@ class CanvasClipboard {
 
         // 处理文件拖放上传（从系统资源管理器等拖入图片/视频文件）
         c.canvas.addEventListener('drop', (e) => {
-            // 页面内图片拖拽（LLM 灯箱/聊天图）的 dataTransfer 会同时携带 URL 和文件，
-            // 此时交给 app.js 的 URL 拖放处理，避免同一张图被重复添加两次
-            if (e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')) {
-                return;
-            }
-
-            const allFiles = Array.from(e.dataTransfer.files);
-            const rect = c.canvas.getBoundingClientRect();
-
-            // 图片文件：走现有流程（FileReader → data URL → addImage）
-            const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
-            imageFiles.forEach((file, i) => {
-                c.images.add(file, e.clientX - rect.left + i * 20, e.clientY - rect.top, c.viewport, i * 20)
-                    .then(() => c.draw());
-            });
-
-            // 视频文件：上传到服务器持久化存储，然后通过 CanvasVideoManager 添加到画布。
-            // isVideoFile 对 MIME 为空的文件（Windows 拖 .mkv/.mov）按扩展名兜底
-            const videoFiles = allFiles.filter(f => CanvasVideoManager.isVideoFile(f));
-            videoFiles.forEach((file) => {
-                c.videoManager.addVideoFile(file)
-                    .then(() => c.draw())
-                    .catch((err) => console.error('视频拖放处理失败:', err));
-            });
+            this._ingestDroppedFiles(e);
         });
+
+        // 画布之外 DOM（提示词面板/节点/工具栏等覆盖层）上的文件拖放同样
+        // 接收：document 捕获层先于 body 的默认行为吞没层执行，落点由事件
+        // 坐标换算（与释放位置的元素无关）——曾只听画布一层，拖到覆盖层上
+        // 静默无效（表现为"拖进去没反应、控制台也无报错"）
+        document.addEventListener('drop', (e) => {
+            if (e.target === c.canvas) return;   // 画布层已处理，避免双落
+            this._ingestDroppedFiles(e);
+        }, true);
 
         // 初始化复制粘贴图片功能
         this.initPasteHandler();
+    }
+
+    /**
+     * 文件拖放入口（画布与画布外覆盖层共用）：
+     * 图片 → FileReader 落图；视频/音频 → 上传工作区后落画布。
+     * 页面内图片拖拽（LLM 灯箱/聊天图）的 dataTransfer 会同时携带 URL 和
+     * 文件，此类拖拽带 text/uri-list——交给 app.js 的 URL 拖放处理，避免
+     * 同一张图被重复添加两次。注意只有 uri-list 能作为跳过条件——部分
+     * 文件来源（聊天工具/下载列表拖出）会同时设置 text/plain 与 Files，
+     * 把 text/plain 也纳入跳过会让这类文件拖入静默无效（曾致 mp3/wav
+     * 拖不进画布）
+     * @param {DragEvent} e - drop 事件
+     */
+    _ingestDroppedFiles(e) {
+        const c = this.canvas;
+        if (!e.dataTransfer) return;
+        if (e.dataTransfer.getData('text/uri-list')) return;
+
+        const allFiles = Array.from(e.dataTransfer.files);
+        if (allFiles.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = c.canvas.getBoundingClientRect();
+
+        // 图片文件：走现有流程（FileReader → data URL → addImage）
+        const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
+        imageFiles.forEach((file, i) => {
+            c.images.add(file, e.clientX - rect.left + i * 20, e.clientY - rect.top, c.viewport, i * 20)
+                .then(() => c.draw());
+        });
+
+        // 视频文件：上传到服务器持久化存储，然后通过 CanvasVideoManager 添加到画布。
+        // isVideoFile 对 MIME 为空的文件（Windows 拖 .mkv/.mov）按扩展名兜底
+        const videoFiles = allFiles.filter(f => CanvasVideoManager.isVideoFile(f));
+        videoFiles.forEach((file) => {
+            c.videoManager.addVideoFile(file)
+                .then(() => c.draw())
+                .catch((err) => console.error('视频拖放处理失败:', err));
+        });
+
+        // 音频文件：上传到 data/audio/ 后以自绘音频卡片落画布
+        // （isAudioFile 同样对 MIME 为空的文件按扩展名兜底）
+        const audioFiles = allFiles.filter(f => CanvasAudioManager.isAudioFile(f));
+        audioFiles.forEach((file, i) => {
+            c.audioManager.addAudioFile(file, {
+                x: e.clientX - rect.left + i * 20,
+                y: e.clientY - rect.top + i * 20
+            }).then(() => c.draw())
+              .catch((err) => console.error('音频拖放处理失败:', err));
+        });
     }
 
     /**
@@ -105,7 +141,8 @@ class CanvasClipboard {
                 if (!list) return false;
                 for (let i = 0; i < list.length; i++) {
                     const type = list[i].type || '';
-                    if (type.startsWith('image/') || CanvasVideoManager.isVideoFile(list[i])) return true;
+                    if (type.startsWith('image/') || CanvasVideoManager.isVideoFile(list[i]) ||
+                        CanvasAudioManager.isAudioFile(list[i])) return true;
                 }
                 return false;
             });
@@ -117,9 +154,10 @@ class CanvasClipboard {
 
             if (!items && !files) return;
 
-            // 收集所有图片与视频
+            // 收集所有图片与视频/音频
             const imagesToAdd = [];
             const videosToAdd = [];
+            const audiosToAdd = [];
 
             // 方法1：从 items 获取（支持截图等）
             if (items) {
@@ -142,12 +180,14 @@ class CanvasClipboard {
                         imagesToAdd.push(file);
                     } else if (CanvasVideoManager.isVideoFile(file)) {
                         videosToAdd.push(file);
+                    } else if (CanvasAudioManager.isAudioFile(file)) {
+                        audiosToAdd.push(file);
                     }
                 }
             }
 
-            // 如果没有图片和视频，不拦截，让默认行为处理
-            if (imagesToAdd.length === 0 && videosToAdd.length === 0) {
+            // 如果没有图片和视频/音频，不拦截，让默认行为处理
+            if (imagesToAdd.length === 0 && videosToAdd.length === 0 && audiosToAdd.length === 0) {
                 return;
             }
 
@@ -186,6 +226,20 @@ class CanvasClipboard {
                     });
                 } catch (err) {
                     console.error(`❌ 粘贴视频 ${i + 1} 失败:`, err);
+                }
+            }
+
+            // 音频文件：上传 data/audio/ 后以音频卡片落画布，同样错开落点
+            for (let i = 0; i < audiosToAdd.length; i++) {
+                const offset = (imagesToAdd.length + videosToAdd.length + i) * 200;
+                try {
+                    const p = c.viewport.screenToCanvas(centerX + offset, centerY + offset);
+                    await c.audioManager.addAudioFile(audiosToAdd[i], {
+                        centerX: p.x,
+                        centerY: p.y
+                    });
+                } catch (err) {
+                    console.error(`❌ 粘贴音频 ${i + 1} 失败:`, err);
                 }
             }
 
@@ -357,6 +411,16 @@ class CanvasClipboard {
                         workflowId: data.workflowId,
                         values: data.values,
                         count: data.count
+                    });
+                    c.images.images.push(node);
+                } else if (entry.type === NodeTypes.SOURCE.VIDEO_GEN_NODE) {
+                    // API 视频生成节点：恢复几何与选择状态
+                    node = new VideoGenNode(c, data.x + offset, data.y + offset, {
+                        width: data.width,
+                        height: data.height,
+                        model: data.model,
+                        ratio: data.ratio,
+                        duration: data.duration
                     });
                     c.images.images.push(node);
                 } else if (entry.type === NodeTypes.SOURCE.LORA_NODE) {

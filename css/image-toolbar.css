@@ -11,8 +11,9 @@
 /* ==================== 工具栏容器 ==================== */
 
 /* 浮动工具栏主容器，fixed 定位跟随屏幕 */
-/* z-index 997：与节点、图片名称/尺寸标签同层，低于顶栏(998)与右侧面板(999)；
-   拖动图片经过顶部工具栏时工具栏被顶栏自然遮住，不遮挡界面框架。
+/* z-index 997：高于画布节点(995)与名称标签(996)，低于顶栏(998)与右侧
+   面板(999)；拖动图片经过顶部工具栏时工具栏被顶栏自然遮住，不遮挡
+   界面框架。
    子菜单 .upscale-submenu(1001) 与 Toast(9999) 独立挂到 body，不受本层影响 */
 .image-toolbar {
     position: fixed;
@@ -184,6 +185,45 @@
     font-weight: 500;
 }
 
+/* ==================== 编组聚集开关按钮 ==================== */
+
+/* 触发器（中分区）：图标 + "聚集"文字，形态与解组按钮同语言。
+   激活态（is-active）：青色图标文字 + 微青底——与画布聚集区
+   描边/角标同色（CanvasRenderer 用 rgba(108,235,255)），选中组
+   一眼可辨是否为当前聚集区 */
+.image-toolbar .group-collect-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 10px;
+    gap: 6px;
+    border: none;
+    border-radius: 17px;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.image-toolbar .group-collect-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.image-toolbar .group-collect-btn svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+}
+
+.image-toolbar .group-collect-btn .btn-text {
+    font-weight: 500;
+}
+
+.image-toolbar .group-collect-btn.is-active {
+    color: #6cebff;
+    background: rgba(108, 235, 255, 0.12);
+}
+
 /* ==================== 添加到内容按钮 ==================== */
 
 /* "添加到内容"按钮 */
@@ -231,7 +271,7 @@
 /* z-index 997：低于顶栏(998)与右侧面板(999)，
    保证标签作为画布的附属注记被界面框架遮住，不会显示到顶栏或面板上 */
 /* z-index 996：比工具栏(997)低一级——"编辑"下拉菜单随工具栏层叠，
-   必须能盖住图片名字标签；仍高于画布与节点注记，低于顶栏(998)/面板(999) */
+   必须能盖住图片名字标签；仍高于画布节点(995)，低于顶栏(998)/面板(999) */
 .image-name-label {
     position: fixed;
     z-index: 996;
@@ -251,7 +291,8 @@
 /* ==================== 图片尺寸标签 ==================== */
 
 /* 图片尺寸标签：显示在图片下方 */
-/* z-index 997：与名称标签一致，同样低于顶栏(998)与右侧面板(999) */
+/* z-index 997：与工具栏同层（高于节点 995 与名称标签 996），
+   同样低于顶栏(998)与右侧面板(999) */
 .image-size-label {
     position: fixed;
     z-index: 997;

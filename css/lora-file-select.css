@@ -1,0 +1,198 @@
+/**
+ * ==========================================================================
+ * LoraFileSelect — LoRA 封面选择器样式
+ * ==========================================================================
+ * 挂载 div 沿用宿主 class（llm-model-select / comfy-model-select 等）
+ * 直接继承两侧宿主上下文的尺寸与配色（面板 #comfyContent 32px 凹陷件、
+ * 画布节点 .image-gen-node 的 --ns 缩放件），本文件只补：
+ *   1. 挂载点的内部排布（select 的原生文字布局在 div 上不成立）
+ *   2. 菜单（挂 body 的封面网格）全套——层级 998：高于画布节点(995)与
+ *      图片工具栏(997)，见 ADR 010 层级表
+ * 配色取自《配色美学》与 lora-manager.css 的封面网格（渐变占位同款）。
+ * ==========================================================================
+ */
+
+/* ===== 触发器（挂载点内部） ===== */
+.lfs-host {
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    text-align: left;
+}
+.lfs-host .lfs-trigger-cover {
+    flex: none;
+    width: 18px;
+    height: 24px;
+    object-fit: cover;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(128, 128, 128, 0.25);
+}
+.lfs-host .lfs-trigger-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 置顶星标：名字前缀金色小星（pinned 数据来自 lora-meta.json） */
+.lfs-host .lfs-trigger-name[data-pinned="1"]::before {
+    content: "★ ";
+    color: #f5c518;
+    font-size: 10px;
+}
+.lfs-host .lfs-trigger.is-empty {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #9aa0aa;
+}
+.lfs-host .lfs-caret {
+    flex: none;
+    color: #9aa0aa;
+    font-size: 10px;
+    margin-left: auto;
+}
+
+/* ===== 列表（挂 body，行式：一行一个 LoRA） ===== */
+.lfs-menu {
+    position: fixed;
+    z-index: 1200;    /* 弹窗层级（项目层级表：节点 995/工具栏 997/面板 999/
+                         弹窗 ≥1200——低于面板会被面板容器整体盖住，见
+                         image-editor.css 同款注释） */
+    width: min(400px, calc(100vw - 24px));
+    max-height: min(560px, calc(100vh - 32px));
+    display: flex;
+    flex-direction: column;
+    background: #17181d;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    padding: 8px;
+}
+.lfs-menu .lfs-search {
+    flex: none;
+    width: 100%;
+    height: 30px;
+    margin-bottom: 8px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+}
+.lfs-menu .lfs-search:focus {
+    border-color: #3b82f6;
+}
+.lfs-menu .lfs-grid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 2px;
+}
+
+/* ===== 列表行：缩略图在左（固定尺寸，不用 aspect-ratio——
+   懒加载图片的固有比例计算在部分时机不生效，会塌成细条） ===== */
+.lfs-cell {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+}
+.lfs-cell:hover,
+.lfs-cell.is-hover {
+    border-color: rgba(96, 165, 250, 0.55);
+    background: rgba(96, 165, 250, 0.08);
+}
+.lfs-cell.is-active {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+}
+/* 置顶星：行尾（名字之后） */
+.lfs-cell.is-pinned::after {
+    content: "★";
+    position: static;
+    flex: none;
+    color: #f5c518;
+    font-size: 13px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
+}
+.lfs-cell .lfs-cell-cover {
+    flex: none;
+    width: 54px;
+    height: 72px;          /* 3:4 固定像素：布局不依赖图片加载状态 */
+    object-fit: cover;
+    display: block;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(128, 128, 128, 0.22);
+}
+/* 无封面渐变占位（lora-manager.css 同款渐变），同样固定尺寸 */
+.lfs-cell .lfs-cover-fallback {
+    flex: none;
+    width: 54px;
+    height: 72px;
+    display: block;
+    border-radius: 4px;
+    background: linear-gradient(145deg, #31344a 0%, #23253a 60%, #1d1e2e 100%);
+    border: 1px solid rgba(128, 128, 128, 0.22);
+}
+.lfs-cell .lfs-cover-fallback-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #565b66;
+    font-size: 18px;
+    background: repeating-linear-gradient(
+        -45deg, rgba(128, 128, 128, 0.06) 0 8px, transparent 8px 16px);
+}
+.lfs-cell .lfs-cell-name {
+    flex: 1;
+    min-width: 0;
+    display: block;
+    font-size: 13px;
+    line-height: 1.3;
+    color: #e2e5ea;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;   /* 行式列表：名字单行省略，悬浮 title 看全名 */
+}
+.lfs-cell .lfs-cell-dir {
+    display: block;
+    flex: none;
+    max-width: 34%;
+    font-size: 11px;
+    color: #6b7280;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 「不使用」空行：弱化 */
+.lfs-cell.is-empty .lfs-cell-name {
+    color: #9aa0aa;
+}
+/* 「不使用」空格：虚线框弱化 */
+.lfs-cell.is-empty {
+    border-style: dashed;
+    border-color: rgba(128, 128, 128, 0.35);
+}
+.lfs-cell.is-empty .lfs-cell-name {
+    color: #9aa0aa;
+}

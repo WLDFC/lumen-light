@@ -32,8 +32,13 @@ class LumenDropdown {
      * @param {string} [options.placeholder] - 无选项时的占位文案
      * @param {boolean} [options.iconButton] - 图标按钮模式：触发器只显示
      *        静态线条图标（不显示选项文案），当前选中在菜单里以对勾标记
-     * @param {string} [options.triggerIcon] - 图标按钮模式的线条图标路径
-     *        （Feather 风格 inner SVG，由组件统一包 svg 壳）
+     * @param {string} [options.triggerIcon] - 图标按钮模式的线条图标路径，
+     *        以及 staticIcon 文本模式的固定图标（Feather 风格 inner SVG，
+     *        由组件统一包 svg 壳）
+     * @param {boolean} [options.staticIcon] - 文本模式下触发器固定显示
+     *        triggerIcon 线条图标，不随选项切换（选项无需带 icon 字段）
+     *        ——「图标+固定文案」形态（收藏页「筛选」触发器）用；文案
+     *        静止复用既有 setLabel（动作型下拉同款约定）
      * @param {boolean} [options.actionMenu] - 动作型菜单：选项是随时可
      *        重复执行的动作而非互斥状态，菜单里不打选中对勾（配合
      *        setLabel 让触发器文案保持动作名不变）
@@ -45,6 +50,7 @@ class LumenDropdown {
         this.menuClass = options.menuClass || '';
         this.iconButton = !!options.iconButton;
         this.triggerIcon = options.triggerIcon || '';
+        this.staticIcon = !!options.staticIcon;
         this.actionMenu = !!options.actionMenu;
 
         this.value = '';              // 当前选中值
@@ -84,6 +90,9 @@ class LumenDropdown {
             '<polyline points="6 9 12 15 18 9"/></svg>';
         this._iconEl = this.trigger.querySelector('.lumen-dd-icon');
         this._labelEl = this.trigger.querySelector('.lumen-dd-label');
+        if (this.staticIcon && this.triggerIcon) {
+            this._iconEl.innerHTML = this._svgShell(this.triggerIcon);
+        }
         this._setTriggerTitle('');
     }
 
@@ -93,8 +102,9 @@ class LumenDropdown {
             'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
     }
 
-    /** 同步触发器上的选项图标 */
+    /** 同步触发器上的选项图标（staticIcon 固定图标不随选项切换） */
     _setTriggerIcon(opt) {
+        if (this.staticIcon) return;
         this._iconEl.innerHTML = opt && opt.icon ? this._svgShell(opt.icon) : '';
     }
 
@@ -114,6 +124,7 @@ class LumenDropdown {
         if (fingerprint === this._optionsFingerprint) {
             if (selectedValue !== undefined && selectedValue !== this.value) {
                 this.value = selectedValue;
+                this._syncTrigger();   // 选项集未变也要同步触发器文案——失效回落（选中项从清单消失）正是走本分支
                 this._refreshSelectionUI();
             }
             return;
@@ -319,6 +330,7 @@ class LumenDropdown {
         item.setAttribute('role', 'option');
         item.setAttribute('aria-selected', opt.value === this.value ? 'true' : 'false');
         item.dataset.value = opt.value;
+        item.title = opt.label;   // 菜单被视口钳制截断时悬停看全文
         if (opt.icon) {
             const icon = document.createElement('span');
             icon.className = 'lumen-dd-icon';
@@ -382,10 +394,20 @@ class LumenDropdown {
         });
     }
 
+    /**
+     * 程序化选中某值（等价点击该项）：更新值/触发器/菜单对勾并回调
+     * onChange。供外部回填选中用（生成同款回放切模型等）
+     * @param {string} value - 选项值
+     * @returns {boolean} 是否命中选项（未命中不改动任何状态）
+     */
+    select(value) {
+        return this._selectByValue(value);
+    }
+
     /** 按值选中：更新值/触发器/对勾，收起菜单，回调 onChange */
     _selectByValue(value) {
         const opt = this._findOpt(value);
-        if (!opt) return;
+        if (!opt) return false;
         const changed = opt.value !== this.value;
         this.value = opt.value;
         // 分类模式下顺带把左栏停留分类对齐到所选值（下次打开停在该分类）
@@ -396,6 +418,7 @@ class LumenDropdown {
         // 动作型菜单每次都触发（重复执行同一动作是正常使用）；
         // 状态型菜单仅值变化时触发
         if ((changed || this.actionMenu) && this.onChange) this.onChange(opt.value);
+        return true;
     }
 
     /** 收起菜单 */
@@ -431,8 +454,20 @@ class LumenDropdown {
             this.menuEl.style.maxHeight = Math.min(320, avail) + 'px';
         }
 
+        // 菜单宽度：先按内容自然宽度测量（fixed 定位 shrink-to-fit，选项
+        // nowrap 即最长选项文本），再与触发器宽度/分类形态最小宽取大——
+        // 长模型名完整可读，短清单不虚胖；上限钳在视口内，超长仍由选项
+        // 省略号兜底（配合选项 title 悬停看全文）
+        this.menuEl.style.width = 'auto';
+        const naturalW = this.menuEl.offsetWidth;
+        const menuW = Math.min(
+            Math.max(rect.width, naturalW, this._categories ? 380 : 200),
+            vw - 16
+        );
+        this.menuEl.style.width = menuW + 'px';
+
+        // 高度按定宽后的实际内容量（长选项 nowrap，宽高互不影响，量一次即可）
         const menuH = this.menuEl.offsetHeight;
-        const menuW = Math.max(rect.width, this._categories ? 380 : 200);
 
         let left = rect.left;
         if (left + menuW > vw - 8) left = vw - 8 - menuW;
@@ -443,7 +478,6 @@ class LumenDropdown {
 
         this.menuEl.style.left = left + 'px';
         this.menuEl.style.top = top + 'px';
-        this.menuEl.style.width = menuW + 'px';
     }
 
     /** 把键盘高亮项滚动到可视区 */

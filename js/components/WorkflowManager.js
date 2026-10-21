@@ -8,8 +8,13 @@
  *       4. 更新工作流状态提示
  * 通过 onWorkflowChange 回调通知外部当前选中的工作流发生变化。
  * 注意：编辑框、保存/删除按钮、节点数量与日期已精简，以节省面板空间。
+ * 选中的工作流 id 存 localStorage（lumen.lastComfyWorkflowId），F5 刷新后
+ * 列表加载完成自动恢复选中（工作流已删除则回落到提示项）。
  * ==========================================================================
  */
+
+// 记忆键：上次选中的面板工作流 id
+const LAST_WF_KEY = 'lumen.lastComfyWorkflowId';
 
 class WorkflowManager {
     /**
@@ -65,8 +70,10 @@ class WorkflowManager {
         selector?.addEventListener('change', (e) => {
             const workflowId = e.target.value;
             if (workflowId) {
+                localStorage.setItem(LAST_WF_KEY, workflowId);
                 this.selectWorkflow(workflowId);
             } else {
+                localStorage.removeItem(LAST_WF_KEY);
                 // 未选择任何工作流时清空状态
                 this.currentWorkflow = null;
                 this.currentWorkflowId = null;
@@ -97,6 +104,7 @@ class WorkflowManager {
             if (data.status === 'ok') {
                 this.workflows = data.workflows;
                 this.updateWorkflowSelector();
+                this.restoreLastWorkflow();
             }
         } catch (e) {
             console.error('加载工作流列表失败:', e);
@@ -120,6 +128,22 @@ class WorkflowManager {
             option.textContent = wf.name;
             selector.appendChild(option);
         });
+    }
+
+    /**
+     * 恢复上次选中的工作流（F5 刷新后）：记忆的 id 仍存在于清单里才恢复，
+     * 工作流被删除时静默回落到提示项并清掉过期记忆
+     */
+    async restoreLastWorkflow() {
+        const saved = localStorage.getItem(LAST_WF_KEY);
+        if (!saved) return;
+        if (!this.workflows.some((wf) => wf.id === saved)) {
+            localStorage.removeItem(LAST_WF_KEY);
+            return;
+        }
+        const selector = document.getElementById('workflowSelector');
+        if (selector) selector.value = saved;
+        await this.selectWorkflow(saved);
     }
 
     /**

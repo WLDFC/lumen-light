@@ -3,7 +3,7 @@
    骨架复用提示词收藏页（recipe-manager.css / recipe-models-sidebar.css）：
    recipe-dialog 全屏遮罩 + 面板 + 头部 + 内容分栏 + 左侧栏条目——
    尺寸观感与「提示词」窗口完全一致。本文件只写 LoRA 特有部分：
-   左栏计数角标、封面网格（3:4、一行 5 个）、置顶星星、空态。
+   左栏计数角标、封面网格（3:4、一行 8 个）、置顶星星、空态。
    配色遵循项目深色主题色板（同 recipe-manager.css 头注）。
    ========================================================================== */
 
@@ -42,12 +42,19 @@
     line-height: 44px;
 }
 
-/* ===== 封面网格（区别于收藏页瀑布流：固定一行 5 个、3:4 封面）===== */
+/* ===== 封面网格（区别于收藏页瀑布流：固定一行 8 个、3:4 封面）===== */
 
 .lora-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);   /* 一行 5 个（初始规格） */
+    grid-template-columns: repeat(8, 1fr);   /* 一行 8 个（初始规格） */
     gap: 14px;
+}
+/* 小屏回落：窄视口下 8 列单卡过小（按钮占比失衡、名称过早截断），
+   回落到 6 列保可读性 */
+@media (max-width: 1500px) {
+    .lora-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
 }
 .lora-card {
     min-width: 0;
@@ -185,7 +192,7 @@
 }
 .lora-info-panel {
     width: 690px;
-    height: 775px;                 /* 固定高度（用户指定） */
+    height: 900px;                 /* 加高：775px → 900px（触发词/备注区随 flex 增高） */
     max-height: calc(100vh - 48px);
     display: flex;
     flex-direction: column;
@@ -194,7 +201,8 @@
     background: #1b1c21;
     border: 1px solid rgba(128, 128, 128, 0.35);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-    overflow: hidden;
+    overflow-y: auto;              /* 整窗滚动：正文等长内容下拉查看，不再挤压缩框 */
+    overscroll-behavior: contain;  /* 切断滚动链：光标在卡上滚动只滚卡片，滚到头也不连带主页面 */
 }
 .lora-info-header {
     display: flex;
@@ -306,10 +314,14 @@
     color: rgba(255, 255, 255, 0.55);
 }
 .lora-info-status {
+    position: sticky;              /* 整窗滚动时状态行悬在按钮行上方不随内容滚走 */
+    bottom: 58px;
+    z-index: 2;
     min-height: 18px;
-    padding: 0 20px;
+    padding: 4px 20px;
     font-size: 12px;
     color: #22c55e;
+    background: #1b1c21;
 }
 .lora-info-status.error {
     color: #ef4444;
@@ -318,8 +330,8 @@
 /* ===== 触发词/备注块（信息窗底部）：面板内"凹陷"输入语义区，
         按《配色美学》色板回落 #0f0f12（与输入框/下拉同层） ===== */
 .lora-trigger-block {
-    flex: 1;                       /* 平分弹窗多余高度，随高度自动拉伸 */
-    min-height: 88px;
+    flex: 0 0 auto;                /* 不再弹性拉伸：固定高度，整窗滚动看全文 */
+    height: 220px;                 /* 触发词/备注恢复原有高度 */
     display: flex;
     flex-direction: column;        /* 文本/编辑框随块撑满 */
     margin: 0 20px 12px;
@@ -337,8 +349,16 @@
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);   /* 色板：说明/提示文字 */
 }
+/* 头部右侧按钮组（复制+编辑）：捆绑成组让 space-between 只分左右两段 */
+.lora-trigger-tools {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
 .lora-trigger-edit,
-.lora-note-edit {
+.lora-note-edit,
+.lora-trigger-copy,
+.lora-note-copy {
     width: 24px;
     height: 24px;
     display: flex;
@@ -352,13 +372,131 @@
     padding: 0;
 }
 .lora-trigger-edit:hover,
-.lora-note-edit:hover {
+.lora-note-edit:hover,
+.lora-trigger-copy:hover,
+.lora-note-copy:hover {
     background: rgba(255, 255, 255, 0.1);   /* 色板：悬停叠加半透明白 */
     color: #fff;
+}
+/* 复制成功的瞬时反馈：图标变绿 1.5s（JS 定时移除） */
+.lora-trigger-copy.copied,
+.lora-note-copy.copied,
+.lora-desc-copy.copied {
+    color: #4ade80;
+}
+
+/* ===== C 站正文框（备注框移除后，独占其空间：220px 触发词 + 备注原 220px） ===== */
+.lora-trigger-block.lora-desc-block {
+    height: 660px;                 /* 内容靠整窗滚动查看 */
+}
+.lora-trigger-block.lora-desc-block .lora-trigger-head {
+    flex-shrink: 0;                /* 长正文滚动时标题行固定 */
+}
+.lora-desc-text {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;              /* 块内滚动，正文再长也不出框 */
+    overscroll-behavior: contain;  /* 滚到头停在块内，不连带整窗/主页面 */
+    margin-top: 6px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.8);
+    word-break: break-word;
+}
+.lora-desc-text.empty {
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.3);
+}
+/* 正文富文本排版（白名单净化后的 C 站 HTML） */
+.lora-desc-text p {
+    margin: 0 0 8px;
+}
+.lora-desc-text p:last-child {
+    margin-bottom: 0;
+}
+.lora-desc-text h1, .lora-desc-text h2, .lora-desc-text h3,
+.lora-desc-text h4, .lora-desc-text h5, .lora-desc-text h6 {
+    margin: 12px 0 6px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #e5e7eb;
+}
+.lora-desc-text ul, .lora-desc-text ol {
+    margin: 0 0 8px;
+    padding-left: 20px;
+}
+.lora-desc-text li {
+    margin: 2px 0;
+}
+.lora-desc-text pre {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+.lora-desc-text code {
+    font-family: Consolas, Menlo, monospace;
+    font-size: 12px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f0f0f0;
+}
+.lora-desc-text pre code {
+    padding: 0;
+    background: transparent;
+}
+.lora-desc-text a {
+    color: #7db4ff;
+    text-decoration: none;
+}
+.lora-desc-text a:hover {
+    text-decoration: underline;
+}
+.lora-desc-text blockquote {
+    margin: 0 0 8px;
+    padding: 4px 12px;
+    border-left: 3px solid rgba(128, 128, 128, 0.4);
+    color: rgba(255, 255, 255, 0.6);
+}
+.lora-desc-text hr {
+    margin: 10px 0;
+    border: none;
+    border-top: 1px solid rgba(128, 128, 128, 0.3);
+}
+.lora-desc-text table {
+    border-collapse: collapse;
+    margin: 0 0 8px;
+}
+.lora-desc-text th, .lora-desc-text td {
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    padding: 3px 8px;
+}
+.lora-desc-copy:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+.lora-desc-copy {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    padding: 0;
 }
 .lora-trigger-text,
 .lora-note-text {
     flex: 1;                       /* 文本区撑满块内剩余高度 */
+    min-height: 0;                 /* flex 链上解除最小高度约束，长文本不再撑破块边框 */
+    overflow-y: auto;              /* 超长改块内滚动 */
+    overscroll-behavior: contain;  /* 滚到头停在块内，不连带整窗/主页面 */
     display: flex;                 /* 编辑态：让内部 textarea 的 flex:1 生效 */
     flex-direction: column;
     margin-top: 6px;
@@ -389,9 +527,13 @@
     outline: none;
 }
 .lora-info-actions {
+    position: sticky;              /* 整窗滚动时按钮行钉在窗底，随时可点 */
+    bottom: 0;
+    z-index: 2;
     display: flex;
     gap: 12px;
-    padding: 0 20px 20px;
+    padding: 10px 20px 16px;
+    background: #1b1c21;
 }
 .lora-info-btn {
     flex: 1;
@@ -407,6 +549,15 @@
 .lora-info-btn:hover {
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
+}
+/* 暗态禁用（无 Civitai 链接时的「C 站页面」按钮）：降透明度+去悬停 */
+.lora-info-btn.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+.lora-info-btn.disabled:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
 }
 
 /* ===== 画布选图浮层（信息窗之上的二级弹层） ===== */
@@ -615,4 +766,312 @@
 .lora-toolbar-right .lumen-dd-icon-btn {
     height: 40px;
     border-radius: 10px;    /* 与搜索框同圆角，成组更整体 */
+}
+
+/* ===== 工具行动作钮：刷新 / 批量 / 获取，统一「图标+文字」样式 ===== */
+
+/* 原「获取」钮样式推广为三钮共用（图标+文字、40px 高、与搜索框同圆角）。
+   批量钮带预制件加的 lumen-batch-btn 基础类（40×40 图标钮），且
+   lumen-batch.css 在 index.html 里后于本文件加载——同权重会输，故一律
+   挂 .lora-toolbar-right 前缀抬权重压过它 */
+.lora-toolbar-right .lora-refresh-btn,
+.lora-toolbar-right .lora-batch-btn,
+.lora-toolbar-right .lora-fetch-btn {
+    width: auto;            /* 抵消 .lumen-batch-btn 的固定 40px 宽 */
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.lora-toolbar-right .lora-refresh-btn:hover,
+.lora-toolbar-right .lora-batch-btn:hover,
+.lora-toolbar-right .lora-fetch-btn:hover {
+    background: rgba(120, 170, 255, 0.12);
+    border-color: rgba(120, 170, 255, 0.35);
+    color: #fff;
+}
+
+/* 批量激活态沿用预制件绿（lumen-batch.css 同值）——置于悬停规则之后，
+   悬停批量中的按钮保持绿色不被统一悬停盖掉 */
+.lora-toolbar-right .lora-batch-btn.is-active {
+    border-color: rgba(34, 197, 94, 0.6);
+    background: rgba(34, 197, 94, 0.16);
+    color: #22c55e;
+}
+
+/* 刷新扫描中：降透明 + 图标转圈（防重入由 JS 兜底）；置于悬停规则之后，
+   悬停扫描中的按钮维持灰态 */
+.lora-toolbar-right .lora-refresh-btn.is-busy {
+    color: rgba(255, 255, 255, 0.4);
+    cursor: default;
+}
+.lora-refresh-btn.is-busy svg {
+    animation: lora-refresh-spin 0.8s linear infinite;
+}
+@keyframes lora-refresh-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ===== Civitai 一键获取：进度条 / 策略弹窗 ===== */
+
+/* 工具行「获取」按钮样式已并入上方「刷新/批量/获取」三钮共享规则 */
+
+/* 进度状态条：夹在工具行与网格之间，运行中显示进度条+计数+取消 */
+.lora-fetch-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 2px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+}
+.lora-fetch-bar {
+    flex: 1;
+    max-width: 320px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+.lora-fetch-bar i {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #5b9dff, #7db4ff);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+.lora-fetch-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.lora-fetch-cancel {
+    flex-shrink: 0;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    cursor: pointer;
+}
+.lora-fetch-cancel:hover {
+    border-color: rgba(255, 120, 120, 0.5);
+    color: #ff9c9c;
+}
+
+/* 策略/冲突弹窗：复用 .lora-info-overlay 遮罩与 .lora-info-panel 骨架，
+   覆写为内容自适应高度 + 自带内边距（信息窗的边距都在子块上，
+   本弹窗的 desc/字段/按钮行需要面板自己给） */
+.lora-fetch-panel {
+    max-width: 440px;
+    width: 440px;
+    height: auto;                  /* 覆写信息窗的 775px 固定高 */
+    padding: 0 16px 16px;
+}
+/* 头部通铺到面板边缘（抵消面板左右内边距），底部分隔线保持整宽 */
+.lora-fetch-panel .lora-info-header {
+    margin: 0 -16px;
+}
+.lora-fetch-desc {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.6);
+}
+.lora-fetch-field {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    margin-bottom: 12px;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.75);
+}
+.lora-fetch-field > span {
+    width: 100%;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+}
+.lora-fetch-field label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+}
+.lora-fetch-field input[type="text"],
+.lora-fetch-field input[type="password"] {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #0f0f12;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12.5px;
+    outline: none;
+}
+.lora-fetch-field input[type="text"]:focus,
+.lora-fetch-field input[type="password"]:focus {
+    border-color: rgba(120, 170, 255, 0.5);
+}
+.lora-fetch-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
+}
+.lora-fetch-start {
+    height: 32px;
+    padding: 0 18px;
+    border-radius: 8px;
+    border: none;
+    background: #3b82f6;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+}
+.lora-fetch-start:hover {
+    background: #2f6fe0;
+}
+
+/* 冲突三选一弹窗的动作按钮组 */.lora-fetch-choices {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+.lora-fetch-choices button {
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.lora-fetch-choices button:hover {
+    border-color: rgba(120, 170, 255, 0.4);
+    color: #fff;
+}
+.lora-fetch-choices button.primary {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #fff;
+}
+.lora-fetch-choices button.primary:hover {
+    background: #2f6fe0;
+}
+
+/* 信息窗 Hash 行：可点击复制完整值；比对标记（✓绿 / ≠橙） */
+.lora-info-hash.copyable {
+    cursor: pointer;
+}
+.lora-info-hash.copyable:hover {
+    color: #7db4ff;
+    text-decoration: underline;
+}
+.lora-hash-mark {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 8px;
+    font-size: 11px;
+    vertical-align: 1px;
+}
+.lora-hash-mark.ok {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.12);
+}
+.lora-hash-mark.diff {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.12);
+}
+
+
+/* ===== 批量管理（LumenBatchManager 预制件接线） ===== */
+
+/* 批量模式：选择圈出现在封面右上角，星星/投递钮整体左移让位
+   （选择圈 20px + 间距 4px ≈ 24px 档位） */
+.lumen-batch-mode .lora-star { right: 30px; }
+.lumen-batch-mode .lora-send { right: 58px; }
+
+/* 批量模式整卡点击=多选 */
+.lumen-batch-mode .lora-card {
+    cursor: pointer;
+}
+
+/* 选中卡片：绿色描边（选择圈变绿打✓的样式在 lumen-batch.css 通用段） */
+.lora-card.is-selected {
+    border-color: rgba(34, 197, 94, 0.7);
+    border-radius: 8px;
+}
+
+/* ===== 移动到文件夹选择弹窗（LumenTreeList 渲染文件夹树） ===== */
+
+/* 遮罩复用 lumen-confirm-overlay（lumen-confirm.css），这里只补面板内部排布 */
+.lora-move-panel {
+    width: 360px;
+    max-width: calc(100vw - 48px);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.lora-move-title {
+    margin: 0;
+    padding: 14px 16px 10px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+/* 文件夹树列表：独立滚动；缩进档位由 lumen-tree-list.css 提供 */
+.lora-move-list {
+    flex: 1;
+    min-height: 80px;
+    overflow-y: auto;
+    padding: 8px 12px;
+}
+
+.lora-move-item {
+    display: block;
+    width: 100%;
+    height: 38px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.lora-move-item:hover {
+    background: rgba(34, 197, 94, 0.14);
+    color: #22c55e;
+}
+
+.lora-move-empty {
+    margin: 0;
+    padding: 8px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
 }

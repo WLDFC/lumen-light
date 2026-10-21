@@ -28,6 +28,50 @@ function typesMatch(a, b) {
 }
 
 /**
+ * 常见 bypass 相关节点的输入类型兜底表（object_info 不可用时的降级依据）。
+ * 背景：offline 同名启发式对多连接输入节点会失效——如 LoraLoader 有
+ * model/clip 两个连接输入，同名匹配与「唯一连接输入」条件双双落空，
+ * 直通解析返回 null → 下游断链 → /prompt 校验失败（表现为提交无响应）。
+ * 同时覆盖 bypass 链两端：被剔除的加载/编码节点与消费其输出的采样/解码
+ * 节点——下游输入声明类型缺失时 type=null 同样无法匹配。
+ * 本表只列标准 ComfyUI 节点族（参数面板/编辑器最常 bypass 的对象），
+ * 自定义节点仍走同名启发式。类型名对齐 ComfyUI object_info 输入声明。
+ */
+const FALLBACK_INPUT_TYPES = {
+    // 加载/变换节点（bypass 的主要目标）
+    LoraLoader: { model: 'MODEL', clip: 'CLIP' },
+    LoraLoaderModelOnly: { model: 'MODEL' },
+    CheckpointLoaderSimple: { clip: 'CLIP', vae: 'VAE' },
+    CLIPSetLastLayer: { clip: 'CLIP' },
+    // 编码/条件节点（可能被 bypass，也是 CLIP 的消费方）
+    CLIPTextEncode: { clip: 'CLIP' },
+    CLIPTextEncodeSDXL: { clip: 'CLIP' },
+    ConditioningZeroOut: { conditioning: 'CONDITIONING' },
+    ConditioningCombine: { conditioning_1: 'CONDITIONING', conditioning_2: 'CONDITIONING' },
+    // 采样/解码节点（bypass 输出的消费方，其输入类型决定直通匹配目标）
+    KSampler: { model: 'MODEL', positive: 'CONDITIONING', negative: 'CONDITIONING', latent_image: 'LATENT' },
+    KSamplerAdvanced: { model: 'MODEL', positive: 'CONDITIONING', negative: 'CONDITIONING', latent_image: 'LATENT' },
+    VAEDecode: { samples: 'LATENT', vae: 'VAE' },
+    VAEEncode: { pixels: 'IMAGE', vae: 'VAE' },
+    VAEDecodeTiled: { samples: 'LATENT', vae: 'VAE' },
+    EmptyLatentImage: { width: null, height: null, batch_size: null },
+    UpscaleModelLoader: { model_name: null },
+    ImageUpscaleWithModel: { upscale_model: 'UPSCALE_MODEL', image: 'IMAGE' }
+};
+
+/**
+ * 解析节点的输入类型表：优先 object_info，缺失时查兜底表，再缺失走启发式
+ * @param {string} classType - 节点 class_type
+ * @param {Object|null} info - object_info 定义（可能缺失）
+ * @returns {Object|null} { [输入名]: 类型 | null }（null 项 = 启发式）
+ */
+function resolveInputTypes(classType, info) {
+    if (info) return inputTypes(info);
+    const fallback = FALLBACK_INPUT_TYPES[classType];
+    return fallback ? { ...fallback } : null;
+}
+
+/**
  * 提取节点全部输入的声明类型表：{ [输入名]: 类型 | 类型数组 | null }
  * classInfo 缺失（离线/自定义节点未装）时值为 null，走启发式
  */
@@ -62,7 +106,9 @@ function applyBypass(workflow, bypassedIds, classInfo = {}) {
         const node = workflow[id];
         if (!node) continue;
         const info = classInfo[node.class_type] || null;
-        bypassInputTypes.set(id, info ? inputTypes(info) : null);
+        // 类型表：object_info → 内置兜底表（LoraLoader 等多连接输入节点
+        // 离线时靠它避免双信号断链）→ 都没有走同名启发式
+        bypassInputTypes.set(id, resolveInputTypes(node.class_type, info));
         bypassInputOrder.set(id, info
             ? [...Object.keys(info.input && info.input.required || {}),
                ...Object.keys(info.input && info.input.optional || {})]
@@ -88,13 +134,18 @@ function applyBypass(workflow, bypassedIds, classInfo = {}) {
 
         // 候选连接输入：declared 顺序（有类型信息时过滤类型匹配）
         const candidates = order.filter((name) => Array.isArray(inputs[name]));
-        let match = null;
-        if (declared) {
-            match = candidates.find((name) => typesMatch(declared[name], type)) || null;
-        } else {
-            // 离线启发式：同名连接输入优先，唯一连接输入时直接直通
+        // 类型匹配优先：declared[name] 已知且与目标类型兼容时命中。
+        // 目标类型未知（下游是自定义节点，不在 object_info/兜底表，type=null）
+        // 时退到启发式——「宁直通不断链」：同名命中比直接断链更接近
+        // ComfyUI 前端 bypass 的实际行为
+        let match = candidates.find((name) =>
+            type !== null && declared && declared[name] !== undefined &&
+            typesMatch(declared[name], type)
+        ) || null;
+        if (!match) {
+            // 启发式：同名连接输入优先；目标类型未知且唯一连接输入时直接直通
             match = candidates.find((name) => name === sourceName)
-                || (candidates.length === 1 ? candidates[0] : null);
+                || (type === null && candidates.length === 1 ? candidates[0] : null);
         }
         if (!match) return null;
         const value = inputs[match];
@@ -106,7 +157,8 @@ function applyBypass(workflow, bypassedIds, classInfo = {}) {
     for (const [id, node] of Object.entries(workflow)) {
         if (bypassSet.has(id)) continue;   // 被忽略节点不进提交 JSON
         const info = classInfo[node.class_type] || null;
-        const declared = info ? inputTypes(info) : null;
+        // 下游输入的声明类型：同样经兜底表降级（下游也是标准节点时离线仍可匹配）
+        const declared = resolveInputTypes(node.class_type, info);
         const inputs = {};
         for (const [name, value] of Object.entries(node.inputs || {})) {
             if (Array.isArray(value)) {

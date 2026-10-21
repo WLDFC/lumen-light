@@ -128,6 +128,8 @@ class ProjectSerializer {
                 source: img.source,
                 prompt: img.prompt || '',
                 negativePrompt: img.negativePrompt || '',
+                // 生成参数记录（溯源/生成同款，GenRecord；无记录的图不写字段）
+                ...(img.genInfo ? { genInfo: img.genInfo } : {}),
                 // 编辑笔迹层（非破坏性图层，data URL；无笔迹时不写字段）
                 ...(img.editStrokes ? { editStrokes: img.editStrokes } : {}),
                 ...(img.editStrokesOpacity !== undefined
@@ -138,7 +140,9 @@ class ProjectSerializer {
                 // data URL 内嵌；无图层结构时不写字段）
                 ...(img.studioLayers ? { studioLayers: img.studioLayers } : {}),
                 // 视频对象额外保存视频地址（恢复时重建 videoEl）
-                ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
+                ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {}),
+                // 音频对象额外保存音频地址与时长（恢复时重建卡片展示）
+                ...(NodeTypes.isAudio(img.source) && img.audioUrl ? { audioUrl: img.audioUrl, duration: img.duration } : {})
             }));
     }
 
@@ -179,6 +183,8 @@ class ProjectSerializer {
                 source: img.source,
                 prompt: img.prompt || '',
                 negativePrompt: img.negativePrompt || '',
+                // 生成参数记录（溯源/生成同款，GenRecord；无记录的图不写字段）
+                ...(img.genInfo ? { genInfo: img.genInfo } : {}),
                 // 编辑笔迹层（非破坏性图层，data URL 内嵌 project.json）
                 ...(img.editStrokes ? { editStrokes: img.editStrokes } : {}),
                 ...(img.editStrokesOpacity !== undefined
@@ -188,7 +194,9 @@ class ProjectSerializer {
                 // 图像编辑器图层栈（同上，studioLayers 随存档持久化）
                 ...(img.studioLayers ? { studioLayers: img.studioLayers } : {}),
                 // 视频对象额外保存视频地址（恢复时重建 videoEl）
-                ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {})
+                ...(NodeTypes.isVideo(img.source) && img.videoUrl ? { videoUrl: img.videoUrl } : {}),
+                // 音频对象额外保存音频地址与时长（恢复时重建卡片展示）
+                ...(NodeTypes.isAudio(img.source) && img.audioUrl ? { audioUrl: img.audioUrl, duration: img.duration } : {})
             };
         }));
     }
@@ -266,7 +274,7 @@ class ProjectSerializer {
      * 只需序列化几何、标题、标题栏颜色（COLOR_PRESETS 键）与标题栏
      * 缩放系数 titleNS（创建时定格，恢复后调整宽高不改变标题栏大小），
      * 恢复无需 id 换算。
-     * @returns {Array} 组数据数组 [{id, title, color, titleNS, x, y, width, height}]
+     * @returns {Array} 组数据数组 [{id, title, color, titleNS, collect, x, y, width, height}]
      */
     collectGroups() {
         const groups = this.canvas.groups ? this.canvas.groups.groups : [];
@@ -275,6 +283,7 @@ class ProjectSerializer {
             title: g.title,
             color: g.color || '',
             titleNS: g.titleNS,
+            collect: !!g.collect,
             x: g.x,
             y: g.y,
             width: g.width,
@@ -380,6 +389,10 @@ class ProjectSerializer {
                         negativePrompt: imgData.negativePrompt || '',
                         created: Date.now()
                     };
+                    // 生成参数记录（溯源/生成同款，GenRecord）：随存档恢复
+                    if (imgData.genInfo) {
+                        imageObj.genInfo = imgData.genInfo;
+                    }
                     // 编辑笔迹层（非破坏性图层）：恢复字段并异步加载位图，
                     // 就位后补一次重绘（渲染器把笔迹层叠画在原图上）
                     if (imgData.editStrokes) {
@@ -424,11 +437,56 @@ class ProjectSerializer {
                             this.canvas.videoManager.restoreVideoElement(imageObj, videoUrl);
                         }
                     }
+                    // 音频对象：恢复播放地址（audioUrl 在 data/audio/ 持久化，
+                    // 上传即落盘；元数据缺字段时按文件名回退）。
+                    // 尺寸归一：历史版本的卡片标准尺寸偏小（420/640/960 三代），
+                    // 统一放大到当前标准（中心不变），位图同步按新尺寸重绘
+                    // ——旧位图直接拉伸到 1280 宽会糊
+                    if (NodeTypes.isAudio(imageObj.source)) {
+                        const audioUrl = imgData.audioUrl ||
+                            (imgData.name ? '/data/audio/' + imgData.name : '');
+                        if (audioUrl) {
+                            this.canvas.audioManager.restoreAudioElement(imageObj, audioUrl);
+                        }
+                        const stdW = this.canvas.audioManager.constructor.CARD_WIDTH;
+                        const stdH = this.canvas.audioManager.constructor.CARD_HEIGHT;
+                        // 宽度升级（420/640/960 三代旧标准）与高度升级
+                        // （336→450 加高代）分开判：用户手动放大过的卡片
+                        // （宽已超标准）不回按标准尺寸改写
+                        if (imageObj.width < stdW ||
+                            (imageObj.width === stdW && imageObj.height < stdH)) {
+                            const cx = imageObj.x + imageObj.width / 2;
+                            const cy = imageObj.y + imageObj.height / 2;
+                            imageObj.width = stdW;
+                            imageObj.height = stdH;
+                            imageObj.x = Math.round(cx - stdW / 2);
+                            imageObj.y = Math.round(cy - stdH / 2);
+                        }
+                        this.canvas.audioManager.refreshCard(imageObj);
+                    }
                     this.canvas.images.images.push(imageObj);
                     resolve(true);
                 };
-                // 加载失败（文件被外部删除等）：跳过这张图片，不阻塞整体恢复
+                // 加载失败（文件被外部删除等）：跳过这张图片，不阻塞整体恢复。
+                // 音频对象特例：卡片位图缺失（旧版本曾把 canvas 元素直接存进
+                // img 导致资产存不出，恢复必 404）但音频文件仍在工作区时，
+                // 用元数据重建卡片恢复对象，不整条跳过
                 img.onerror = () => {
+                    if (NodeTypes.isAudio(imageObj.source) &&
+                        (imgData.audioUrl || imgData.name)) {
+                        const audioUrl = imgData.audioUrl ||
+                            '/data/audio/' + imgData.name;
+                        this.canvas.audioManager.addAudio(audioUrl, {
+                            name: imgData.name,
+                            prompt: imgData.prompt || '',
+                            x: imgData.x,
+                            y: imgData.y
+                        }).then(
+                            () => resolve(true),
+                            () => resolve(false)
+                        );
+                        return;
+                    }
                     console.warn('存档图片加载失败，已跳过:', imgData.filename || imgData.src);
                     resolve(false);
                 };
@@ -482,6 +540,7 @@ class ProjectSerializer {
                 titleNS: (typeof g.titleNS === 'number' && g.titleNS > 0)
                     ? g.titleNS
                     : Math.max(Math.min(g.width, g.height) / GroupManager.DESIGN_BASE, 0.01),
+                collect: g.collect === true,
                 x: g.x,
                 y: g.y,
                 width: Math.max(g.width, GroupManager.MIN_WIDTH),
@@ -489,6 +548,9 @@ class ProjectSerializer {
                 selected: false
             });
         }
+        // 聚集唯一性收口：脏数据/手工编辑的存档可能带出多个 collect=true，
+        // 归一只保留第一个（开关联动在 GroupManager.setCollect）
+        GroupManager.normalizeCollectGroups(manager.groups);
     }
 
     /**
@@ -544,6 +606,16 @@ class ProjectSerializer {
                     tier: n.tier,
                     quality: n.quality,
                     count: n.count
+                });
+            } else if (n.type === NodeTypes.SOURCE.VIDEO_GEN_NODE) {
+                // API 视频生成节点：恢复几何与全部选择状态
+                // （模型清单由节点构造后自行异步加载并回填）
+                node = new VideoGenNode(this.canvas, n.x, n.y, {
+                    width: n.width,
+                    height: n.height,
+                    model: n.model,
+                    ratio: n.ratio,
+                    duration: n.duration
                 });
             } else if (n.type === NodeTypes.SOURCE.COMFY_GEN_NODE) {
                 // Comfy 生图节点：恢复几何与全部选择状态
