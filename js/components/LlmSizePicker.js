@@ -58,6 +58,30 @@ class LlmSizePicker {
     }
 
     /**
+     * 写入比例（生成同款参数回填用）：非法值忽略，更新内部状态并刷新
+     * 折叠按钮显示（选项段高亮在下一次展开 decorateOptions 时重建）
+     * @param {string} ratio - 如 '1:1'、'16:9'
+     */
+    setRatio(ratio) {
+        const valid = String(ratio || '');
+        if (!valid || !LlmResolution.getSizeOptions().includes(valid)) return;
+        this.ratio = valid;
+        this.render();
+    }
+
+    /**
+     * 写入分辨率档位（生成同款参数回填用）：非法值忽略
+     * @param {string} tier - 如 '1K'、'2K'
+     */
+    setTier(tier) {
+        const valid = String(tier || '');
+        if (!valid ||
+            !LlmResolution.getResolutionTiers().some((t) => t.label === valid)) return;
+        this.tier = valid;
+        this.render();
+    }
+
+    /**
      * 同步当前模型（模型切换/列表刷新时由宿主组件调用）
      * 若当前档位整档低于模型最小总像素（如 Seedream 4.5 不支持 1K），
      * 可见地切换到最低可用档，保证面板状态与实际可生成的尺寸一致

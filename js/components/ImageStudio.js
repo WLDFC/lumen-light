@@ -140,6 +140,7 @@ class ImageStudio {
         this._text = new StudioTextTool(this);
         this._shape = new StudioShapeTool(this);
         this._blur = new StudioBlurTool(this);
+        this._adjust = new StudioAdjustTool(this);
         // 模糊笔刷强度（文档像素，σ = 强度/10），顶栏强度滑杆设置
         this.fxStrength = 16;
         this._colorPicker = new StudioColorPicker(this);
@@ -186,19 +187,56 @@ class ImageStudio {
         this.ih = imageObj.img.naturalHeight;
         this.frame = { fx: 0, fy: 0, fw: this.iw, fh: this.ih };
 
-        // 重建图层栈：底部固定「背景（白底，锁变换）+ 图层 0（图片层，
-        // 可移动缩放）」两层，其上按 studioLayers 重建常规图层。
-        // _imagePristine 保存图片层 pristine 内容快照，供「还原」恢复。
-        // 旧格式自动迁移：旧 base 条目（visible/opacity/mask，涂画已烘焙
-        // 进 img）→ 图片层；editStrokes/mask → 「图层 1」
+        // 图层栈重建（新格式按存档顺序 / 旧格式自动迁移，见方法注释）
+        const loadJobs = this._rebuildLayersFromSpecs(imageObj);
+
+        // 就绪门闩：既有图层内容全部加载完才允许落笔/保存
+        // （防止在空画布上擦除/保存，覆盖掉尚未加载的图层内容）
+        this._readyDone = false;
+        this._readyAll = Promise.all(loadJobs).then(() => {
+            this._readyDone = true;
+            // 历史基线：刚打开未修改的完整状态（此后每个操作完成点追加）
+            this._history.reset();
+            this._pushHistory('打开');
+        });
+
+        this.activeLayerId = this.layers[this.layers.length - 1].id;
+        if (focus === 'crop') {
+            this.setTool('crop');
+        } else {
+            // 默认移动工具：进入即见选中框，先摆位/缩放，涂画再切画笔
+            this.setTool('move');
+        }
+        this._rebuildLayerDom();
+        this._renderLayerList();
+        this._syncPanels();
+
+        // 先显示再适配：舞台尺寸要在可见状态下测量
+        this.overlayEl.style.display = 'flex';
+        this.fitView();
+    }
+
+    /**
+     * 从存档 specs 重建图层栈（open 的图层装配段）：
+     *   - 新格式：specs[0].isBackground 为真 → 按保存顺序重建（背景层/
+     *     图片层以标志识别而非固定下标，图片层可停在 ≥1 的任意位置；
+     *     sawBg/sawImg 对历史重复条目静默去重，背景层缺失兜底补回最底）；
+     *   - 旧格式：底片两层（背景 + 图片层）固定垫底，specs[0] 旧原图层
+     *     条目并入图片层，其余 spec 依序建层；
+     *   - 更旧迁移：无 specs 但有 editStrokes/mask → 映射为「图层 1」。
+     * 常规层的文字/形状属性在载入像素后按属性重渲染（落盘 paint 仅作
+     * 字体缺失兜底）；_imagePristine 同步拍下图片层 pristine 内容供还原。
+     * @param {Object} imageObj - 画布图片对象（含 studioLayers/editStrokes/mask）
+     * @returns {Promise[]} 全部图层内容的异步加载任务（open 的就绪门闩消费）
+     */
+    _rebuildLayersFromSpecs(imageObj) {
+        const loadJobs = [];
         this._layerSeq = 0;
         this.layers = [];
-        const loadJobs = [];
 
         const bg = this._createLayerCanvas('背景', { isBackground: true });
-        const bgCtx = bg.paintCv.getContext('2d');
-        bgCtx.fillStyle = '#ffffff';
-        bgCtx.fillRect(0, 0, this.iw, this.ih);
+        bg.paintCv.getContext('2d').fillStyle = '#ffffff';
+        bg.paintCv.getContext('2d').fillRect(0, 0, this.iw, this.ih);
         bg.empty = false;
         // 注意：bg/imgLayer 不在此处入栈——入栈位置由下方分支决定
         // （新格式按保存顺序重建，旧格式在此处固定入栈），push 两次
@@ -214,9 +252,6 @@ class ImageStudio {
 
         const specs = Array.isArray(imageObj.studioLayers) ? imageObj.studioLayers : null;
         if (specs && specs[0] && specs[0].isBackground) {
-            // 新格式：按保存顺序重建图层栈（图片层可被拖到任意 ≥1 的
-            // 位置）——背景层/图片层以标志识别而非固定下标。 sawBg/sawImg
-            // 防御：若历史版本存过重复条目，加载时静默去重
             let sawBg = false, sawImg = false;
             for (const spec of specs) {
                 if (spec.isBackground) {
@@ -224,6 +259,7 @@ class ImageStudio {
                     sawBg = true;
                     bg.visible = spec.visible !== false;
                     bg.opacity = spec.opacity ?? 1;
+                    bg.flipX = !!spec.flipX;
                     loadJobs.push(this._loadInto(bg.paintCv, spec.paint));
                     loadJobs.push(this._loadInto(bg.maskCv, spec.mask));
                     this.layers.push(bg);
@@ -235,6 +271,7 @@ class ImageStudio {
                     imgLayer.tx = Number(spec.x) || 0;
                     imgLayer.ty = Number(spec.y) || 0;
                     imgLayer.tscale = Number(spec.scale) > 0 ? Number(spec.scale) : 1;
+                    imgLayer.flipX = !!spec.flipX;
                     // 图片层内容以持久化 paint 为准（img.src 已是含背景的合成底片）；
                     // pristine 快照必须等异步加载完成后再拍，否则会拍到空画布
                     if (spec.paint) {
@@ -257,6 +294,7 @@ class ImageStudio {
                     layer.tx = Number(spec.x) || 0;
                     layer.ty = Number(spec.y) || 0;
                     layer.tscale = Number(spec.scale) > 0 ? Number(spec.scale) : 1;
+                    layer.flipX = !!spec.flipX;
                     layer.empty = !spec.paint;
                     const paintJob = this._loadInto(layer.paintCv, spec.paint);
                     loadJobs.push(paintJob);
@@ -319,31 +357,7 @@ class ImageStudio {
                 this.layers.push(layer);
             }
         }
-
-        // 就绪门闩：既有图层内容全部加载完才允许落笔/保存
-        // （防止在空画布上擦除/保存，覆盖掉尚未加载的图层内容）
-        this._readyDone = false;
-        this._readyAll = Promise.all(loadJobs).then(() => {
-            this._readyDone = true;
-            // 历史基线：刚打开未修改的完整状态（此后每个操作完成点追加）
-            this._history.reset();
-            this._pushHistory('打开');
-        });
-
-        this.activeLayerId = this.layers[this.layers.length - 1].id;
-        if (focus === 'crop') {
-            this.setTool('crop');
-        } else {
-            // 默认移动工具：进入即见选中框，先摆位/缩放，涂画再切画笔
-            this.setTool('move');
-        }
-        this._rebuildLayerDom();
-        this._renderLayerList();
-        this._syncPanels();
-
-        // 先显示再适配：舞台尺寸要在可见状态下测量
-        this.overlayEl.style.display = 'flex';
-        this.fitView();
+        return loadJobs;
     }
 
     /** 把 data URL 内容异步画进画布（空内容立即完成） */
@@ -531,6 +545,8 @@ class ImageStudio {
      * 清空/恢复同样是一次修改（保存时要重算拍平/烘焙），必须置脏标记
      */
     revert() {
+        // 调色预览中先丢弃调色会话（快照会盖掉下面的还原动作）
+        if (this._adjust?._open) this._adjust.close();
         if (this.tool === 'crop') {
             // 画幅与全幅一致时重置是空操作，不记历史
             const f = this.frame;
@@ -708,6 +724,100 @@ class ImageStudio {
         }
     }
 
+    /**
+     * 抠图去背景：选中图层的画布内容交给后端 /api/rembg 本地推理
+     * （BEN2 / RMBG），主体之外区域变透明，结果写回该层画布。
+     * 与图片工具栏的抠图按钮（结果作为新图片落画布）不同，这里是
+     * 就地编辑语义，且只作用于选中层——其他图层不动，也不做整图
+     * 拍平。流程：
+     *   1. 校验选中层可抠：背景层锁定白底；文字/形状层像素由属性
+     *      派生，写回会被下次重渲染覆盖，均不可抠；
+     *   2. 该层 paintCv 内容提交推理（内容尺寸，不含 tx/tscale 变换
+     *      ——变换描述摆放位置，抠图关心的是内容本身；后端保持原
+     *      尺寸回传，1:1 写回无偏移）；
+     *   3. 结果写回该层 paintCv（全幅覆盖）+ 刷新图层面板缩略图；
+     *   4. 该层拍进文档底片时（_bakesIntoBase：图片层，或被拖到
+     *      图片层之下的层）隐藏白底背景层——抠图输出透明 PNG，
+     *      背景层若保持可见，保存时 _flattenDoc 会把白底拍平写回
+     *      img.src、透明就丢了；走 editStrokes 通道的上层不垫白底，
+     *      无需处理。图层面板眼睛可随时点回看白底预览；
+     *   5. 按 _bakesIntoBase 置脏 + 推历史，保存与撤销走既有契约。
+     */
+    async removeBackground() {
+        if (!this.image || this._removingBg) return;
+        const layer = this._activeLayer();
+        if (!layer) {
+            this._flashMsg('请先选中要抠图的图层');
+            return;
+        }
+        if (layer.isBackground) {
+            this._flashMsg('背景层是锁定白底垫层，不可抠图；请选中图片层或普通图层');
+            return;
+        }
+        if (layer.isText || layer.isShape) {
+            this._flashMsg('文字/形状层不支持抠图——像素由属性派生，请栅格化或另建像素层');
+            return;
+        }
+        this._removingBg = true;
+        this._setBusy(true);   // 转圈光标 + 拦截一切指针操作
+        this.msgEl.textContent = '抠图中…（本地模型推理，请稍候）';
+        try {
+            const imageData = layer.paintCv.toDataURL('image/png');
+            const resp = await fetch('/api/rembg', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    imageData,
+                    // 抠图模型在设置中选定，与画布工具栏抠图按钮同源
+                    model: window.SettingsManager.getActiveRembgModel()
+                })
+            });
+            const j = await resp.json();
+            if (j.status !== 'ok') throw new Error(j.message || '未知错误');
+
+            // 结果写回选中层：先等图加载完成，再全幅覆盖该层画布
+            const imgEl = new Image();
+            await new Promise((resolve, reject) => {
+                imgEl.onload = resolve;
+                imgEl.onerror = () => reject(new Error('结果图加载失败'));
+                imgEl.src = j.image;
+            });
+            const g = layer.paintCv.getContext('2d');
+            g.clearRect(0, 0, layer.paintCv.width, layer.paintCv.height);
+            g.drawImage(imgEl, 0, 0, layer.paintCv.width, layer.paintCv.height);
+            this._refreshThumb(layer);
+
+            // 该层拍进文档底片时，隐藏白底背景层保透明（眼睛/缩略图随
+            // 列表重建一起刷新）
+            if (this._bakesIntoBase(layer)) {
+                const bg = this.layers.find((l) => l.isBackground && l.visible);
+                if (bg) {
+                    bg.visible = false;
+                    this._layers._applyLayerStyles(bg);
+                    this._layers._renderLayerList();
+                    this.dirty.layers = true;
+                }
+            }
+            this.dirty[this._bakesIntoBase(layer) ? 'base' : 'strokes'] = true;
+            this._pushHistory('抠图');
+            this.msgEl.textContent = `抠图完成（${(j.cost / 1000).toFixed(1)}s，${j.provider}）`;
+            setTimeout(() => { if (this.msgEl.textContent.startsWith('抠图完成')) this.msgEl.textContent = ''; }, 3000);
+        } catch (err) {
+            console.error('抠图失败:', err);
+            this.msgEl.textContent = '抠图失败：' + err.message;
+            this.msgEl.classList.add('error');
+            setTimeout(() => {
+                if (this.msgEl.textContent.startsWith('抠图失败')) {
+                    this.msgEl.textContent = '';
+                    this.msgEl.classList.remove('error');
+                }
+            }, 5000);
+        } finally {
+            this._removingBg = false;
+            this._setBusy(false);
+        }
+    }
+
     // ==================== 绘制（统一绘制面 → 激活图层） ====================
 
     _onPaintDown(e) {
@@ -837,7 +947,13 @@ class ImageStudio {
         ctx.lineWidth = width;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        const lx = (p) => ({ x: (p.x - layer.tx) / ts, y: (p.y - layer.ty) / ts });
+        // 文档坐标 → 图层局部坐标；图层被左右翻转时局部 x 再镜像一次，
+        // 保证「看到哪里就画到哪里」（形状层的镜像已烘焙进画布，不镜像）
+        const lx = (p) => {
+            let x = (p.x - layer.tx) / ts;
+            if (layer.flipX && !layer.isShape) x = cv.width - x;
+            return { x, y: (p.y - layer.ty) / ts };
+        };
         const lf = lx(from);
         const lt = lx(to);
         ctx.beginPath();
@@ -960,6 +1076,8 @@ class ImageStudio {
             this.selCanvas.style.height = stageH + 'px';
             this._selDpr = dpr;
             if (this.tool === 'move' || this.tool === 'text') this._drawSelOverlay();
+            // 光标圈的重算与重画由本方法末尾的 _updateCursor() 统一收口
+            //（尺寸重设清了位图，旧 _cursorBBox 指向空区域，清之无害）
         }
 
         // 裁剪覆盖层：四周外扩出血边距（锚点/尺寸标签画在框外），
@@ -1000,6 +1118,8 @@ class ImageStudio {
     }
 
     close() {
+        // 调色会话先收尾（未保存即丢弃；图层栈随即清空，不能拖到后面）
+        if (this._adjust?._open) this._adjust.close();
         this.overlayEl.style.display = 'none';
         this.overlayEl.classList.remove('cropping');
         this.image = null;
@@ -1042,32 +1162,206 @@ class ImageStudio {
      *  可见性 = 笔刷类工具 且 指针在舞台内——滑杆 input、setTool 等调用
      *  发生在顶栏/面板上时（指针在舞台外），只应用尺寸样式不点亮圆圈，
      *  圈的出现由舞台 pointermove 兜底负责 */
+    /** 光标圈直接画在选中框覆盖层 selCanvas 上（笔刷类工具下该层本来
+     *  空置）——不再设独立 DOM 层：直径 = 笔刷屏幕实际宽度（粗细 ×
+     *  缩放比 × SIZE_SCALE，与画出的笔迹严格 1:1，所见即所得）；橡皮
+     *  虚线圈区分。可见性 = 笔刷类工具 且 指针在舞台内（顶栏/面板上
+     *  不画，圈的出现由舞台 pointermove 兜底负责） */
     _updateCursor() {
         if (!this._brushCursorTool || !this._cursorInStage) {
             this._hideCursor();
             return;
         }
-        const d = Math.max(4,
+        this._cursorD = Math.max(4,
             this.sizes[this._maskMode ? 'mask' : 'strokes'] * this.zoom * ImageStudio.SIZE_SCALE);
-        this.cursorEl.style.width = d + 'px';
-        this.cursorEl.style.height = d + 'px';
-        // 橡皮虚线圈区分；模糊/马赛克不填充（效果区域本身够显眼）。
-        // 描边一律白色——黑白双描边由 .ie-cursor 的 box-shadow 黑晕补齐
-        // （fx 曾用黑色描边，在舞台纯黑空白区完全不可见）
-        this.cursorEl.style.border = this.tool === 'eraser'
-            ? '1px dashed rgba(255,255,255,0.9)'
-            : '1px solid rgba(255,255,255,0.9)';
-        this.cursorEl.style.background = this.tool === 'fx' ? 'transparent' : '';
-        this.cursorEl.style.display = 'block';
+        this._redrawCursorOverlay();   // 尺寸/工具/粗细变化：原位重画
+    }
+
+    /** 光标圈局部重绘：只清上一处圈的包围盒再画新圈——canvas 2D 的
+     *  脏区=圈面积，纹理上传量与全屏 clear 无关；且没有独立 DOM 层
+     *  移动（独立层在某些环境不走合成器快速路径，大圈悬停掉帧的
+     *  机械修复——JS/DOM 层实测均干净后定位到的最后路径） */
+    _redrawCursorOverlay() {
+        if (!this.selCanvas) return;
+        const g = this.selCanvas.getContext('2d');
+        const dpr = this._selDpr || 1;
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // 清上一处圈的包围盒（外扩 2px 覆盖描边出血）
+        if (this._cursorBBox) {
+            const b = this._cursorBBox;
+            g.clearRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+            this._cursorBBox = null;
+        }
+        if (!this._cursorPos || !this._cursorD) return;
+        const { x, y } = this._cursorPos;
+        this._drawCursorRing(g, x, y, this._cursorD);
+        this._cursorBBox = { x: x - this._cursorD / 2, y: y - this._cursorD / 2,
+            w: this._cursorD, h: this._cursorD };
+    }
+
+    /** 圈样式（黑白互补任意底色可辨）：半透明填充（fx 不填，效果区
+     *  本身显眼）+ 黑外弧 + 白弧（橡皮虚线）+ 中心定位点 */
+    _drawCursorRing(g, x, y, d) {
+        const r = d / 2 - 1.5;
+        if (this.tool !== 'fx') {
+            g.beginPath();
+            g.arc(x, y, r, 0, Math.PI * 2);
+            g.fillStyle = 'rgba(0, 0, 0, 0.13)';
+            g.fill();
+        }
+        g.setLineDash([]);
+        g.lineWidth = 1.2;
+        g.beginPath();
+        g.arc(x, y, r + 1.1, 0, Math.PI * 2);
+        g.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+        g.stroke();
+        if (this.tool === 'eraser') g.setLineDash([4, 3]);
+        g.beginPath();
+        g.arc(x, y, r, 0, Math.PI * 2);
+        g.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+        g.stroke();
+        g.setLineDash([]);
+        // 中心定位点：低缩放/小圈径时的位置参照
+        g.beginPath();
+        g.arc(x, y, 1.5, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        g.fill();
+        g.lineWidth = 1;
+        g.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+        g.stroke();
     }
 
     _hideCursor() {
-        this.cursorEl.style.display = 'none';
+        // selCanvas 上已无圈（局部清包围盒），指针位置与尺寸缓存一并
+        // 作废——重新进入舞台时由监听器触发 _updateCursor 完整重算
+        //（拖粗细滑杆时指针在顶栏走的是本分支，若不置空尺寸缓存，
+        // 回舞台后只会按旧直径重画，圈大小不随滑杆变化）
+        this._cursorPos = null;
+        this._cursorD = null;
+        this._redrawCursorOverlay();
     }
 
     // ==================== 子模块薄代理 ====================
     // 方法体在 js/components/image-studio/ 各子模块（操作宿主实例），
     // 这里保留同名入口：主类内部调用、DOM 事件绑定与外部调用点零改动
+
+    /**
+     * 左右翻转激活图层（顶栏翻转按钮）：非破坏式——只在图层上置 flipX
+     * 标记，由显示（画布镜像）、笔迹坐标（局部 x 镜像）、拍平合成与
+     * 序列化统一消费。再次点击翻回；背景层（锁定的白底）不参与。
+     */
+    flipActiveLayer() {
+        const layer = this._activeLayer();
+        if (!layer || layer.isBackground) return;
+        layer.flipX = !layer.flipX;
+        if (layer.isShape) {
+            // 形状层：按镜像后的尾巴方位重渲染（外伸/锚点随之重定位）
+            this._shape._render(layer);
+        } else {
+            this._applyLayerStyles(layer);    // 画布镜像显示（含遮罩画布）
+        }
+        this._positionLayerCanvases(layer);
+        this._refreshThumb(layer);            // 图层面板缩略图同步镜像
+        // 翻转改变拍平结果与序列化内容（flipX 随 studioLayers 落盘）
+        this.dirty.layers = true;
+        if (this._bakesIntoBase(layer)) this.dirty.base = true;
+        this._syncPanels();
+        this._pushHistory('左右翻转');
+        this._drawSelOverlay();
+    }
+
+    /**
+     * 旋转激活图层（顶栏旋转按钮，deg = 90 顺时针 / 180）：非破坏式——
+     * 像素层把旋转（含已有翻转标记折入像素）烘焙进画布内容（90° 宽高
+     * 互换），tx/ty 以画布中心为锚重定位；形状层与文字层只旋转属性
+     * （包围盒宽高互换 / 气泡尾巴换向 / text.rot）后重渲染，保持可再编辑。
+     * 背景层（锁定的白底）不参与。
+     */
+    rotateActiveLayer(deg) {
+        const layer = this._activeLayer();
+        if (!layer || layer.isBackground) return;
+        if (layer.isShape) {
+            // 形状层：旋转形状属性后重渲染。翻转标记先折入尾巴（先镜像
+            // 再旋转 = 旋转「看到的样子」），随后清除标记，属性自洽
+            const s = layer.shape;
+            const ext0 = layer._shapeExt || { left: 0, top: 0 };
+            // 旧包围盒中心（tx 是画布左上角，含外伸；包围盒 = tx + ext.left）
+            const cx = (layer.tx || 0) + ext0.left + s.w / 2;
+            const cy = (layer.ty || 0) + ext0.top + s.h / 2;
+            if (layer.flipX) {
+                s.tail = StudioShapeTool.MIRROR_TAIL[s.tail] || s.tail;
+                layer.flipX = false;
+            }
+            if (deg === 90) {
+                [s.w, s.h] = [s.h, s.w];
+                if (s.tail) s.tail = StudioShapeTool.ROT_TAIL_CW[s.tail] || s.tail;
+            } else if (s.tail) {
+                s.tail = StudioShapeTool.ROT_TAIL_180[s.tail] || s.tail;
+            }
+            // 以旧包围盒中心为锚放回新包围盒（_render 会按新外伸回退 tx/ty）
+            layer._shapeExt = { left: 0, top: 0 };
+            layer.tx = cx - s.w / 2;
+            layer.ty = cy - s.h / 2;
+            this._shape._render(layer);
+        } else if (layer.isText) {
+            // 文字层：旋转折入文字属性（text.rot / text.mirror），重渲染
+            // 生成旋转后的位图——再次编辑时属性完整，不会丢失旋转态
+            const t = layer.text;
+            if (layer.flipX) {
+                t.mirror = !t.mirror;
+                layer.flipX = false;
+            }
+            t.rot = (((t.rot || 0) + deg) % 360 + 360) % 360;
+            // 以旧画布中心为锚放回新画布（90° 宽高互换）
+            const ow = layer.paintCv.width * layer.tscale;
+            const oh = layer.paintCv.height * layer.tscale;
+            const cx = (layer.tx || 0) + ow / 2;
+            const cy = (layer.ty || 0) + oh / 2;
+            this._text._render(layer);
+            layer.tx = cx - layer.paintCv.width * layer.tscale / 2;
+            layer.ty = cy - layer.paintCv.height * layer.tscale / 2;
+        } else {
+            // 像素层（底片图层 / 笔迹层 / 模糊层等）：画布内容烘焙旋转，
+            // 翻转标记同步折入像素后清除——之后所有消费点（笔迹坐标
+            // 映射、拍平、序列化）按无标记路径工作，坐标自洽
+            const bakeMirror = !!layer.flipX;
+            layer.flipX = false;
+            // 旧画布中心（烘焙前算好，烘焙后画布尺寸已变）
+            const ow = layer.paintCv.width * layer.tscale;
+            const oh = layer.paintCv.height * layer.tscale;
+            const cx = (layer.tx || 0) + ow / 2;
+            const cy = (layer.ty || 0) + oh / 2;
+            const rad = deg * Math.PI / 180;
+            const rot = (cv) => {
+                const swap = deg === 90;
+                const nw = swap ? cv.height : cv.width;
+                const nh = swap ? cv.width : cv.height;
+                const t = document.createElement('canvas');
+                t.width = nw; t.height = nh;
+                const g = t.getContext('2d');
+                g.translate(nw / 2, nh / 2);
+                g.rotate(rad);
+                if (bakeMirror) g.scale(-1, 1);
+                g.drawImage(cv, -cv.width / 2, -cv.height / 2);
+                cv.width = nw; cv.height = nh;
+                cv.getContext('2d').drawImage(t, 0, 0);
+            };
+            rot(layer.paintCv);
+            rot(layer.maskCv);
+            layer.tx = cx - layer.paintCv.width * layer.tscale / 2;
+            layer.ty = cy - layer.paintCv.height * layer.tscale / 2;
+        }
+        this._applyLayerStyles(layer);        // 清除残留的翻转 transform
+        this._positionLayerCanvases(layer);
+        this._refreshThumb(layer);
+        // 旋转改变拍平结果、序列化内容与遮罩并集（旋转随 paint 落盘）
+        this.dirty.layers = true;
+        this.dirty.mask = true;
+        if (this._bakesIntoBase(layer)) this.dirty.base = true;
+        this._syncPanels();
+        this._pushHistory(`旋转${deg}度`);
+        this._drawSelOverlay();
+    }
 
     // ---- 图层面板（StudioLayerPanel） ----
     addLayer(opts) { return this._layers.addLayer(opts); }
@@ -1123,6 +1417,9 @@ class ImageStudio {
 
     // ---- 历史记录（StudioHistory） ----
     _pushHistory(label) { return this._history.push(label); }
+
+    // ---- 调色工具（StudioAdjustTool） ----
+    openAdjust() { return this._adjust.open(); }
 
     // ---- 裁剪/扩图（StudioCropTool） ----
     _onCropDown(e) { return this._crop._onCropDown(e); }

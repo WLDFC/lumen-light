@@ -108,6 +108,13 @@ class ImageManager {
         // 视频对象额外属性：videoEl（播放控制）和 videoUrl（存档恢复）
         if (options.videoEl) imageObj.videoEl = options.videoEl;
         if (options.videoUrl) imageObj.videoUrl = options.videoUrl;
+        // 音频对象额外属性：audioUrl（存档恢复）与 duration（卡片展示）
+        if (options.audioUrl) imageObj.audioUrl = options.audioUrl;
+        if (options.duration !== undefined) imageObj.duration = options.duration;
+
+        // 生成参数记录（溯源/生成同款，GenRecord）：LLM 聊天生图拖拽落画布
+        // 时随图携带（LlmImageDrag），无记录的拖入图不写字段
+        if (options.genInfo) imageObj.genInfo = options.genInfo;
 
         this.images.push(imageObj);
         // 撤销记账：程序化落图（LLM 拖拽/桥接回流/视频落画布等）可回退
@@ -236,6 +243,11 @@ class ImageManager {
      */
     _cleanupVideoFile(obj, options) {
         if (options.skipFileCleanup) return;
+        // 音频对象同样清理工作区文件（data/audio/）
+        if (NodeTypes.isAudio(obj.source) && obj.audioUrl) {
+            this.cleanupAudioFileByUrl(obj.audioUrl);
+            return;
+        }
         if (!NodeTypes.isVideo(obj.source) || !obj.videoUrl) return;
         this.cleanupVideoFileByUrl(obj.videoUrl);
     }
@@ -257,6 +269,24 @@ class ImageManager {
         const filename = url.split('/').pop();
         fetch('/api/videos/' + encodeURIComponent(filename), { method: 'DELETE' })
             .catch((err) => console.warn('删除视频工作区文件失败:', err));
+        return true;
+    }
+
+    /**
+     * 按工作区地址清理音频文件（音频版 cleanupVideoFileByUrl）：
+     * 仅处理 data/audio/ 内的地址；引用计数校验；播放器开着先关闭
+     * @param {string} url - 音频工作区地址（data/audio/...）
+     * @returns {boolean} 是否真正发起了删除
+     */
+    cleanupAudioFileByUrl(url) {
+        if (!url || !url.includes('data/audio')) return false;
+        if (this.images.some(i => NodeTypes.isAudio(i.source) && i.audioUrl === url)) return false;
+        const owner = this.images.find(i => i.audioUrl === url);
+        if (owner) window.canvas?.audioManager?.dispose?.(owner);
+
+        const filename = url.split('/').pop();
+        fetch('/api/audios/' + encodeURIComponent(filename), { method: 'DELETE' })
+            .catch((err) => console.warn('删除音频工作区文件失败:', err));
         return true;
     }
 

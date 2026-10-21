@@ -8,6 +8,9 @@
  *   - 高清放大：调用 UpscaleManager 对图片进行高清放大处理
  *   - 添加到资产：POST /api/assets 存入后端 data/assets/（内容哈希去重），
  *     资产库随之出现内置标签「我的资产」（见 AssetLibrary.onAssetsSaved）
+ *   - 生成同款：仅带生成记录（imageObj.genInfo，GenRecord）的图显示——
+ *     在图片下方弹出参数卡（GenInfoPopup），可查看/复制提示词参数、
+ *     仅回填或按记录重新生成（回放行为见 GenReplay）
  *   - 下载：将当前选中的图片保存到本地
  *
  * 同时，工具栏还会显示：
@@ -133,12 +136,22 @@ class ImageToolbar {
                     <!-- 添加到资产：保存到后端 data/assets/（内容哈希去重），
                          左侧资产库出现内置标签「我的资产」——与「下载」互补 -->
                     <button type="button" class="toolbar-btn add-asset-btn" title="添加到资产（保存到「我的资产」，左侧资产库可见）">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                             <line x1="12" y1="11" x2="12" y2="17"></line>
                             <line x1="9" y1="14" x2="15" y2="14"></line>
                         </svg>
                         <span class="btn-text">添加到资产</span>
+                    </button>
+                    <!-- 生成同款：查看生成参数并在图片下方弹出参数卡
+                         （GenInfoPopup）；仅带生成记录的图显示——上传图/
+                         旧存档图没有记录，show() 里按 imageObj.genInfo 条件开关 -->
+                    <button type="button" class="toolbar-btn gen-info-btn" title="生成同款（查看生成参数，可回填或直接重生成）">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                            <polyline points="21 3 21 9 15 9"></polyline>
+                        </svg>
+                        <span class="btn-text">生成同款</span>
                     </button>
                 </div>
                 <!-- 右侧功能区：下载（仅图标，无文字） -->
@@ -155,6 +168,9 @@ class ImageToolbar {
 
         // 将工具栏追加到 body，使其能够绝对定位悬浮在画布之上
         document.body.appendChild(this.toolbar);
+
+        // 「生成同款」按钮初始隐藏——是否显示按选中图片有无生成记录决定
+        this.toolbar.querySelector('.gen-info-btn').style.display = 'none';
 
         this.bindToolbarActions();
     }
@@ -208,6 +224,13 @@ class ImageToolbar {
                 this.addToAssets();
             });
 
+        // ---- 中间：生成同款（图片下方弹出参数卡，GenInfoPopup）----
+        this.toolbar.querySelector('.gen-info-btn')
+            .addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openGenInfo();
+            });
+
         // ---- 右侧：下载 ----
         this.toolbar.querySelector('.download-btn')
             .addEventListener('click', (e) => {
@@ -255,8 +278,12 @@ class ImageToolbar {
             // 早期只有提示词/文本两种节点时这里是手工排除清单，LoRA/Comfy/
             // RunningHub 等后来加的节点类型被漏掉——选中节点会误弹图片工具栏；
             // 现改用 NodeTypes.isRealCanvasImage 统一判定，新增节点类型自动覆盖
+            // 音频对象排除：图片工具栏的按钮（高清放大/去除背景/编辑等）
+            // 对音频全是无效动作，弹出还遮住音频卡片——音频的交互走
+            // 单击弹播放器 + Del 删除 + 缩放手柄，不进图片工具栏
             const selectedImages = this.canvas.images.getSelected()
-                .filter(img => NodeTypes.isRealCanvasImage(img));
+                .filter(img => NodeTypes.isRealCanvasImage(img) &&
+                               !NodeTypes.isAudio(img.source));
             if (selectedImages.length > 0) {
                 this.show(selectedImages);
             } else {
@@ -276,6 +303,14 @@ class ImageToolbar {
                         um.menuContainer.contains(e.target)) ||
                     (um.activeScaleMenu && um.activeScaleMenu.contains(e.target))));
                 if (inUpscaleMenu) return;
+
+                // 生成参数弹窗（生成同款）同样挂在 body 上：点弹窗内
+                // （复制/动作按钮）不算点外部，否则 mousedown 先把工具栏
+                // 连同弹窗一起收掉，按钮的 click 永远等不到；弹窗内参数
+                // 下拉的菜单也挂 body（.lumen-dropdown-menu），同理排除
+                if (this.genInfoPopup?.isOpen &&
+                    (this.genInfoPopup.root.contains(e.target) ||
+                     e.target.closest?.('.lumen-dropdown-menu'))) return;
 
                 const isCanvasClick = e.target.tagName === 'CANVAS';
                 const hasSelectedImages = this.canvas.images.selectedIds.size > 0;
@@ -305,6 +340,7 @@ class ImageToolbar {
 
         // 监听图片拖动开始事件：拖动过程中隐藏工具栏和标签，避免视觉干扰
         window.addEventListener('canvasImageDragStart', () => {
+            this.genInfoPopup?.close();
             if (this.isVisible) {
                 this.hideElements();
             }
@@ -319,6 +355,7 @@ class ImageToolbar {
 
         // 监听缩放开始事件：隐藏按钮组和名称标签，仅保留尺寸标签作为实时反馈
         window.addEventListener('canvasImageResizeStart', () => {
+            this.genInfoPopup?.close();
             if (this.isVisible) {
                 this.toolbar.style.display = 'none';
                 this.nameLabel.style.display = 'none';
@@ -378,6 +415,12 @@ class ImageToolbar {
         // 多张选中时隐藏尺寸标签
         this.sizeLabel.style.display = images.length > 1 ? 'none' : 'block';
 
+        // 「生成同款」按钮条件显示：仅单选且图片带生成记录（GenRecord）——
+        // 上传图/旧存档恢复的图没有记录，按钮不出现
+        const lastSelected = images[images.length - 1];
+        this.toolbar.querySelector('.gen-info-btn').style.display =
+            (images.length === 1 && lastSelected.genInfo) ? '' : 'none';
+
         this.updatePosition();
     }
 
@@ -416,6 +459,9 @@ class ImageToolbar {
 
         // 放大菜单挂在 body 上，工具栏隐藏时必须显式移除
         this.upscaleManager?.removeMenu();
+
+        // 生成参数弹窗随工具栏一起收起
+        this.genInfoPopup?.close();
 
         // 清理 requestAnimationFrame 定时器，避免内存泄漏
         if (this.updateThrottleTimer) {
@@ -564,7 +610,10 @@ class ImageToolbar {
                 imageUrl: this.canvas.images.getCompositeSrc(image),
                 source: image.source || 'unknown',
                 name,
-                model
+                model,
+                // 生成参数记录（溯源/生成同款）：随收藏进 tags.json 并渲染进
+                // sidecar「生成参数」节；上传图/旧图无记录则不带，行为不变
+                ...(image.genInfo ? { genInfo: image.genInfo } : {})
             })
         });
         const responseText = await response.text();
@@ -577,6 +626,26 @@ class ImageToolbar {
         if (!response.ok) throw new Error(result.message || '保存失败');
         window.dispatchEvent(new CustomEvent('promptTagSaved', { detail: result }));
         window.socket?.showNotification(result.duplicated ? '该图片已保存，已更新名字和模型' : '图片和提示词已保存');
+    }
+
+    /**
+     * 生成同款入口：打开生成参数弹窗（GenInfoPopup，锚定图片下方）。
+     * 仅单选且图片带生成记录（imageObj.genInfo）时有效——按钮显隐
+     * 已在 show() 条件控制，此处兜底防编程触发
+     */
+    openGenInfo() {
+        if (this.selectedImages.length !== 1) return;
+        const image = this.selectedImages[this.selectedImages.length - 1];
+        if (!image.genInfo) return;
+        if (!this.genInfoPopup) {
+            this.genInfoPopup = new GenInfoPopup(this.canvas);
+        }
+        // 已开着且是同一张图 = 再次点击收起（开关语义）
+        if (this.genInfoPopup.isOpen && this.genInfoPopup.image === image) {
+            this.genInfoPopup.close();
+            return;
+        }
+        this.genInfoPopup.open(image);
     }
 
     /**
@@ -718,23 +787,51 @@ class ImageToolbar {
 
     /**
      * 添加到内容方法
-     * 根据右侧面板当前模式分发目标：
-     *   - LLM 模式：图片加入聊天窗口的待发送图片区（随消息发给模型）
-     *   - Comfy 模式：图片加入内容缩略图列表（原有行为）
-     * 两种模式的事件数据格式保持一致
+     * 根据选中对象类型与右侧面板当前模式分流：
+     *   - 视频对象（带 videoUrl）：LLM 模式不支持（附件区只收图片），
+     *     提示后跳过；Comfy 模式派发 addVideoToContent 事件进视频槽
+     *     （引用式——只传 videoUrl 与封面，不搬视频字节）
+     *   - 图片对象：
+     *     - LLM 模式：图片加入聊天窗口的待发送图片区（随消息发给模型）
+     *     - Comfy 模式：图片加入内容缩略图列表（原有行为）
+     * 同一工具栏同时服务图片与视频对象（视频在画布上是带 videoUrl 的
+     * 图片对象），按钮文案不变，事件数据格式保持一致
      */
     addToContent() {
         if (!this.selectedImages.length) {
-            console.warn('⚠️ 没有可添加的图片');
+            console.warn('⚠️ 没有可添加的内容');
             return;
         }
 
         const modeSelect = document.getElementById('promptMode');
-        const eventName = (modeSelect && modeSelect.value === 'llm')
-            ? 'addImageToLlmAttachments'
-            : 'addImageToThumbnails';
+        const isLlmMode = modeSelect && modeSelect.value === 'llm';
 
         for (const img of this.selectedImages) {
+            // ---- 视频对象分支 ----
+            if (img.videoUrl) {
+                if (isLlmMode) {
+                    window.socket?.showNotification?.('视频暂不支持加入对话（仅支持图片附件）');
+                    continue;
+                }
+                window.dispatchEvent(new CustomEvent('addVideoToContent', {
+                    detail: {
+                        video: {
+                            // 引用式：videoUrl 指向后端 data/videos/ 已落盘文件，
+                            // 槽位与 Comfy 节点都按引用取文件，不搬运字节
+                            videoUrl: img.videoUrl,
+                            // 封面快照（首帧），槽位缩略图显示用
+                            cover: img.img.src,
+                            name: img.name || '',
+                            width: img.width,
+                            height: img.height
+                        }
+                    }
+                }));
+                continue;
+            }
+
+            // ---- 图片对象分支 ----
+            const eventName = isLlmMode ? 'addImageToLlmAttachments' : 'addImageToThumbnails';
 
             window.dispatchEvent(new CustomEvent(eventName, {
                 detail: {

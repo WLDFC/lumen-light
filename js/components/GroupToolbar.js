@@ -61,8 +61,18 @@ class GroupToolbar {
                     <button class="group-color-btn" title="标题栏颜色"></button>
                     <button class="group-layout-btn" title="排列组内成员"></button>
                 </div>
-                <!-- 中间功能区（预留） -->
-                <div class="toolbar-section center"></div>
+                <!-- 中间功能区：聚集开关（全局至多一个，激活态高亮） -->
+                <div class="toolbar-section center">
+                    <button class="group-collect-btn" title="聚集：新生成的图自动落入本组（开启另一组会自动关闭本组）">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <span class="btn-text">聚集</span>
+                    </button>
+                </div>
                 <!-- 右侧功能区：解组（破坏性动作独立分区，图标 = 双叠方块 + 斜线） -->
                 <div class="toolbar-section right">
                     <button class="group-ungroup-btn" title="解组（保留组内图片与节点）">
@@ -112,6 +122,7 @@ class GroupToolbar {
         this.colorDropdown.setOptions(this._colorOptions, '');
 
         this._bindLayoutDropdown();
+        this._bindCollectButton();
         this._bindUngroupButton();
     }
 
@@ -121,12 +132,18 @@ class GroupToolbar {
      * （纯函数），这里只负责取成员、应用坐标与组矩形重_fit 等副作用
      */
     _bindLayoutDropdown() {
-        // Feather 风格线性图标：宫格/水平（横排三点）/垂直（竖排三点）
+        // Feather 风格线性图标：宫格/瀑布流（两列错落块）/水平（横排三点）/
+        // 垂直（竖排三点）
         this._layoutOptions = [
             {
                 value: 'grid',
                 label: '宫格布局',
                 icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'
+            },
+            {
+                value: 'waterfall',
+                label: '瀑布流布局',
+                icon: '<rect x="3" y="3" width="8" height="10" rx="1.5"/><rect x="3" y="16" width="8" height="5" rx="1.5"/><rect x="14" y="3" width="8" height="5" rx="1.5"/><rect x="14" y="11" width="8" height="10" rx="1.5"/>'
             },
             {
                 value: 'horizontal',
@@ -152,6 +169,23 @@ class GroupToolbar {
         });
         this.layoutDropdown.setOptions(this._layoutOptions, 'grid');
         this.layoutDropdown.setLabel('布局');
+    }
+
+    /**
+     * 绑定「聚集」开关按钮：切换当前选中组的 collect 字段（全局至多
+     * 一个，开启另一组会自动关闭本组——联动与撤销记账在
+     * GroupManager.setCollect）。激活态用 is-active 高亮，show() 换组
+     * 选中时同步；落点路由与落图提示在 CollectZone
+     */
+    _bindCollectButton() {
+        const btn = this.toolbar.querySelector('.group-collect-btn');
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();   // 点击不传给画布（避免被当作空白点击）
+            if (!this.group) return;
+            this.canvas.groups.setCollect(this.group.id, !this.group.collect);
+            btn.classList.toggle('is-active', !!this.group.collect);
+        });
+        this._collectBtn = btn;
     }
 
     /**
@@ -311,6 +345,8 @@ class GroupToolbar {
         this.toolbar.style.display = 'block';
         // 下拉同步为该组当前颜色（各组独立，换组选中时跟随）
         this.colorDropdown.setOptions(this._colorOptions, group.color || '');
+        // 聚集开关同步为该组当前状态（激活态高亮）
+        this._collectBtn?.classList.toggle('is-active', !!group.collect);
         this.updatePosition();
     }
 

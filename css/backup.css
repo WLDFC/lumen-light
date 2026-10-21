@@ -1,0 +1,231 @@
+/**
+ * 备份导出/导入弹窗样式（backup.css）
+ *
+ * 作用：文件菜单「备份导出 / 备份导入」弹窗（BackupManager）——
+ *       全屏遮罩 + 居中窄幅面板：勾选行列表（复选框 + 标题 + 说明小字）、
+ *       文件选择凹陷区、警示框、操作按钮行。
+ *
+ * 配色遵循项目深色主题色板：面板 #1b1c21、凹陷层 #0f0f12、
+ * 通用边框 rgba(128,128,128,0.3)、强调蓝 #3b82f6、警示 #f59e0b / 删除红 #ef4444。
+ * 层级 2000：与存档弹窗同级（从文件菜单唤出，需盖过画布全部内容）。
+ */
+
+/* 全屏遮罩 */
+.backup-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 15, 18, 0.6);
+}
+
+.backup-overlay.is-open {
+    display: flex;
+}
+
+/* 面板壳：窄幅居中 */
+.backup-dialog {
+    width: 400px;
+    max-width: calc(100vw - 48px);
+    max-height: calc(100vh - 96px);
+    display: flex;
+    flex-direction: column;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.backup-dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.backup-dialog-header h3 {
+    margin: 0;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.backup-close-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+}
+
+.backup-close-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.backup-dialog-body {
+    padding: 12px 16px 16px;
+    overflow-y: auto;
+}
+
+.backup-desc {
+    margin: 0 0 10px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+}
+
+/* 勾选行：复选框 + 标题 + 说明小字（说明换行独立一行，缩进对齐标题） */
+.backup-check-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas: "box label" "box note";
+    column-gap: 8px;
+    align-items: center;
+    padding: 7px 8px;
+    margin-bottom: 2px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.backup-check-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.backup-check-row input {
+    grid-area: box;
+    accent-color: #3b82f6;
+    cursor: pointer;
+    margin: 0;
+}
+
+.backup-check-row input:disabled {
+    cursor: not-allowed;
+}
+
+.backup-check-row input:disabled ~ .backup-check-label,
+.backup-check-row input:disabled ~ .backup-check-note {
+    opacity: 0.4;
+}
+
+.backup-check-label {
+    grid-area: label;
+    color: #fff;
+    font-size: 13px;
+}
+
+.backup-check-note {
+    grid-area: note;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    margin-top: 1px;
+}
+
+/* 「包含 API Key」子项：缩进一级 */
+.backup-check-sub {
+    margin-left: 20px;
+}
+
+.backup-warn-note {
+    color: #f59e0b;
+}
+
+/* 导入文件选择凹陷区 */
+.backup-file-zone {
+    padding: 14px 12px;
+    margin-bottom: 8px;
+    background: #0f0f12;
+    border: 1px dashed rgba(128, 128, 128, 0.4);
+    border-radius: 8px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.backup-file-zone:hover {
+    border-color: rgba(59, 130, 246, 0.6);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* 聊天记录替换警示框 */
+.backup-warn-box {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 8px;
+    color: #fca5a5;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* 错误信息 */
+.backup-error {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 8px;
+    color: #fca5a5;
+    font-size: 12px;
+}
+
+/* 导入结果清单 */
+.backup-result {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #0f0f12;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    line-height: 1.8;
+}
+
+/* 底部操作行 */
+.backup-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.backup-cancel-btn {
+    padding: 7px 16px;
+    background: #0f0f12;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.backup-cancel-btn:hover {
+    border-color: rgba(128, 128, 128, 0.5);
+}
+
+.backup-primary-btn {
+    padding: 7px 18px;
+    background: #3b82f6;
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.backup-primary-btn:hover {
+    background: #2f6fe0;
+}
+
+.backup-primary-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

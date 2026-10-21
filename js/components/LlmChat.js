@@ -31,6 +31,7 @@ class LlmChat {
         this.stopBtn = document.getElementById('llmStopBtn');
         this.modelSelect = document.getElementById('llmModelSelect');
         this.qualitySelect = document.getElementById('llmQualitySelect');
+        this.skillSelect = document.getElementById('llmSkillSelect');
         this.uploadBtn = document.getElementById('llmUploadBtn');
         this.clearBtn = document.getElementById('llmClearBtn');
         this.fileInput = document.getElementById('llmFileInput');
@@ -76,6 +77,23 @@ class LlmChat {
             { value: 'medium', label: '中质量', icon: LLM_DD_ICONS.star },
             { value: 'high', label: '高质量', icon: LLM_DD_ICONS.star }
         ], '');
+
+        // 指定技能下拉（agent 发送的永驻兜底，见 _refreshAgentSkillDropdown /
+        // getMandatedSkillNote）：「自动」= 模型按 skill_list 描述自行判断；
+        // 选定后每轮 agent 消息注入"先 skill_load 该技能"注记。选择存
+        // localStorage（lumenLight.agentSkill）跨刷新生效
+        this.skillDropdown = new LumenDropdown(this.skillSelect, {
+            menuClass: 'llm-skill-menu',
+            placeholder: '自动',
+            onChange: (v) => {
+                if (v) localStorage.setItem('lumenLight.agentSkill', v);
+                else localStorage.removeItem('lumenLight.agentSkill');
+                this.skillSelect?.classList.toggle('has-skill', !!v);
+            }
+        });
+        this._refreshAgentSkillDropdown();
+        // 技能库弹窗（启停/上传会改清单）关闭后刷新；无变更也只是轻量 GET
+        document.addEventListener('llm-skills-changed', () => this._refreshAgentSkillDropdown());
 
         // ===== 状态 =====
         // 对话历史（发送给后端的上下文）
@@ -161,6 +179,11 @@ class LlmChat {
                     this.videoGen.importLocalVideo(file);
                 } else if (file.type.startsWith('image/')) {
                     this.attachments.addFromFile(file);
+                } else if (window.AudioIngest?.isAudioFile(file)) {
+                    // 音频：不进对话（模型不消费），直接送画布落音频卡片
+                    window.AudioIngest.ingestFile(file)
+                        .catch((err) => window.socket?.showNotification?.(
+                            '音频添加失败: ' + (err.message || '未知错误'), 4000));
                 } else {
                     this.attachments.addDocFromFile(file);
                 }
@@ -747,6 +770,51 @@ class LlmChat {
         }
         this.updateToolbarForModel();
         this._swapHistorySnapshot();
+    }
+
+    /**
+     * 刷新「指定技能」下拉：拉 pi 技能库清单（/api/pi-skills），只列启用项。
+     * 首项「自动」= 不指定，模型按 skill_list 描述自行判断（skill 触发的
+     * 默认路径）；存储的技能已删/禁用时回落自动并清掉失效选择
+     */
+    async _refreshAgentSkillDropdown() {
+        if (!this.skillDropdown) return;
+        let skills = [];
+        try {
+            const r = await fetch('/api/pi-skills');
+            const result = await r.json();
+            if (r.ok && result.status === 'ok' && Array.isArray(result.skills)) {
+                skills = result.skills.filter((s) => s.enabled !== false);
+            }
+        } catch { /* 后端不可达：只显示「自动」 */ }
+        this._agentSkillNames = new Map(skills.map((s) => [s.id, s.name || s.id]));
+        const items = [{ value: '', label: '自动', icon: LLM_DD_ICONS.zap }]
+            .concat(skills.map((s) => ({
+                value: s.id,
+                label: s.name || s.id,
+                icon: LLM_DD_ICONS.star
+            })));
+        let selected = localStorage.getItem('lumenLight.agentSkill') || '';
+        if (selected && !this._agentSkillNames.has(selected)) {
+            localStorage.removeItem('lumenLight.agentSkill');
+            selected = '';
+        }
+        this.skillDropdown.setOptions(items, selected);
+        this.skillSelect?.classList.toggle('has-skill', !!selected);
+    }
+
+    /**
+     * 指定技能的注入注记（agent 发送链路用，LlmPiAgent 拼进 pi 消息、
+     * 不进用户气泡）：选定技能 → 一行"先 skill_load 再执行"的系统注记。
+     * 只注入指令不注入正文——加载仍走 pi 原生 skill_load，内容按需进
+     * 上下文，不常驻膨胀；未选（自动档）返回空串，模型自行判断
+     */
+    getMandatedSkillNote() {
+        const id = localStorage.getItem('lumenLight.agentSkill');
+        if (!id) return '';
+        const name = (this._agentSkillNames && this._agentSkillNames.get(id)) || id;
+        return `\n\n[系统注记：用户为本回合指定了技能「${name}」（skill id: ${id}）——` +
+            `开始任务前必须先 skill_load 加载它并遵循其内容执行；与它职责相近的技能不要重复加载，避免流程混淆。]`;
     }
 
     // ---- 以下 6 个为 LlmHistoryController 同名方法的薄代理 ----

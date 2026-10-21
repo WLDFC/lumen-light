@@ -85,9 +85,8 @@ class StudioCropTool {
         studio.panY += ((studio.frame.fy + studio.frame.fh / 2) - prevCy) * studio.zoom;
         studio.dirty.frame = true;
         const f = studio.frame;
-        studio.dragLabel = (studio.dragEdge === 'left' || studio.dragEdge === 'right')
-            ? `W：${Math.round(f.fw)} 像素`
-            : `H：${Math.round(f.fh)} 像素`;
+        // 完整画幅尺寸（两维都显示——拖单边时另一维是不变基准）
+        studio.dragLabel = `画幅 ${Math.round(f.fw)} × ${Math.round(f.fh)}`;
         studio._applyTransform();
         studio._updateMsg();
     }
@@ -173,15 +172,27 @@ class StudioCropTool {
             ctx.stroke();
         }
 
-        // 拖拽中的尺寸标签（黑底白字圆角，浮在活动边外侧）
+        // 拖拽中的尺寸标签（黑底白字圆角）。放画幅框内侧：贴活动边
+        // 内侧对齐（垂直边=框内右缘中部，水平边=框内底缘居中）——
+        // 首版浮在框外侧被 cropCanvas 的出血边距（CROP_BLEED×2−16
+        // 仅 80px）裁掉尾部，用户只见「W:」不见数字；框内永远完整。
+        // 画幅极窄时（标签比框还宽）退到框中央，两侧由出血边距吸收
         if (studio.dragLabel && studio.dragEdge) {
             const vertical = studio.dragEdge === 'left' || studio.dragEdge === 'right';
             ctx.font = '12px system-ui, sans-serif';
             const textW = ctx.measureText(studio.dragLabel).width;
             const padX = 8, padY = 5;
             const boxW = textW + padX * 2, boxH = 12 + padY * 2;
-            const bx = vertical ? b + w + 16 : b + w / 2 - boxW / 2;
-            const by = vertical ? b + h / 2 - boxH / 2 : b + h + 16;
+            let bx, by;
+            if (vertical) {
+                bx = b + w - boxW - 14;
+                by = b + h / 2 - boxH / 2;
+                if (bx < b + 4) bx = b + w / 2 - boxW / 2;
+            } else {
+                bx = b + w / 2 - boxW / 2;
+                by = b + h - boxH - 14;
+                if (by < b + 4) by = b + h / 2 - boxH / 2;
+            }
             ctx.fillStyle = 'rgba(20, 21, 26, 0.9)';
             ctx.beginPath();
             ctx.roundRect(bx, by, boxW, boxH, 5);

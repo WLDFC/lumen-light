@@ -1,0 +1,59 @@
+/**
+ * 通用层级树列表预制件样式（lumen-tree-list.css）
+ *
+ * 作用：LumenTreeList 组件的视觉——树形行（折叠箭头/等宽占位、按深度
+ *       缩进），行内颜色由宿主的样式类决定（如 recipe-models-item）。
+ *       缩进档位 18px/级，与收藏页侧栏、LoRA 文件夹栏共用。
+ *
+ * 使用方：js/components/LumenTreeList.js（收藏页标签侧栏、移动目标
+ *       选择框、LoRA 文件夹侧栏）。宿主可在行上叠加自己的类做配色与
+ *       悬停反馈（本档只管结构与几何）。
+ */
+
+/* 树行基座：行式布局，宿主内容（标签钮/操作钮/计数）追加在箭头之后 */
+.lumen-tree-item {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    border-radius: 8px;
+}
+
+/* 子级整行右移（悬停高亮与宿主内容一起缩进，层级感明确） */
+.lumen-tree-item.is-depth-1 { margin-left: 18px; }
+.lumen-tree-item.is-depth-2 { margin-left: 36px; }
+
+/* 折叠箭头：仅父节点显示，展开时转向下（▸ 旋转 90°） */
+.lumen-tree-caret {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    margin-right: 2px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 0.15s, background 0.12s, color 0.12s;
+}
+
+.lumen-tree-caret:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.lumen-tree-item.is-open .lumen-tree-caret {
+    transform: rotate(90deg);
+}
+
+/* 叶子节点的箭头占位：宽度与真箭头一致，保持各条目名字左对齐 */
+.lumen-tree-caret-spacer {
+    flex-shrink: 0;
+    width: 22px;
+    margin-right: 2px;
+}

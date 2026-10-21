@@ -109,4 +109,52 @@ describe('画布桥接路由', () => {
             .send({ command: 'delete_media', params: {} });
         expect(res.status).toBe(503);
     });
+
+    it('多客户端时新增写命令只发给最近活跃的一个（防双标签重复执行）', async () => {
+        // node_run 触发生成，广播会让双开页面各跑一次——必须单发
+        const stale = fakeCanvasClient();
+        stale.lastSeen = Date.now() - 3000;   // 稍旧的标签页
+        const clients = new Map([['c1', stale], ['c2', client]]);
+        app = express();
+        app.use(express.json());
+        app.use('/api/canvas-bridge', createCanvasBridgeRouter({ clients }));
+
+        const cmdPromise = (async () => request(app)
+            .post('/api/canvas-bridge/command')
+            .send({ command: 'node_run', params: { nodeId: 'n1' } }))();
+        await waitFor(() => client.ws.sent.length === 1);
+
+        expect(client.ws.sent.length).toBe(1);       // 最新客户端收到
+        expect(client.ws.sent[0].command).toBe('node_run');
+        expect(stale.ws.sent.length).toBe(0);        // 旧客户端不收（不重复执行）
+
+        const { id } = client.ws.sent[0];
+        await request(app).post('/api/canvas-bridge/response')
+            .send({ id, ok: true, data: { started: true } });
+        const cmdRes = await cmdPromise;
+        expect(cmdRes.body.status).toBe('ok');
+    });
+
+    it('view_focus / select_set 是读命令：广播给全部客户端', async () => {
+        const stale = fakeCanvasClient();
+        stale.lastSeen = Date.now() - 3000;
+        const clients = new Map([['c1', client], ['c2', stale]]);
+        app = express();
+        app.use(express.json());
+        app.use('/api/canvas-bridge', createCanvasBridgeRouter({ clients }));
+
+        for (const command of ['view_focus', 'select_set']) {
+            client.ws.sent.length = 0;
+            stale.ws.sent.length = 0;
+            const cmdPromise = (async () => request(app)
+                .post('/api/canvas-bridge/command')
+                .send({ command, params: {} }))();
+            await waitFor(() => client.ws.sent.length === 1 && stale.ws.sent.length === 1);
+            // 两端都收到（幂等查看命令，首个应答生效）
+            await request(app).post('/api/canvas-bridge/response')
+                .send({ id: client.ws.sent[0].id, ok: true, data: {} });
+            const cmdRes = await cmdPromise;
+            expect(cmdRes.body.status).toBe('ok');
+        }
+    });
 });

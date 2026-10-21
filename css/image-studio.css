@@ -1,13 +1,18 @@
 /**
  * ==========================================================================
- * LumenLight 图像编辑器（ImageStudio）样式 —— PS 式布局
+ * LumenLight 图像编辑器（ImageStudio）样式 —— PS 式布局（主文件）
  * ==========================================================================
  * 根元素复用 .image-editor 全套灯箱基础样式（css/image-editor.css：
- * 遮罩/顶栏/舞台/缩放指示/光标/确认框），本文件只做两件事：
- *   1. PS 式三栏布局覆盖：左工具栏（画笔/橡皮/粗细/还原/裁剪）+
- *      右侧面板（上=色板，下=图层），顶栏留空待扩展；
- *   2. 统一绘制面（笔迹/遮罩两层画布的输入代理）与裁剪覆盖层样式。
- * 对应组件：js/components/ImageStudio.js
+ * 遮罩/顶栏/舞台/缩放指示/光标/确认框），本文件承载布局壳与顶栏：
+ *   1. PS 式三栏布局：左工具栏 + 右侧面板壳，顶栏留空待扩展；
+ *   2. 顶栏全套：文件菜单 / 翻转·旋转图标钮 / 形状与文字工具选项；
+ *   3. 统一绘制面（笔迹/遮罩两层画布的输入代理）与裁剪覆盖层样式。
+ * 拆分契约（index.html 按此顺序加载；三个文件选择器互不相交，
+ * 顺序只为稳定级联与阅读）：
+ *   image-studio.css（本文件，布局壳 + 顶栏）
+ *   → image-studio-panel.css（图层面板 / 色板取色器 / 右工具栏 + 历史）
+ *   → image-studio-picker.css（画布选图弹窗）
+ * 对应组件：js/components/ImageStudio.js 与 image-studio/ 子模块
  * ==========================================================================
  */
 
@@ -67,7 +72,8 @@
     color: #ffffff;
 }
 
-/* ---- 右侧面板：上=色板，下=图层面板（宽度可拖拽，JS 控制内联宽度） ---- */
+/* ---- 右侧面板：上=色板，下=图层面板（宽度可拖拽，JS 控制内联宽度） ----
+   面板内容样式（色板/图层/取色器/历史）在 image-studio-panel.css */
 .is-side {
     position: relative;       /* 拖拽手柄的定位基准 */
     width: 240px;
@@ -109,128 +115,7 @@
     background: rgba(128, 128, 128, 0.25);      /* 与工具栏间隔线同色系 */
 }
 
-/* 色板容器（蒙版激活时整体禁用）：内嵌取色器 + 色块网格两层 */
-.is-palette {
-    flex: none;
-    padding: 0 12px 12px;
-    transition: opacity 0.15s ease;
-}
-
-/* 遮罩层激活时色板禁用（遮罩只有全强度红一种语义） */
-.is-palette.disabled {
-    opacity: 0.3;
-    pointer-events: none;
-}
-
-.is-palette-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-}
-
-.image-studio .is-palette-grid .ie-swatch {
-    width: 100%;
-    aspect-ratio: 1;
-    border-radius: 6px;
-}
-
-/* 图层透明度（激活图层的透明度，PS 同语义） */
-.is-opacity-row {
-    padding: 8px 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.is-opacity-row input[type="range"] {
-    flex: 1;
-    accent-color: #3b82f6;
-}
-
-/* ==================== 图层面板 ==================== */
-.is-layer-list {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 0 8px 8px;
-    border-top: 1px solid rgba(128, 128, 128, 0.2);
-}
-
-.is-layer-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 8px;
-    margin: 2px 0;
-    border-radius: 6px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.is-layer-row:hover {
-    background: rgba(255, 255, 255, 0.05);
-}
-
-/* 激活图层：强调蓝描边（绘制的目标层） */
-.is-layer-row.active {
-    border-color: #3b82f6;
-    background: rgba(59, 130, 246, 0.12);
-}
-
-/* 遮罩层：遮罩模式下激活行 = 当前遮罩涂画目标，PS 式暗红底 +
-   红描边（与遮罩笔迹同色系），和普通激活蓝一眼区分 */
-.is-layer-row.active.masking {
-    border-color: #ef4444;
-    background: rgba(239, 68, 68, 0.18);
-}
-
-/* 像素层缩略图：棋盘格垫透明区（PS 同款语义，空图层即纯棋盘格）。
-   position:static 必须显式声明——全局规则 css/style.css 对裸 canvas
-   有 position:fixed;top:0;left:0（主画布专用），不压住的话缩略图
-   会被拽出图层行钉死在视口左上角（即"左上角神秘色块"） */
-.is-layer-thumb {
-    position: static;
-    width: 28px;
-    height: 28px;
-    flex: none;
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background:
-        conic-gradient(#3d3d3d 25%, #2c2c2c 0 50%, #3d3d3d 0 75%, #2c2c2c 0) 0 0 / 10px 10px;
-}
-
-/* 文字层 T 徽标：白色衬线 T（PS 同款；不随文字颜色——图标只表类型） */
-.is-layer-type-t {
-    width: 28px;
-    height: 28px;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06);
-    color: #ffffff;
-    font: 700 17px/1 Georgia, 'Times New Roman', serif;
-    user-select: none;
-}
-
-/* 形状图层徽标（行首）：▢ 字形，与文字层 T 徽标同一视觉体系 */
-.is-layer-type-s {
-    width: 28px;
-    height: 28px;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06);
-    color: #ffffff;
-    font: 700 16px/1 sans-serif;
-    user-select: none;
-}
+/* ==================== 形状工具顶栏选项 ==================== */
 
 /* 形状工具类型按钮：小方块图标钮（横排/竖排按钮同族，但图标需要
    显式尺寸——无 width/height 的内联 SVG 默认 300×150，曾把整行撑爆） */
@@ -313,103 +198,6 @@
 .is-color-input::-webkit-color-swatch {
     border: none;
     border-radius: 2px;
-}
-
-/* 背景层锁标（行尾）：锁变换/不可排序/不可删的约束前置可见 */
-.is-layer-lock {
-    flex: none;
-    display: flex;
-    align-items: center;
-    color: rgba(255, 255, 255, 0.55);
-}
-
-.is-layer-lock svg {
-    width: 12px;
-    height: 12px;
-}
-
-/* 拖放排序落点指示：插入到目标行的上/下缘 */
-.is-layer-row.drop-above {
-    box-shadow: 0 -2px 0 0 #3b82f6;
-}
-
-.is-layer-row.drop-below {
-    box-shadow: 0 2px 0 0 #3b82f6;
-}
-
-/* 拖拽中的源行半透明（行本身不动，落点只看蓝色插入条） */
-.is-layer-row.dragging {
-    opacity: 0.45;
-}
-
-.is-layer-name {
-    flex: 1;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.85);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* 眼睛可见性开关 */
-.is-layer-eye {
-    width: 26px;
-    height: 26px;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: none;
-    border-radius: 5px;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.75);
-    cursor: pointer;
-}
-
-.is-layer-eye svg {
-    width: 14px;
-    height: 14px;
-}
-
-.is-layer-eye:hover {
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.is-layer-eye.hidden-layer {
-    color: rgba(255, 255, 255, 0.25);
-}
-
-/* ==================== 图层右键菜单 ==================== */
-.is-ctxmenu {
-    position: fixed;
-    z-index: 1300;            /* 浮在灯箱（1200）之上 */
-    min-width: 120px;
-    padding: 4px;
-    background: var(--icon-bg, #1b1c21);
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.is-ctxmenu-item {
-    padding: 7px 12px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.85);
-    border-radius: 5px;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.is-ctxmenu-item:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
-}
-
-/* 删除守卫：仅剩一个可涂图层时禁用 */
-.is-ctxmenu-item.disabled {
-    opacity: 0.35;
-    pointer-events: none;
 }
 
 /* 蒙版画布显示层：无独立 CSS 透明度（由 JS 按图层透明度×0.55 内联控制） */
@@ -496,7 +284,52 @@
     background: rgba(255, 255, 255, 0.1);       /* 叠加式悬停 */
 }
 
-/* 浮起层菜单：与面板同色，靠边框 + 阴影区分层级（配色规范） */
+/* 顶栏图标按钮（左右翻转 / 旋转）：与形状类型按钮同规格的 30×26 图标位，
+   透明底 + 悬停叠加；禁用态（无选中层/背景层）弱化且不可点；
+   .on = 当前图层处于镜像态（蓝色高亮，与形状类型选中态同款） */
+.is-flip-btn,
+.is-rotate-btn {
+    width: 30px;
+    height: 26px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.is-flip-btn:hover:not(:disabled),
+.is-rotate-btn:hover:not(:disabled) {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.is-flip-btn.on {
+    background: #3b82f6;
+    color: #fff;
+}
+
+.is-flip-btn:disabled,
+.is-rotate-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.is-flip-btn svg,
+.is-rotate-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* 浮起层菜单：与面板同色，靠边框 + 阴影区分层级（配色规范）。
+   文件/字体/旋转三个下拉菜单共用（字体菜单的滚动加高在
+   .is-font-menu，见下方文字工具分区） */
 .is-file-menu {
     position: absolute;
     top: calc(100% + 6px);
@@ -534,204 +367,6 @@
     width: 15px;
     height: 15px;
     flex: none;
-}
-
-/* ==================== 画布选图弹窗（+ 下拉 → 从画布选择） ==================== */
-.is-picker-mask {
-    position: fixed;
-    inset: 0;
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.6);
-}
-
-/* hidden 属性对抗上面的 display:flex（弹窗默认隐藏） */
-.is-picker-mask[hidden] {
-    display: none;
-}
-
-/* 中央长方形主体：面板层 #1b1c21 + 通用边框 + 阴影 */
-.is-picker {
-    width: 720px;
-    max-width: 80vw;
-    height: 520px;
-    max-height: 76vh;
-    display: flex;
-    flex-direction: column;
-    background: #1b1c21;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    overflow: hidden;
-}
-
-.is-picker-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
-    flex: none;
-}
-
-.is-picker-title {
-    font-size: 14px;
-    color: #fff;
-}
-
-.is-picker-close {
-    width: 28px;
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.85);
-    cursor: pointer;
-}
-
-.is-picker-close:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-}
-
-.is-picker-close svg {
-    width: 15px;
-    height: 15px;
-}
-
-/* 滚动容器与瀑布流分离（同 recipe-manager 的 .recipe-cards-area 方案）：
- * 多列元素自身当滚动容器时 Chrome 列分片会失效（全部内容横排成一行），
- * 必须让父级滚动、瀑布流自然生长 */
-.is-picker-body {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-}
-
-/* 缩略图瀑布流：CSS 多列（同 recipe-manager.css 的 .recipe-grid 方案），
- * 卡片保持原始宽高比、高低交错；先填满一列再进下一列 */
-.is-picker-grid {
-    column-count: 4;
-    column-gap: 10px;
-    padding: 14px 16px;
-}
-
-.is-picker-item {
-    position: relative;
-    display: block;
-    width: 100%;
-    min-width: 0;
-    margin-bottom: 10px;        /* 列内卡片间距（多列布局不用 gap） */
-    padding: 0;
-    break-inside: avoid;        /* 禁止卡片被拆到两列 */
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.03);      /* 卡片内层底色 */
-    cursor: pointer;
-    overflow: hidden;
-}
-
-.is-picker-item:hover {
-    border-color: rgba(128, 128, 128, 0.4);     /* 悬停加强边框 */
-}
-
-/* 选中：强调蓝描边（呼应节点/图片选中框语义） */
-.is-picker-item.selected {
-    outline: 2px solid #3b82f6;
-    outline-offset: -2px;
-}
-
-.is-picker-item img {
-    width: 100%;
-    height: auto;               /* 保持原始宽高比完整显示（瀑布流关键） */
-    display: block;
-}
-
-/* 勾选角标：选中时出现的蓝色圆点对勾 */
-.is-picker-badge {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 20px;
-    height: 20px;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    background: #3b82f6;
-    border-radius: 50%;
-    color: #fff;
-}
-
-.is-picker-item.selected .is-picker-badge {
-    display: flex;
-}
-
-.is-picker-badge svg {
-    width: 12px;
-    height: 12px;
-}
-
-.is-picker-empty {
-    column-span: all;
-    padding: 48px 0;
-    text-align: center;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.5);            /* 空状态提示文字 */
-}
-
-.is-picker-foot {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
-    border-top: 1px solid rgba(128, 128, 128, 0.2);
-    flex: none;
-}
-
-.is-picker-count {
-    margin-right: auto;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-}
-
-.is-picker-cancel,
-.is-picker-ok {
-    height: 32px;
-    padding: 0 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.is-picker-cancel {
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    background: transparent;
-    color: #fff;
-}
-
-.is-picker-cancel:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.is-picker-ok {
-    border: none;
-    background: #3b82f6;                        /* 主按钮强调蓝 */
-    color: #fff;
-}
-
-.is-picker-ok:hover {
-    background: #2563eb;
-}
-
-.is-picker-ok:disabled {
-    opacity: 0.6;
-    cursor: default;
 }
 
 /* ==================== 文字工具（顶栏选项 + 就地编辑框） ==================== */
@@ -831,187 +466,4 @@
     white-space: pre;
     box-sizing: border-box;
     caret-color: currentColor;
-}
-
-/* ==================== 色板：PS 式内嵌取色器（StudioColorPicker） ==================== */
-
-.is-color-picker {
-    padding-bottom: 10px;
-}
-
-/* 主区：SV 渐变方框 + 垂直色相条 */
-.is-cp-main {
-    display: flex;
-    gap: 8px;
-    height: 140px;
-}
-
-.is-cp-sv {
-    position: relative;
-    flex: 1;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    cursor: crosshair;
-    /* 底色两层渐变由 StudioColorPicker._render 内联写入：
-       黑（自下）+ 白→当前色相纯色（自右） */
-}
-
-.is-cp-sv-cursor {
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    border: 2px solid #fff;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
-    pointer-events: none;       /* 游标不挡方框拖拽 */
-}
-
-.is-cp-hue {
-    position: relative;
-    width: 14px;
-    flex: none;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 2px;
-    background: linear-gradient(to bottom,
-        #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
-    cursor: ns-resize;
-}
-
-.is-cp-hue-cursor {
-    position: absolute;
-    left: -3px;
-    right: -3px;
-    height: 5px;
-    border: 2px solid #fff;
-    border-radius: 3px;
-    transform: translateY(-50%);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
-    pointer-events: none;
-}
-
-/* 当前色/上次色叠放块 + Hex 输入 */
-.is-cp-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding-top: 10px;
-}
-
-.is-cp-pair {
-    position: relative;
-    width: 32px;
-    height: 32px;
-    flex: none;
-}
-
-.is-cp-cur {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 21px;
-    height: 21px;
-    border: 1px solid rgba(128, 128, 128, 0.4);
-    z-index: 1;
-}
-
-.is-cp-prev {
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    width: 21px;
-    height: 21px;
-    border: 1px solid rgba(128, 128, 128, 0.4);
-    background: transparent;
-    padding: 0;
-    cursor: pointer;
-}
-
-.is-cp-hex {
-    flex: 1;
-    min-width: 0;
-    height: 26px;
-    padding: 0 6px;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.3);
-    color: #fff;
-    font-size: 12px;
-    font-family: monospace;
-    outline: none;
-}
-
-.is-cp-hex:focus {
-    border-color: #3b82f6;
-}
-
-
-/* ==================== 右侧工具栏（PS 面板栏同位）+ 历史面板 ==================== */
-
-/* 右侧竖排工具栏：宽度与左栏一致（52px），历史面板锚定其左 */
-.is-rail {
-    position: relative;
-    width: 52px;
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 0;
-    background: var(--icon-bg, #1b1c21);
-    border-left: 1px solid rgba(128, 128, 128, 0.2);
-}
-
-.is-history-panel {
-    position: absolute;
-    right: 100%;                /* 右缘贴合工具栏 */
-    top: 0;                     /* 顶缘贴合顶栏，零边距 */
-    width: 190px;
-    z-index: 30;
-    background: var(--icon-bg, #1b1c21);
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    overflow: hidden;
-}
-
-.is-history-header {
-    padding: 8px 12px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
-    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
-}
-
-.is-history-list {
-    max-height: 340px;
-    overflow-y: auto;
-    padding: 4px 0;
-}
-
-.is-history-row {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 6px 12px;
-    border: none;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.85);
-    font-size: 12px;
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.is-history-row:hover {
-    background: rgba(255, 255, 255, 0.06);
-}
-
-/* 当前所处状态：强调蓝；其后的条目 = 未来状态（点击重做），弱化 */
-.is-history-row.active {
-    background: #3b82f6;
-    color: #fff;
-}
-
-.is-history-row.future {
-    opacity: 0.4;
 }

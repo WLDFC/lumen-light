@@ -1,0 +1,138 @@
+/**
+ * 通用批量管理预制件样式（lumen-batch.css）
+ *
+ * 作用：LumenBatchManager 组件的视觉——工具行批量按钮（激活绿）、
+ *       批量条（已选计数/全选/取消选择/完成）、卡片右上角选择圈
+ *       （批量模式显示空圈，宿主卡片带 is-selected 后变绿打白✓）。
+ *
+ * 使用方：js/components/LumenBatchManager.js（收藏页、LoRA 管理器）。
+ * 宿主网格（或任意祖先）带 .lumen-batch-mode 时选择圈显示、卡片光标
+ * 换指针；选择圈始终放在卡片右上角——与宿主自有角标冲突时由宿主 CSS
+ * 让位（如 LoRA 星星批量模式下左移）。
+ *
+ * 配色遵循项目深色主题色板：
+ *   选中/主操作绿 #22c55e，面板底 rgba(27,28,33,1)，边框 rgba(128,128,128,0.3)。
+ */
+
+/* ===== 批量按钮（工具行） ===== */
+
+/* 与漏斗排序触发器同高同组观感（40px 高、10px 圆角） */
+.lumen-batch-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    background: rgba(27, 28, 33, 1);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.lumen-batch-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 激活态：绿色描边 + 浅绿底（与侧栏选中态同色） */
+.lumen-batch-btn.is-active {
+    border-color: rgba(34, 197, 94, 0.6);
+    background: rgba(34, 197, 94, 0.16);
+    color: #22c55e;
+}
+
+/* ===== 批量条（工具行与网格之间，仅批量模式显示） ===== */
+
+.lumen-batch-bar {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    margin: -8px 0 14px;
+}
+
+.lumen-batch-bar.is-visible {
+    display: flex;
+}
+
+/* 已选计数 */
+.lumen-batch-count {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+}
+
+/* 全选 / 取消选择：小号文字按钮 */
+.lumen-batch-action {
+    padding: 4px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.lumen-batch-action:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* 弹性占位：把"完成"推到右端 */
+.lumen-batch-spacer {
+    flex: 1;
+}
+
+/* 完成（退出批量）：绿色主操作 */
+.lumen-batch-done {
+    padding: 5px 14px;
+    border: 0;
+    border-radius: 8px;
+    background: #22c55e;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.lumen-batch-done:hover {
+    background: rgba(34, 197, 94, 0.85);
+}
+
+/* ===== 卡片右上角选择圈 ===== */
+
+/* 默认隐藏；批量模式下显示空圈占位（提示此处可多选） */
+.lumen-batch-check {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 1;
+    width: 20px;
+    height: 20px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    border-radius: 50%;
+    background: rgba(15, 15, 18, 0.55);
+    box-sizing: border-box;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;   /* 不挡图片点击/整卡点击 */
+}
+
+.lumen-batch-mode .lumen-batch-check {
+    display: flex;
+}
+
+/* 选中态：圈变绿、打白色✓（is-selected 加在宿主卡片根上） */
+.is-selected .lumen-batch-check {
+    border-color: #22c55e;
+    background: #22c55e;
+}
+
+.is-selected .lumen-batch-check::after {
+    content: '✓';
+}

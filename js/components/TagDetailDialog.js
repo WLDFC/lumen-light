@@ -14,7 +14,10 @@
  *        点击已选中的标签可取消选择）
  *     3. 参考图槽位（TagReferenceSlots，最多 5 张，选完立即上传，
  *        点击图片看大图，× 删除）
- *     4. Copy 按钮 + 提示词多行编辑框（可手动编辑提示词）
+ *     4. Copy/写入 按钮 + 提示词多行编辑框（可手动编辑提示词）；「写入」
+ *        经 PromptWriteTargets 预制件把编辑框当前内容覆盖注入 Comfy 面板
+ *        正向框 1/2 或画布提示词节点（动作型下拉实时枚举目标，ADR 031/037
+ *        写入契约：不派发合成 input）
  *     5. 保存按钮：点击后调用 PUT /api/tags/:id 一次性提交
  *        名字、模型、提示词三个字段
  *
@@ -28,6 +31,7 @@
  *   js/components/RecipeManager.js     # 调用方：卡片图片点击时 open()
  *   js/components/SaveTagDialog.js     # 模型标签清单保持一致（共用 MODELS）
  *   js/components/TagReferenceSlots.js # 参考图槽位子组件
+ *   js/components/PromptWriteTargets.js # 「写入」钮的注入目标预制件
  *   routes/tags.js                     # 后端 PUT /:id 与参考图增删接口
  *   css/tag-detail-dialog.css          # 样式（tag-detail- / tag-ref- 前缀）
  * ============================================================
@@ -84,7 +88,10 @@ class TagDetailDialog {
                     <div class="tag-ref-slots-host"></div>
                     <div class="tag-detail-prompt-header">
                         <span class="tag-detail-label">提示词</span>
-                        <button class="tag-detail-copy-btn" type="button" title="复制正面提示词">Copy</button>
+                        <div class="tag-detail-prompt-actions">
+                            <button class="tag-detail-copy-btn" type="button" title="复制正面提示词">Copy</button>
+                            <button class="tag-detail-write-btn" type="button" title="写入：注入 Comfy 面板正向框 1/2 或画布提示词节点（覆盖语义）"></button>
+                        </div>
                     </div>
                     <textarea class="tag-detail-prompt-input" placeholder="输入图片的生成提示词"></textarea>
                     <button class="tag-detail-save-btn" type="button">保存</button>
@@ -181,6 +188,24 @@ class TagDetailDialog {
                 console.error('复制提示词失败:', error);
             }
         });
+
+        // 写入按钮：PromptWriteTargets 预制件接线（LumenDropdown 动作型菜单，
+        // 展开时实时枚举画布提示词节点 + 面板正向框 1/2；覆盖写入、不派发
+        // 合成 input，契约见预制件头注）。反馈：成功绿 1.2s / 失败控制台
+        this.writeTargets = new PromptWriteTargets();
+            this.writeTargets.attachDropdown(
+                this.dialog.querySelector('.tag-detail-write-btn'),
+                {
+                    getText: () => this.promptInput.value.trim(),
+                    menuClass: 'tag-detail-menu',   // 菜单挂 body 默认 z1200，被本弹窗 1500 压住，抬到 1600
+                    onResult: ({ ok }) => {
+                    const btn = this.dialog.querySelector('.tag-detail-write-btn');
+                    btn.classList.toggle('is-copied', ok);
+                    if (!ok) return;
+                    window.setTimeout(() => btn.classList.remove('is-copied'), 1200);
+                }
+            }
+        );
 
         // Ctrl+Enter 快捷提交（在输入框内操作时不必移动鼠标）
         this.promptInput.addEventListener('keydown', (e) => {

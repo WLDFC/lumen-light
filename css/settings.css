@@ -316,7 +316,7 @@
 
 .settings-models-row.head {
     display: grid;          /* 网格布局 */
-    grid-template-columns: 1fr 1fr 76px 32px; /* 四列：模型ID、名称、类型、删除按钮 */
+    grid-template-columns: minmax(0, 1fr) 76px auto; /* 三列：模型ID、类型、操作按钮组 */
     gap: 10px;              /* 列间距 */
     padding: 0 8px;         /* 左右内边距，与数据行对齐 */
     font-size: 13px;        /* 表头字号 */
@@ -329,7 +329,7 @@
 
 .settings-models-row {
     display: grid;          /* 网格布局 */
-    grid-template-columns: 1fr 1fr 76px 32px; /* 四列：模型ID下拉框、名称输入框、类型下拉框、删除按钮 */
+    grid-template-columns: minmax(0, 1fr) 76px auto; /* 三列：模型ID下拉框、类型下拉框、操作按钮组 */
     gap: 10px;              /* 列与列之间的水平间距 */
     align-items: center;    /* 垂直居中对齐 */
 }
@@ -342,32 +342,70 @@
     width: 100%;            /* 模型ID下拉框占满列宽 */
 }
 
-.settings-model-name {
-    width: 100%;            /* 模型名称输入框占满列宽 */
-}
-
 .settings-model-type {
     width: 100%;            /* 模型类型下拉框占满列宽 */
 }
 
+/* 操作按钮组：测试/编辑/删除三个图标钮 + 启用开关，靠右排列 */
+.settings-model-actions {
+    display: flex;          /* 水平排列 */
+    align-items: center;    /* 垂直居中 */
+    gap: 6px;               /* 按钮间距 */
+}
+
+.settings-model-act,
 .settings-model-delete {
-    width: 32px;            /* 删除按钮宽度 */
-    height: 32px;           /* 删除按钮高度 */
+    width: 26px;            /* 图标按钮统一 26×26 */
+    height: 26px;
+    padding: 0;             /* 图标居中不需要内边距 */
     border: none;           /* 无边框 */
     border-radius: 6px;     /* 圆角 */
     background: transparent;/* 透明背景 */
     color: #9ca3af;         /* 图标灰色 */
-    font-size: 16px;        /* 图标字号 */
     cursor: pointer;        /* 手型指针 */
     display: flex;          /* 弹性布局，居中图标 */
-    align-items: center;    /* 垂直居中 */
-    justify-content: center;/* 水平居中 */
+    align-items: center;
+    justify-content: center;
     transition: background 0.15s ease, color 0.15s ease; /* 悬停过渡 */
 }
 
+.settings-model-act svg {
+    width: 15px;            /* 线框图标尺寸 */
+    height: 15px;
+    display: block;         /* 消除 inline 基线空隙 */
+}
+
+.settings-model-act:hover {
+    background: rgba(255, 255, 255, 0.08); /* 悬停浅色背景 */
+    color: #ffffff;                        /* 悬停图标变白 */
+}
+
 .settings-model-delete:hover {
-    background: rgba(239, 68, 68, 0.1); /* 悬停红色半透明背景 */
-    color: #ef4444;                     /* 悬停图标变红 */
+    background: rgba(239, 68, 68, 0.1);    /* 删除悬停红色半透明背景 */
+    color: #ef4444;                        /* 删除悬停图标变红 */
+}
+
+/* 测试链接结果态（4 秒后由 JS 清除）：绿=通过 / 黄=可达但清单未含 / 红=失败 */
+.settings-model-test.is-ok { color: #4ade80; }
+.settings-model-test.is-warn { color: #fbbf24; }
+.settings-model-test.is-bad { color: #f87171; }
+
+/* 测试进行中：图标旋转 + 半透明 */
+.settings-model-test.is-testing {
+    opacity: 0.5;
+}
+
+.settings-model-test.is-testing svg {
+    animation: modelTestSpin 1s linear infinite;
+}
+
+@keyframes modelTestSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.settings-model-switch {
+    margin-left: 2px;       /* 与删除钮留一点呼吸空隙 */
 }
 
 .settings-models-hint {
@@ -661,4 +699,69 @@
     height: 100%;           /* 占满父容器高度 */
     color: #6b7280;         /* 空状态文字颜色 */
     font-size: 14px;        /* 字号 */
+}
+
+/* ==================== 模型编辑弹窗 ==================== */
+/* 挂 body 的独立遮罩层：设置弹窗 z 3000 之上再叠一层，
+   只装 显示名称/上下文/输出上限 三个字段 */
+#modelEditOverlay {
+    position: fixed;        /* 铺满视口 */
+    inset: 0;               /* 同 top/right/bottom/left:0 */
+    z-index: 4000;          /* 压在设置弹窗（z 3000）之上 */
+    background: rgba(0, 0, 0, 0.5); /* 半透明遮罩 */
+    display: flex;          /* 弹性布局，弹窗居中 */
+    align-items: center;
+    justify-content: center;
+}
+
+.model-edit-dialog {
+    width: 380px;           /* 弹窗宽度 */
+    max-width: 90vw;        /* 小屏自适应 */
+    max-height: 80vh;       /* 高度上限，内容可滚动 */
+    overflow-y: auto;       /* 内容超高滚动 */
+    background: #1b1c21;    /* 与设置侧栏同底色 */
+    border: 1px solid rgba(255, 255, 255, 0.08); /* 微亮描边区分背景 */
+    border-radius: 12px;    /* 圆角与设置弹窗一致 */
+    padding: 20px;          /* 内边距 */
+    display: flex;          /* 纵向排列字段 */
+    flex-direction: column;
+    gap: 14px;              /* 字段间距 */
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); /* 浮起阴影 */
+}
+
+.model-edit-title {
+    font-size: 15px;        /* 标题字号 */
+    font-weight: 600;       /* 标题字重 */
+    color: #ffffff;         /* 白色标题 */
+}
+
+.model-edit-subtitle {
+    font-size: 12px;        /* 模型 ID 副标题字号 */
+    color: #9ca3af;         /* 灰色 */
+    overflow-wrap: anywhere; /* 超长模型 ID 按字符断行 */
+}
+
+.model-edit-field {
+    display: flex;          /* 纵向排列标签与输入框 */
+    flex-direction: column;
+    gap: 6px;               /* 标签/输入/提示间距 */
+    min-width: 0;           /* 允许收缩 */
+}
+
+.model-edit-field label {
+    font-size: 13px;        /* 字段标签字号 */
+    color: #d1d5db;         /* 浅灰标签 */
+}
+
+.model-edit-hint {
+    font-size: 11px;        /* 字段提示字号 */
+    color: #6b7280;         /* 深灰提示 */
+    line-height: 1.5;       /* 多行提示行距 */
+}
+
+.model-edit-footer {
+    display: flex;          /* 按钮行：取消/确定靠右 */
+    justify-content: flex-end;
+    gap: 10px;              /* 按钮间距 */
+    margin-top: 4px;        /* 与字段留一点空隙 */
 }

@@ -2,10 +2,15 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-rem 切换到脚本所在目录, 保证相对路径 (runtime\node.exe, server.js) 正确解析
+rem NOTE: keep every rem comment ASCII-only in this file.
+rem cmd's batch parser tracks line positions by BYTE offset, which can land
+rem mid-character in UTF-8 multi-byte text and garble the rest of the line
+rem into a phantom "command" (red 'xxx is not recognized' noise at startup).
+
+rem cd to script dir so relative paths (runtime\node.exe, server.js) resolve
 cd /d "%~dp0"
 
-rem 服务端口, 需与 server.js 的监听端口一致
+rem server port, must match server.js listen port
 set PORT=8080
 
 echo ==========================================
@@ -13,7 +18,7 @@ echo    LumenLight 后端启动脚本
 echo ==========================================
 echo.
 
-rem 启动前清理残留的旧 watcher 进程, 防止其再次拉起 server 抢占端口
+rem kill stale watcher node processes that could re-spawn server and grab port
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'watch-path' -and $_.CommandLine -match 'server\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>nul
 
 echo [1/2] 检查端口 %PORT% 占用...
@@ -33,12 +38,12 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%PORT% .*LISTENING"')
 if "!KILLED!" == "" (
     echo      端口 %PORT% 空闲
 ) else (
-    rem 端口释放存在 TIME_WAIT 延迟, 等待约 2 秒; 括号块内必须用 rem 不能用双冒号
+    rem port release has TIME_WAIT delay, wait ~2s; inside ( ) must use rem not ::
     ping -n 3 127.0.0.1 >nul
 )
 (call )
 
-rem 选择 Node: 优先项目内置绿色版 runtime\node.exe, 未捆绑时回退系统 node
+rem pick node: prefer bundled runtime\node.exe, fall back to system node
 set "NODE_EXE=%~dp0runtime\node.exe"
 if exist "%NODE_EXE%" (
     set "NODE_CMD=%NODE_EXE%"
@@ -52,16 +57,16 @@ echo [2/2] 启动 LumenLight 后端...
 echo      稳定模式: 未启用热重载, 修改后端代码后需重启本脚本生效
 echo ==========================================
 
-rem 稳定模式说明: node --watch 热重载会强制结束 server 进程树, 而 pi 是
-rem server 的子进程, 会随之退出, 长任务被中断。因此日常运行不启用热重载,
-rem 后端代码改动后手动重启本脚本即可。控制台输出同时写入
-rem data\pi\server-console.log, 用于事后排查问题。
+rem Stable mode: node --watch force-kills the server process tree, and pi
+rem (a child of server) dies with it, interrupting long tasks. So no hot
+rem reload; restart this script manually after backend changes. Console
+rem output is mirrored to data\pi\server-console.log for post-mortem.
 if not exist "%~dp0data\pi" mkdir "%~dp0data\pi"
-rem 日志超过 5MB 时重建, 避免无限膨胀
+rem rebuild log above 5MB to avoid unbounded growth
 if exist "%~dp0data\pi\server-console.log" for %%A in ("%~dp0data\pi\server-console.log") do if %%~zA gtr 5000000 del "%%~A" >nul 2>nul
 powershell -NoProfile -Command "& '%NODE_CMD%' server.js 2>&1 | Tee-Object -FilePath '%~dp0data\pi\server-console.log' -Append; exit $LASTEXITCODE"
 
-rem Node 异常退出时暂停窗口, 便于查看错误信息
+rem pause window on abnormal node exit so the error stays visible
 if errorlevel 1 (
     echo.
     echo ==========================================

@@ -97,7 +97,7 @@ function text(text: string) {
 
 type LumenTask = {
     id: string;
-    kind: "llm_image" | "video";
+    kind: "llm_image" | "video" | "upscale" | "rembg";
     label: string;
     status: "running" | "done" | "error" | "cancelled";
     startedAt: number;
@@ -142,6 +142,7 @@ function settleFailure(task: LumenTask, err: unknown, controller?: AbortControll
     task.status = cancelled ? "cancelled" : "error";
     task.finishedAt = Date.now();
     task.error = cancelled ? "用户已停止" : (err instanceof Error ? err.message : String(err));
+    reportTask(task);
 }
 
 /** 登记新任务并清理过期/超量旧任务 */
@@ -159,12 +160,49 @@ function registerTask(t: LumenTask) {
         if (victim) tasks.delete(victim.id);
     }
     tasks.set(t.id, t);
+    reportTask(t);
     return t;
 }
 
+// ===== 任务上报（前端任务中心联动） =====
+// 任务句柄住在 pi 子进程内存，前端无法枚举——登记/结算时 fire-and-forget
+// POST 到后端中继（/api/tasks，广播 WS task-event 给前端任务注册表镜像）。
+// 上报失败静默：任务本体不受影响，poll 查询仍以本地 tasks 为准。
+const EXT_STATUS_MAP: Record<LumenTask["status"], "running" | "done" | "failed" | "stopped"> = {
+    running: "running",
+    done: "done",
+    error: "failed",
+    cancelled: "stopped",
+};
+function reportTask(t: LumenTask): void {
+    const body = JSON.stringify({
+        // 前缀 pi- 防与前端注册表自身序号 id 冲突
+        id: `pi-${t.id}`,
+        kind: t.kind,
+        label: t.label,
+        status: EXT_STATUS_MAP[t.status],
+        note: t.status === "done" ? (t.result || "")
+            : (t.status === "cancelled" ? "已停止" : (t.error || "")),
+        startedAt: t.startedAt,
+        endedAt: t.finishedAt
+    });
+    fetch(LUMEN_BASE + "/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(5000)
+    }).catch(() => { /* 后端不可达：放弃本次上报 */ });
+}
+
 /** 任务状态的人读文本（poll 返回值） */
+const TASK_KIND_LABELS: Record<LumenTask["kind"], string> = {
+    video: "视频生成",
+    llm_image: "API 生图",
+    upscale: "高清放大",
+    rembg: "AI 抠图",
+};
 function taskStatusText(t: LumenTask): string {
-    const idLine = `任务 ${t.id}（${t.kind === "video" ? "视频生成" : "API 生图"}：${t.label}）`;
+    const idLine = `任务 ${t.id}（${TASK_KIND_LABELS[t.kind] || t.kind}：${t.label}）`;
     if (t.status === "running") {
         const sec = Math.round((Date.now() - t.startedAt) / 1000);
         return `${idLine}仍在执行，已等待 ${sec} 秒。请隔 30 秒以上再用 canvas_poll_task 查询，不要连续频繁轮询。`;
@@ -178,22 +216,40 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default async function (pi: ExtensionAPI) {
     // ===== 1. 注册 LumenLight 面板的模型为 pi provider =====
-    try {
-        const res = await fetch(`${LUMEN_BASE}/api/pi/provider-config`);
-        const json = await res.json();
-        if (json.status === "ok") {
-            for (const p of json.data.providers) {
-                pi.registerProvider(p.id, {
-                    name: p.name,
-                    baseUrl: p.baseUrl,
-                    apiKey: `$${p.apiKeyEnv}`,
-                    api: "openai-completions",
-                    models: p.models,
-                });
+    // 时序说明：pi 是 server 的子进程，扩展加载常早于 Express 完成端口监听，
+    // 首次 fetch 会 ECONNREFUSED——这是正常启动序列而非故障，静默重试；
+    // 收到 HTTP 响应（无论 status）即视为后端就绪不再重试，重试耗尽才
+    // 输出一条精简警告（不 打印整个错误对象——PowerShell Tee 会把它渲染
+    // 成整屏红色堆栈， StartupConsole 曾被误认成启动失败）。
+    const PROVIDER_RETRY_MAX = 12;   // 12 次 × 500ms ≈ 6s 覆盖后端冷启动
+    const PROVIDER_RETRY_MS = 500;
+    for (let attempt = 1; attempt <= PROVIDER_RETRY_MAX; attempt++) {
+        try {
+            const res = await fetch(`${LUMEN_BASE}/api/pi/provider-config`);
+            const json = await res.json();
+            if (json.status === "ok") {
+                for (const p of json.data.providers) {
+                    pi.registerProvider(p.id, {
+                        name: p.name,
+                        baseUrl: p.baseUrl,
+                        apiKey: `$${p.apiKeyEnv}`,
+                        api: "openai-completions",
+                        models: p.models,
+                    });
+                }
+                break;
+            } else {
+                console.warn(`[lumen-canvas] provider 配置响应异常（status=${json.status}），跳过注册`);
+                break;
+            }
+        } catch (err) {
+            if (attempt === PROVIDER_RETRY_MAX) {
+                const message = err instanceof Error ? err.message : String(err);
+                console.warn(`[lumen-canvas] LumenLight provider 注册失败（重试 ${PROVIDER_RETRY_MAX} 次后放弃，后端未运行？）: ${message}`);
+            } else {
+                await sleep(PROVIDER_RETRY_MS);
             }
         }
-    } catch (err) {
-        console.warn("[lumen-canvas] LumenLight provider 注册失败（后端未运行？）:", err);
     }
 
     // ===== 2. 工具启停联动（面板「工具与技能」勾选） =====
@@ -260,7 +316,8 @@ export default async function (pi: ExtensionAPI) {
         const isCanvasTool = event.toolName.startsWith("canvas_");
 
         if (level === "readonly") {
-            // 只读：画布查询类放行；落图/删除/跑工作流/搭节点与全部内置工具阻止
+            // 只读：画布查询类放行；落图/删除/跑工作流/搭节点/改节点/
+            // 撤销/整理媒体/写提示词/存档与全部内置工具阻止
             const MUTATING = new Set([
                 "canvas_drop_image",
                 "canvas_delete_media",
@@ -269,6 +326,12 @@ export default async function (pi: ExtensionAPI) {
                 "canvas_run_llm_image",
                 "canvas_run_video",
                 "canvas_build_graph",
+                "canvas_node_ops",
+                "canvas_undo",
+                "canvas_media_ops",
+                "canvas_set_prompts",
+                "canvas_archive",
+                "canvas_image_process",
             ]);
             if (isCanvasTool && !MUTATING.has(event.toolName)) return;
             // lumen-comfy 的只读查询类工具放行（细粒度门禁由 lumen-comfy
@@ -405,7 +468,8 @@ export default async function (pi: ExtensionAPI) {
         },
     });
 
-    // 参考图解析：attachment:N=用户本消息附图（后端按序号供图），
+    // 参考图解析：attachment:N=用户附图（后端供图：本条消息带图时即本条的，
+    // 不带图时回退最近一条含附图消息——"发图→追问参数"的第二轮仍命中），
     // 画布名称=画布已有图 → data URL 数组（canvas_run_comfy / canvas_run_llm_image 共用）
     async function resolveRefImages(refs: string[]): Promise<string[]> {
         const images: string[] = [];
@@ -418,8 +482,10 @@ export default async function (pi: ExtensionAPI) {
                 } | null;
                 const hit = attJson?.attachments?.find((a) => a.ref === ref);
                 if (!hit) {
+                    // 报错列出仍可用的引用，模型可自行改参数重试而非反问用户
+                    const avail = (attJson?.attachments ?? []).map((a) => a.ref).join("、");
                     throw new Error(
-                        `参考图 ${ref} 不存在（本消息共 ${attJson?.attachments?.length || 0} 张附图）`
+                        `参考图 ${ref} 不存在（当前可用的附图引用：${avail || "无"}）`
                     );
                 }
                 images.push(hit.dataUrl);
@@ -648,6 +714,347 @@ export default async function (pi: ExtensionAPI) {
         },
     });
 
+    // 节点运维：改已有节点 / 删节点 / 触发生成 / 断连线。
+    // 与 canvas_build_graph（一次性新建）互补——搭好的图用本工具迭代调参
+    pi.registerTool({
+        name: "canvas_node_ops",
+        label: "Node Operations",
+        description:
+            "对画布上已有节点做运维操作（搭建用 canvas_build_graph，修改用本工具）。" +
+            "action 分四种：" +
+            "update=修改节点字段（text：prompt/text 节点文本；model：image_gen 的模型" +
+            "（厂商||模型ID 复合键）；workflowId：comfy_gen 的工作流；count：生图数量；" +
+            "entries：lora 节点条目整体替换 [{file, strengthModel?, strengthClip?}]，" +
+            "传空数组即清空；x/y：任意节点位置）；" +
+            "delete=删除节点（可撤销）；" +
+            "run=触发节点生成（等同点击生成按钮：必须有提示词链连入，image_gen 还须已选模型；" +
+            "触发即返回，产物完成后自动落画布，稍后用 canvas_get_state 查看，不要轮询本工具）；" +
+            "disconnect=断开一条连线（定位二选一：edgeId，或 from+to 传两端节点/图片 id，" +
+            "拓扑见 canvas_get_state 的 edges 字段）。" +
+            "nodeId 来自 canvas_get_state 的 nodes[].id。",
+        parameters: Type.Object({
+            action: Type.String({ description: "update / delete / run / disconnect" }),
+            nodeId: Type.Optional(Type.String({ description: "目标节点 id（update/delete/run 必填；disconnect 可用 edgeId 或 from+to 替代）" })),
+            text: Type.Optional(Type.String({ description: "update：prompt/text 节点的新文本" })),
+            model: Type.Optional(Type.String({ description: "update：image_gen 的模型（厂商||模型ID 复合键，须在可选清单内）" })),
+            workflowId: Type.Optional(Type.String({ description: "update：comfy_gen 的工作流 id（canvas_list_workflows 查询）" })),
+            count: Type.Optional(Type.Number({ description: "update：生图数量（正整数，image_gen 上限 8）" })),
+            entries: Type.Optional(Type.Array(Type.Object({
+                file: Type.String({ description: "LoRA 文件名" }),
+                strengthModel: Type.Optional(Type.Number({ description: "模型强度（默认 1）" })),
+                strengthClip: Type.Optional(Type.Number({ description: "文本强度（默认 1）" })),
+            }), { description: "update：lora 节点条目整体替换（空数组=清空）" })),
+            x: Type.Optional(Type.Number({ description: "update：节点新位置 X" })),
+            y: Type.Optional(Type.Number({ description: "update：节点新位置 Y" })),
+            edgeId: Type.Optional(Type.String({ description: "disconnect：连线 id（get_state 的 edges[].id）" })),
+            from: Type.Optional(Type.String({ description: "disconnect：连线起点 id" })),
+            to: Type.Optional(Type.String({ description: "disconnect：连线终点 id" })),
+        }),
+        async execute(toolCallId, params) {
+            return serialized(async () => {
+                const bridgeParams: Record<string, unknown> = { action: params.action };
+                if (params.nodeId !== undefined) bridgeParams.nodeId = params.nodeId;
+                if (params.text !== undefined) bridgeParams.text = params.text;
+                if (params.model !== undefined) bridgeParams.model = params.model;
+                if (params.workflowId !== undefined) bridgeParams.workflowId = params.workflowId;
+                if (params.count !== undefined) bridgeParams.count = params.count;
+                if (params.entries !== undefined) bridgeParams.entries = params.entries;
+                if (params.x !== undefined) bridgeParams.x = params.x;
+                if (params.y !== undefined) bridgeParams.y = params.y;
+                if (params.edgeId !== undefined) bridgeParams.edgeId = params.edgeId;
+                if (params.from !== undefined) bridgeParams.from = params.from;
+                if (params.to !== undefined) bridgeParams.to = params.to;
+                const cmdByAction: Record<string, string> = {
+                    update: "node_update", delete: "node_delete",
+                    run: "node_run", disconnect: "edge_disconnect",
+                };
+                const cmd = cmdByAction[params.action];
+                if (!cmd) throw new Error(`未知 action「${params.action}」（可用: update / delete / run / disconnect）`);
+                const data = await bridge(cmd, bridgeParams);
+                return text(JSON.stringify(data));
+            });
+        },
+    });
+
+    // 撤销/重做：agent 误操作的细粒度安全网（与用户 Ctrl+Z 同一撤销栈）
+    pi.registerTool({
+        name: "canvas_undo",
+        label: "Canvas Undo",
+        description:
+            "撤销或重做画布操作（与用户按 Ctrl+Z / Ctrl+Shift+Z 同一个撤销栈，上限 50 步）。" +
+            "移动/缩放/删除/新增/连线/断线等画布操作（含本 agent 经工具做的）都可回退。" +
+            "删错图、挪错节点时优先用本工具恢复，比整档回滚轻得多。",
+        parameters: Type.Object({
+            action: Type.Optional(Type.String({ description: "undo（默认）/ redo" })),
+        }),
+        async execute(toolCallId, params) {
+            return serialized(async () => {
+                const data = await bridge("history_step", {
+                    action: params.action === "redo" ? "redo" : "undo",
+                });
+                return text(JSON.stringify(data));
+            });
+        },
+    });
+
+    // 媒体对象运维：批量移动/缩放（排阵列、整理画布）与重命名
+    pi.registerTool({
+        name: "canvas_media_ops",
+        label: "Media Operations",
+        description:
+            "整理画布上的图片/视频（节点的位置修改用 canvas_node_ops 的 x/y）。" +
+            "action=arrange：批量移动/缩放，items 数组逐项指定（name 或 id 定位，" +
+            "x/y/width/height 按需提供），适合排对比阵列、腾出空白区域；" +
+            "action=rename：把 name 改为 newName（同名对象全部改名）。" +
+            "两种操作都可撤销（canvas_undo）。",
+        parameters: Type.Object({
+            action: Type.String({ description: "arrange / rename" }),
+            items: Type.Optional(Type.Array(Type.Object({
+                id: Type.Optional(Type.String({ description: "对象 id（与 name 二选一）" })),
+                name: Type.Optional(Type.String({ description: "对象名称（与 id 二选一）" })),
+                x: Type.Optional(Type.Number({ description: "新位置 X" })),
+                y: Type.Optional(Type.Number({ description: "新位置 Y" })),
+                width: Type.Optional(Type.Number({ description: "新宽度（缩放）" })),
+                height: Type.Optional(Type.Number({ description: "新高度（缩放）" })),
+            }), { description: "arrange：批量几何调整清单" })),
+            renameName: Type.Optional(Type.String({ description: "rename：原名称" })),
+            newName: Type.Optional(Type.String({ description: "rename：新名称" })),
+        }),
+        async execute(toolCallId, params) {
+            return serialized(async () => {
+                if (params.action === "arrange") {
+                    const data = await bridge("media_arrange", { items: params.items });
+                    const skipped = (data as { skipped?: string[] }).skipped || [];
+                    return text(`已整理 ${skipped.length ? (data as { arranged: number }).arranged + " 个（未找到: " + skipped.join("、") + "）" : (data as { arranged: number }).arranged + " 个对象"}`);
+                }
+                if (params.action === "rename") {
+                    const data = await bridge("media_rename", {
+                        name: params.renameName,
+                        newName: params.newName,
+                    });
+                    return text(`已重命名 ${(data as { renamed: number }).renamed} 个对象为「${(data as { newName: string }).newName}」`);
+                }
+                throw new Error(`未知 action「${params.action}」（可用: arrange / rename）`);
+            });
+        },
+    });
+
+    // 后端图像处理：高清放大 / AI 抠图（任务式）+ 存资产库（同步）。
+    // 输入取画布图或用户附图（resolveRefImages 当场解析），产物自动落画布
+    pi.registerTool({
+        name: "canvas_image_process",
+        label: "Image Process",
+        description:
+            "对一张图做后端图像处理。action 三种：" +
+            "upscale=高清放大（Real-ESRGAN；type：anime 动漫（默认，支持 2x/4x）/ real 真实照片（仅 4x）；" +
+            "scale 默认 4）；remove_bg=AI 抠图（RMBG 模型，输出透明背景 PNG）。" +
+            "这两个动作是异步任务：立即返回任务 id，结果完成后自动落画布，" +
+            "用 canvas_poll_task 查询（间隔 30 秒以上）；" +
+            "add_asset=把图存进本地资产库「我的资产」（同步完成，name 为展示名可省）。" +
+            "source 指定输入图：attachment:N（用户本消息第 N 张附图，用户所发图片必用此项）" +
+            "或画布图片名（canvas_get_state 的清单）。",
+        parameters: Type.Object({
+            action: Type.String({ description: "upscale / remove_bg / add_asset" }),
+            source: Type.String({ description: "输入图：attachment:N 或画布图片名" }),
+            type: Type.Optional(Type.String({ description: "upscale：anime（默认，动漫图）/ real（真实照片，仅 4x）" })),
+            scale: Type.Optional(Type.Number({ description: "upscale：放大倍数 2 或 4（默认 4）" })),
+            name: Type.Optional(Type.String({ description: "add_asset：资产展示名（可省，缺省用图片名）" })),
+        }),
+        async execute(toolCallId, params) {
+            const [dataUrl] = await resolveRefImages([params.source]);
+            if (!dataUrl) throw new Error(`无法解析输入图：${params.source}`);
+
+            if (params.action === "add_asset") {
+                const res = await fetch(LUMEN_BASE + "/api/assets", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ src: dataUrl, name: params.name || undefined }),
+                    signal: AbortSignal.timeout(BRIDGE_TIMEOUT_MS),
+                });
+                const json = (await res.json().catch(() => null)) as {
+                    status?: string; message?: string; name?: string; existed?: boolean;
+                } | null;
+                if (!res.ok || !json || json.status !== "ok") {
+                    throw new Error(json?.message || `存资产失败（HTTP ${res.status}）`);
+                }
+                return text(`已存入资产库「我的资产」：${json.name}（文件 ${json.existed ? "已存在，去重复用" : "新存入"}）`);
+            }
+
+            if (params.action !== "upscale" && params.action !== "remove_bg") {
+                throw new Error(`未知 action「${params.action}」（可用: upscale / remove_bg / add_asset）`);
+            }
+
+            // 提交前快照停止信号：后台处理期间用户点停止即中断
+            await refreshStopSignal();
+            const submitStopAt = stopSignalAt;
+            const controller = new AbortController();
+            const isUpscale = params.action === "upscale";
+            const scale = isUpscale ? (Number(params.scale) === 2 ? 2 : 4) : 0;
+            const upType = isUpscale ? (params.type === "real" ? "real" : "anime") : "";
+            if (isUpscale && upType === "real" && scale !== 4) {
+                throw new Error("real 类型仅支持 4x 放大（2x 请用 anime 类型）");
+            }
+            const taskId = `${isUpscale ? "up" : "rem"}_${++taskSeq}`;
+            const sourceName = params.source.startsWith("attachment:") ? "用户附图" : params.source;
+            const task = registerTask({
+                id: taskId,
+                kind: isUpscale ? "upscale" : "rembg",
+                label: sourceName,
+                status: "running",
+                startedAt: Date.now(),
+                promise: Promise.resolve(),
+            });
+            task.promise = (async () => {
+                const stopTimer = watchStopSignal(controller, submitStopAt);
+                try {
+                    const endpoint = isUpscale ? "/api/upscale" : "/api/rembg";
+                    const body = isUpscale
+                        ? { imageData: dataUrl, type: upType, scale }
+                        : { imageData: dataUrl };
+                    const res = await fetch(LUMEN_BASE + endpoint, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                        signal: AbortSignal.any([AbortSignal.timeout(IMG_TASK_TIMEOUT_MS), controller.signal]),
+                    });
+                    const json = (await res.json().catch(() => null)) as {
+                        status?: string; message?: string;
+                        upscaledImage?: string;   // upscale：裸 base64
+                        image?: string;           // rembg：完整 data URL
+                    } | null;
+                    if (!res.ok || !json || json.status !== "ok") {
+                        throw new Error(json?.message || `处理失败（HTTP ${res.status}）`);
+                    }
+                    // 后端返回即完整 data URL（upscale 的 upscaledImage 与 rembg 的
+                    // image 均已带 data:image/...;base64, 前缀）；仅在未来后端改回
+                    // 裸 base64 时兜底拼前缀，重复拼接会导致浏览器解码失败
+                    const raw = isUpscale ? json.upscaledImage : json.image;
+                    const outUrl = raw && raw.startsWith("data:") ? raw : `data:image/png;base64,${raw}`;
+                    const dropped = await serialized(async () => {
+                        return (await bridge("drop_image", {
+                            dataUrl: outUrl,
+                            name: isUpscale ? `${sourceName}_x${scale}` : `${sourceName}_cutout`,
+                        })) as { id: string; name: string };
+                    });
+                    task.status = "done";
+                    task.finishedAt = Date.now();
+                    task.result = `${isUpscale ? `放大 ${scale}x` : "抠图"}完成（耗时 ` +
+                        `${Math.round((task.finishedAt - task.startedAt) / 1000)} 秒），已放置画布「${dropped.name}」（id: ${dropped.id}）`;
+                    reportTask(task);
+                } catch (err) {
+                    settleFailure(task, err, controller);
+                } finally {
+                    clearInterval(stopTimer);
+                }
+            })();
+            return text(
+                `${isUpscale ? "高清放大" : "AI 抠图"}任务已提交（taskId: ${taskId}，输入 ${sourceName}）。` +
+                `完成后结果自动落画布；用 canvas_poll_task 查询进度（间隔 30 秒以上）。`
+            );
+        },
+    });
+
+    // 视图与选中：视口聚焦 + 设置选中集（纯查看辅助，不改动画布内容）
+    pi.registerTool({
+        name: "canvas_view",
+        label: "Canvas View",
+        description:
+            "控制画布视口与选中（给正在看画布的用户做引导；不改变画布内容）。" +
+            "action=focus：视口缩放平移到目标——target 为 all（全部内容，默认）/ selected（当前选中）/" +
+            "对象 id 或名称；" +
+            "action=select：设置选中集（ids 或 names 二选一，总是先清空再设置）。" +
+            "选中后 canvas_get_state 的 selected 字段与本视图一致，用户工具栏也会作用于选中对象。",
+        parameters: Type.Object({
+            action: Type.String({ description: "focus / select" }),
+            target: Type.Optional(Type.String({ description: "focus：all / selected / 对象 id 或名称" })),
+            ids: Type.Optional(Type.Array(Type.String(), { description: "select：对象 id 数组" })),
+            names: Type.Optional(Type.Array(Type.String(), { description: "select：对象名称数组" })),
+        }),
+        async execute(toolCallId, params) {
+            if (params.action === "focus") {
+                const data = await bridge("view_focus", {
+                    target: params.target === undefined ? "all" : params.target,
+                });
+                return text(`已聚焦 ${(data as { focused: number }).focused} 个对象，视口缩放 ${Math.round((data as { scale: number }).scale * 100)}%`);
+            }
+            if (params.action === "select") {
+                const data = await bridge("select_set", {
+                    ids: params.ids,
+                    names: params.names,
+                });
+                const d = data as { selected: string[]; missing?: string[] };
+                return text(`已选中 ${d.selected.length} 个对象（${d.selected.join("、")}）` +
+                    (d.missing && d.missing.length ? `；未找到: ${d.missing.join("、")}` : ""));
+            }
+            throw new Error(`未知 action「${params.action}」（可用: focus / select）`);
+        },
+    });
+
+    // 写入面板提示词（get_prompts 的写侧）
+    pi.registerTool({
+        name: "canvas_set_prompts",
+        label: "Set Canvas Prompts",
+        description:
+            "写入右侧面板的正/负面提示词（canvas_get_prompts 的写侧）。" +
+            "面板正面是两框合并语义（质量画风框 + 内容框），写入时全文进主框、清空次框，" +
+            "读回结果与写入一致。画布节点工作流的提示词在 prompt 节点里" +
+            "（用 canvas_node_ops 的 update 改 text），与本面板是两个数据落点。" +
+            "正面/负面至少提供一个。",
+        parameters: Type.Object({
+            positive: Type.Optional(Type.String({ description: "正面提示词全文" })),
+            negative: Type.Optional(Type.String({ description: "负面提示词全文" })),
+        }),
+        async execute(toolCallId, params) {
+            return serialized(async () => {
+                const data = await bridge("set_prompts", {
+                    positive: params.positive,
+                    negative: params.negative,
+                });
+                const d = data as { positive: string; negative: string };
+                return text(`面板提示词已更新（正面 ${d.positive.length} 字 / 负面 ${d.negative.length} 字）`);
+            });
+        },
+    });
+
+    // 存档快照：保存当前画布 / 另存新档 / 列出存档（破坏性操作前的兜底）
+    pi.registerTool({
+        name: "canvas_archive",
+        label: "Canvas Archive",
+        description:
+            "画布存档管理。action=save：保存快照——不传 name 覆盖保存当前档" +
+            "（画布未命名时会报错，此时必须传 name），传 name 另存新档（重名自动加序号，不覆盖已有）；" +
+            "action=list：列出全部存档（名称与最后修改时间）。" +
+            "批量删除、大改动前先 save 一份快照，翻车可回档。注意：保存大画布（图片多）" +
+            "可能接近桥接超时上限，超时报错不代表保存失败，可用 list 复核。",
+        parameters: Type.Object({
+            action: Type.String({ description: "save / list" }),
+            name: Type.Optional(Type.String({ description: "save：另存的新存档名（省略=保存当前档）" })),
+        }),
+        async execute(toolCallId, params) {
+            if (params.action === "list") {
+                const res = await fetch(LUMEN_BASE + "/api/saves");
+                const json = (await res.json().catch(() => null)) as {
+                    saves?: Array<{ name: string; createdAt?: string | null }>;
+                } | null;
+                const saves = json?.saves || [];
+                if (saves.length === 0) return text("当前没有存档");
+                const NL = String.fromCharCode(10);
+                return text(["共 " + saves.length + " 个存档：",
+                    ...saves.map((s) => `- ${s.name}${s.createdAt ? "（" + s.createdAt.slice(0, 16).replace("T", " ") + "）" : ""}`),
+                ].join(NL));
+            }
+            if (params.action === "save") {
+                return serialized(async () => {
+                    const data = (await bridge("archive_save", {
+                        name: params.name,
+                    })) as { saved: boolean; archive: string; created: boolean };
+                    return text(`已${data.created ? "另存" : "保存"}存档「${data.archive}」`);
+                });
+            }
+            throw new Error(`未知 action「${params.action}」（可用: save / list）`);
+        },
+    });
+
     // 调用 API 生图模型（LLM 面板生图通道，与 canvas_run_comfy 的工作流通道平行）。
     // 提交与等待分离：本工具只做参数校验与参考图解析（attachment:N 只在本条
     // 消息上下文有效，必须当场解析成 data URL），实际生成放后台任务，
@@ -728,13 +1135,16 @@ export default async function (pi: ExtensionAPI) {
                         const buf = Buffer.from(await imgRes.arrayBuffer());
                         dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
                     }
-                    // 落图是写操作：走串行链，避免与其它写工具并发冲击浏览器
+                    // 落图是写操作：走串行链，避免与其它写工具并发冲击浏览器。
+                    // collect: 聚集编组启用时画布端统一落入聚集区（与占位图
+                    // 链路同语义）；不传 x/y——聚集区内槽位由画布端排布
                     const dropped = await serialized(async () => {
-                        return (await bridge("drop_image", { dataUrl })) as { id: string; name: string };
+                        return (await bridge("drop_image", { dataUrl, collect: true })) as { id: string; name: string };
                     });
                     task.status = "done";
                     task.finishedAt = Date.now();
                     task.result = `模型 ${params.model} 生图完成（耗时 ${Math.round((task.finishedAt - task.startedAt) / 1000)} 秒），已放置画布「${dropped.name}」（id: ${dropped.id}）`;
+                    reportTask(task);
                 } catch (err) {
                     settleFailure(task, err, controller);
                 } finally {
@@ -892,6 +1302,7 @@ export default async function (pi: ExtensionAPI) {
                             task.status = "done";
                             task.finishedAt = Date.now();
                             task.result = `视频生成完成（耗时 ${Math.round((task.finishedAt - task.startedAt) / 1000)} 秒）${note}`;
+                            reportTask(task);
                             return;
                         }
                         if (polled!.taskStatus !== "queued" && polled!.taskStatus !== "running") {

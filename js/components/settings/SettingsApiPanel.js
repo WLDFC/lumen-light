@@ -3,7 +3,8 @@
  * LumenLight 设置 - API 面板
  * 作用：渲染「API」分类，负责提供商切换、端点地址、API Key、模型列表的
  *       增删改，以及从提供商拉取可用模型、把设置保存到后端。
- *       提供商分两类：内置三家（Deepseek / OpenAI兼容 / 豆包）与
+ *       提供商分两类：内置五家（Deepseek / OpenAI兼容 / 豆包 / 阿里云百炼 /
+ *       魔搭ModelScope）与
  *       用户自由添加的「OpenAI 兼容」自定义厂商（自命名、可添加任意个、
  *       可删除，协议与内置 OpenAI兼容 完全一致）。
  * 数据约定：设置本体存放在 SettingsManager.settings 中（按厂商分组），
@@ -14,12 +15,80 @@
  */
 
 class SettingsApiPanel {
-    /** 内置提供商（固定三家，不可删除）；其余 providers 键均为自定义厂商 */
+    /** 内置提供商（固定五家，不可删除）；其余 providers 键均为自定义厂商 */
     static BUILTIN_PROVIDERS = [
         { key: 'Deepseek', label: 'Deepseek' },
         { key: 'OpenAI', label: 'OpenAI兼容' },
-        { key: 'Doubao', label: '豆包 / 火山方舟' }
+        { key: 'Doubao', label: '豆包 / 火山方舟' },
+        { key: 'DashScope', label: '阿里云百炼' },
+        { key: 'ModelScope', label: '魔搭ModelScope' }
     ];
+
+    /** 内置提供商的官方 OpenAI 兼容端点：配置为空时作为预填值展示，
+     *  用户粘贴 Key 即可直接「保存设置」启用（自定义厂商无预填） */
+    static DEFAULT_ENDPOINTS = {
+        Deepseek: 'https://api.deepseek.com/v1',
+        OpenAI: 'https://api.openai.com/v1',
+        Doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+        DashScope: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        ModelScope: 'https://api-inference.modelscope.cn/v1'
+    };
+
+    /** agent（pi）上下文窗口的取值钳制与留空默认值。
+     *  默认 307200（300K）与 piAgentManager.getProviderConfig 的透传默认一致
+     *  （2026-10-28 由 128K 上调，用户拍板） */
+    static CTX_TOKEN_MIN = 1024;
+    static CTX_TOKEN_MAX = 10485760;
+    static CTX_DEFAULT_TOKENS = 307200;
+    static CTX_DEFAULT_LABEL = '300K';
+
+    /** 单次回复输出上限的取值钳制与留空默认值（默认 8192，同上） */
+    static MAXTOK_TOKEN_MIN = 256;
+    static MAXTOK_TOKEN_MAX = 1048576;
+    static MAXTOK_DEFAULT_TOKENS = 8192;
+    static MAXTOK_DEFAULT_LABEL = '8K';
+
+    /**
+     * 解析 token 数输入：纯数字按 tokens，数字后缀 k/K 按 ×1024
+     * （128K → 131072），结果钳制到 [min, max]；空串/非法返回 null
+     * @param {string} raw - 输入框原始值
+     * @param {number} min - 最小值
+     * @param {number} max - 最大值
+     * @returns {number|null}
+     */
+    static parseTokenField(raw, min, max) {
+        const text = (raw || '').trim();
+        if (!text) return null;
+        const m = /^(\d+)([kK])?$/.exec(text);
+        if (!m) return null;
+        let value = parseInt(m[1], 10) * (m[2] ? 1024 : 1);
+        if (value < min) value = min;
+        if (value > max) value = max;
+        return value;
+    }
+
+    /**
+     * token 数的表单展示值：1024 的整数倍显示为 K 形式（131072 → 128K，
+     * 与 parseTokenField 的 K 写法互逆），其余原样；非法/缺失返回空串
+     * @param {number|string} value - settings 里存的 token 数
+     * @returns {string}
+     */
+    static formatTokenField(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n <= 0) return '';
+        return n % 1024 === 0 ? `${n / 1024}K` : String(n);
+    }
+
+    /** 模型行操作按钮的 SVG 线框图标：stroke 走 currentColor，
+     *  颜色/悬停/结果态全部由 CSS 控制（与设置面板深色主题同源） */
+    static ICONS = {
+        // 插头：测试链接
+        test: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 1.5v3M10.5 1.5v3M4 4.5h8v2.5a4 4 0 0 1-8 0z"/><path d="M8 11v3.5"/></svg>',
+        // 铅笔：编辑
+        edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.1 2.3a1.9 1.9 0 0 1 2.6 2.6L5.5 13.1l-3.4.8.8-3.4z"/><path d="M10 3.4l2.6 2.6"/></svg>',
+        // 垃圾桶：删除
+        trash: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.2h11"/><path d="M6.3 4V2.9c0-.5.4-.9.9-.9h1.6c.5 0 .9.4.9.9V4"/><path d="M4.1 4.2l.6 8.9c0 .5.4.9.9.9h4.8c.5 0 .9-.4.9-.9l.6-8.9"/><path d="M6.6 7v4.3M9.4 7v4.3"/></svg>'
+    };
     /**
      * @param {SettingsManager} manager - 设置管理器实例（提供 contentEl、settings 等）
      */
@@ -71,7 +140,7 @@ class SettingsApiPanel {
         // 根据当前提供商显示对应的模型提示
         const modelHint = this.getProviderModelHint(currentProvider);
 
-        // 厂商下拉：内置三家 + 自定义厂商（providers 里的自由键名）
+        // 厂商下拉：内置五家 + 自定义厂商（providers 里的自由键名）
         const providerOptions = [
             ...SettingsApiPanel.BUILTIN_PROVIDERS.map((p) =>
                 `<option value="${p.key}" ${currentProvider === p.key ? 'selected' : ''}>${p.label}</option>`
@@ -104,7 +173,8 @@ class SettingsApiPanel {
                 <div class="settings-form-item">
                     <label for="settingsApiEndpoint">端点地址</label>
                     <input type="text" id="settingsApiEndpoint" class="settings-input"
-                           placeholder="https://api.example.com/v1" value="${LumenLight.escapeHtml(config.endpoint || '')}">
+                           placeholder="https://api.example.com/v1"
+                           value="${LumenLight.escapeHtml(config.endpoint || SettingsApiPanel.DEFAULT_ENDPOINTS[currentProvider] || '')}">
                 </div>
                 <div class="settings-form-item">
                     <label for="settingsApiKey">API Key</label>
@@ -128,14 +198,19 @@ class SettingsApiPanel {
                     <div class="settings-models-table">
                         <div class="settings-models-row head">
                             <span>模型 ID</span>
-                            <span>显示名称</span>
                             <span>类型</span>
+                            <span>操作</span>
                         </div>
                         <div class="settings-models-body" id="settingsModelsBody">
                             ${models.map((model, index) => this.renderModelRow(model, index)).join('')}
                         </div>
                     </div>
-                    <div class="settings-models-hint">${modelHint}</div>
+                    <div class="settings-models-hint">${modelHint}<br>
+                        🔌 测试链接：检查端点可达性与该模型是否在清单中（部分中转 /models 不全，不在清单只作提醒）；
+                        ✏️ 编辑：显示名称（留空显示模型 ID）与 agent 上下文/输出上限（${SettingsApiPanel.CTX_DEFAULT_LABEL} / ${SettingsApiPanel.MAXTOK_DEFAULT_LABEL}
+                        或 ${SettingsApiPanel.CTX_DEFAULT_TOKENS} / ${SettingsApiPanel.MAXTOK_DEFAULT_TOKENS} 写法，留空用默认，仅影响 agent 压缩时机与输出预算，不改变模型真实上限）；
+                        开关关闭后该模型在所有模型下拉与 agent 中隐藏。
+                    </div>
                 </div>
 
                 <!-- RunningHub 云端配置：仅 Key 与端点（工作流/应用的 ID 输入
@@ -198,13 +273,22 @@ class SettingsApiPanel {
         fetchBtn?.addEventListener('click', () => this.fetchModels());
         addBtn?.addEventListener('click', () => this.addModel());
 
-        // 绑定删除模型事件（事件委托）
+        // 模型行操作事件（事件委托）：测试链接 / 编辑弹窗 / 删除
         const modelsBody = document.getElementById('settingsModelsBody');
         modelsBody?.addEventListener('click', (e) => {
+            const testBtn = e.target.closest('.settings-model-test');
+            if (testBtn) {
+                this.testModelConnection(parseInt(testBtn.dataset.index, 10), testBtn);
+                return;
+            }
+            const editBtn = e.target.closest('.settings-model-edit');
+            if (editBtn) {
+                this.openModelEditModal(parseInt(editBtn.dataset.index, 10));
+                return;
+            }
             const deleteBtn = e.target.closest('.settings-model-delete');
             if (deleteBtn) {
-                const index = parseInt(deleteBtn.dataset.index, 10);
-                this.removeModel(index);
+                this.removeModel(parseInt(deleteBtn.dataset.index, 10));
             }
         });
 
@@ -233,6 +317,10 @@ class SettingsApiPanel {
                 return 'Deepseek 直接填写模型名称，例如 deepseek-chat';
             case 'OpenAI':
                 return 'OpenAI兼容接口直接填写模型名称，例如 gpt-4o';
+            case 'DashScope':
+                return '百炼走 OpenAI 兼容模式（compatible-mode），模型名称如 qwen-plus、qwen3-max、qwen3-vl-plus（带视觉）；Key 在百炼控制台「API-KEY」页创建';
+            case 'ModelScope':
+                return '魔搭免费推理 API，模型 ID 需带组织前缀，如 Qwen/Qwen3-235B-A22B-Instruct-2507、deepseek-ai/DeepSeek-V3.2（点「获取模型列表」可拉全量）；Token 在魔搭「访问令牌」页创建，按天有免费额度';
             default:
                 if (this.isCustomProvider(provider)) {
                     return '自定义厂商走 OpenAI 兼容协议，直接填写模型名称；请确保与其他厂商的模型 ID 不重复，否则同名模型只会路由到先配置的厂商';
@@ -386,14 +474,16 @@ class SettingsApiPanel {
         // 模型类型：auto=按名称自动识别（默认）、chat=聊天、image=绘图（图像生成）
         const type = ['auto', 'chat', 'image', 'video'].includes(model.type) ? model.type : 'auto';
 
+        // 开关缺省=启用：只有显式 enabled === false 才是停用（与项目启停惯例一致，
+        // 同 ADR 004 的 === false 判定口径）
+        const enabled = model.enabled !== false;
+
         return `
             <div class="settings-models-row" data-index="${index}">
                 <select class="settings-input settings-model-id" data-index="${index}">
                     ${currentOption}
                     ${idOptions}
                 </select>
-                <input type="text" class="settings-input settings-model-name" data-index="${index}"
-                       placeholder="显示名称" value="${LumenLight.escapeHtml(model.displayName || '')}">
                 <select class="settings-input settings-model-type" data-index="${index}"
                         title="自动：按模型名称识别；聊天：强制走对话接口；绘图：强制走图像生成接口；视频：强制走视频生成接口">
                     <option value="auto" ${type === 'auto' ? 'selected' : ''}>自动</option>
@@ -401,33 +491,63 @@ class SettingsApiPanel {
                     <option value="image" ${type === 'image' ? 'selected' : ''}>绘图</option>
                     <option value="video" ${type === 'video' ? 'selected' : ''}>视频</option>
                 </select>
-                <button class="settings-model-delete" type="button" data-index="${index}" title="删除模型">🗑️</button>
+                <div class="settings-model-actions">
+                    <button type="button" class="settings-model-act settings-model-test" data-index="${index}"
+                            title="测试链接：检查端点可达性与该模型是否在清单中">${SettingsApiPanel.ICONS.test}</button>
+                    <button type="button" class="settings-model-act settings-model-edit" data-index="${index}"
+                            title="编辑：显示名称 / 上下文 / 输出上限">${SettingsApiPanel.ICONS.edit}</button>
+                    <button type="button" class="settings-model-act settings-model-delete" data-index="${index}"
+                            title="删除模型">${SettingsApiPanel.ICONS.trash}</button>
+                    <label class="settings-switch settings-model-switch"
+                           title="启用/停用：关闭后该模型在所有模型下拉与 agent 中隐藏">
+                        <input type="checkbox" class="settings-model-enabled" data-index="${index}" ${enabled ? 'checked' : ''}>
+                        <span class="settings-switch-slider"></span>
+                    </label>
+                </div>
             </div>
         `;
     }
 
     /**
-     * 收集当前表单中的模型列表
-     * @returns {Array} 模型对象数组
+     * 收集当前表单中的模型列表（与行严格对位）。
+     * 返回数组下标 == 行下标 == settings 存储下标（render 按存储数组
+     * 1:1 渲染行）：未选 ID 的空行以 null 占位而不是丢弃——否则压缩
+     * 会让「编辑/删除」按钮携带的行下标在空行位于目标行之前时错位。
+     * 占位 null 由写回侧（collectApiFromForm / 增删改方法）过滤，
+     * 落盘行为与旧版「丢弃空行」一致
+     * @returns {Array<(Object|null)>} 模型对象或 null 占位
      */
     collectModelsFromForm() {
         const body = document.getElementById('settingsModelsBody');
         const models = [];
 
         if (body) {
+            // 显示名称/上下文/输出上限已移入编辑弹窗（写入 settings，
+            // 不在行 DOM 里），收集时必须按位回填——否则任意一次收集
+            // （保存/切厂商/加删行）都会把这些字段静默抹掉
+            const storedModels = Array.isArray(this.getCurrentProviderConfig().models)
+                ? this.getCurrentProviderConfig().models : [];
             const rows = body.querySelectorAll('.settings-models-row');
-            rows.forEach((row) => {
+            rows.forEach((row, i) => {
                 const idSelect = row.querySelector('.settings-model-id');
-                const nameInput = row.querySelector('.settings-model-name');
                 const typeSelect = row.querySelector('.settings-model-type');
+                const enabledInput = row.querySelector('.settings-model-enabled');
                 const id = idSelect ? idSelect.value.trim() : '';
-                const displayName = nameInput ? nameInput.value.trim() : '';
                 // 模型类型标记：auto/chat/image/video，用于前端区分聊天、绘图与视频接口
                 const type = typeSelect ? typeSelect.value : 'auto';
 
-                if (id || displayName) {
-                    models.push({ id, displayName, type });
+                // 空行（未选 ID）占位保对位，写回侧过滤
+                if (!id) {
+                    models.push(null);
+                    return;
                 }
+                const prev = storedModels[i] || {};
+                const entry = { id, displayName: prev.displayName || '', type };
+                if (prev.contextWindow) entry.contextWindow = prev.contextWindow;
+                if (prev.maxTokens) entry.maxTokens = prev.maxTokens;
+                // 开关缺省=启用：只在停用时写字段（=== false 判定口径）
+                if (enabledInput && enabledInput.checked === false) entry.enabled = false;
+                models.push(entry);
             });
         }
 
@@ -439,13 +559,18 @@ class SettingsApiPanel {
      * 按厂商分组保存，避免不同厂商的端点、Key、模型互相串。
      * 当前厂商以 settings.api.currentProvider 为准，
      * 调用方（如 onProviderChange）需要自行维护 currentProvider 的切换。
+     * @param {boolean} [keepEmptyRows] - 保留空行占位（对位编辑用）：
+     *        仅 addModel/removeModel/applyModelEdit 需要「行下标可直取」
+     *        的对位数组并在变更后自行过滤；持久化路径（保存/切厂商）
+     *        默认过滤 null，落盘行为与旧版「丢弃空行」一致
      * @returns {Object} API 设置对象 { currentProvider, providers }
      */
-    collectApiFromForm() {
+    collectApiFromForm(keepEmptyRows = false) {
         const provider = (this.settings.api && this.settings.api.currentProvider) || 'Deepseek';
         const endpoint = document.getElementById('settingsApiEndpoint')?.value.trim() || '';
         const apiKey = document.getElementById('settingsApiKey')?.value.trim() || '';
-        const models = this.collectModelsFromForm();
+        const aligned = this.collectModelsFromForm();
+        const models = keepEmptyRows ? aligned : aligned.filter(Boolean);
 
         // 保留其他厂商的已有配置，只更新当前厂商。
         // bindings 不再写入 skill（技能模型已迁移到提示词节点技能栏，
@@ -518,10 +643,13 @@ class SettingsApiPanel {
      * 添加一个空模型行
      */
     addModel() {
-        const api = this.collectApiFromForm();
+        // keepEmptyRows：先拿对位数组再追加，避免先前空行被丢弃压缩
+        // 导致与渲染行错位
+        const api = this.collectApiFromForm(true);
         const provider = api.currentProvider || 'Deepseek';
         const providerConfig = api.providers[provider] || { endpoint: '', apiKey: '', models: [] };
         providerConfig.models.push({ id: '', displayName: '', type: 'auto' });
+        providerConfig.models = providerConfig.models.filter(Boolean);
         api.providers[provider] = providerConfig;
         this.settings.api = api;
         this.render();
@@ -529,16 +657,192 @@ class SettingsApiPanel {
 
     /**
      * 删除指定索引的模型
-     * @param {number} index - 模型索引
+     * @param {number} index - 模型索引（= 渲染行下标，与对位数组直配）
      */
     removeModel(index) {
-        const api = this.collectApiFromForm();
+        const api = this.collectApiFromForm(true);
         const provider = api.currentProvider || 'Deepseek';
         const providerConfig = api.providers[provider] || { endpoint: '', apiKey: '', models: [] };
         providerConfig.models.splice(index, 1);
+        providerConfig.models = providerConfig.models.filter(Boolean);
         api.providers[provider] = providerConfig;
         this.settings.api = api;
         this.render();
+    }
+
+    // ==================== 模型编辑弹窗 ====================
+    // 显示名称/上下文/输出上限收进弹窗（行内只留 ID/类型/操作组）。
+    // 弹窗字段初值取自 settings 的存储值（这些字段不在行 DOM 中），
+    // 确认后经「收集→按位合并→重渲染」的既有管线落回，与添加/删除
+    // 模型同一条数据路径；取消/Esc/点遮罩一律不改动
+
+    /**
+     * 打开模型编辑弹窗
+     * @param {number} index - 模型行下标（与 settings 存储数组对位）
+     */
+    openModelEditModal(index) {
+        this.closeModelEditModal();   // 防重复叠加
+        const storedModels = Array.isArray(this.getCurrentProviderConfig().models)
+            ? this.getCurrentProviderConfig().models : [];
+        const model = storedModels[index] || {};
+        const row = document.querySelector(`#settingsModelsBody .settings-models-row[data-index="${index}"]`);
+        const id = row?.querySelector('.settings-model-id')?.value.trim() || model.id || '';
+
+        const overlay = document.createElement('div');
+        overlay.id = 'modelEditOverlay';
+        overlay.innerHTML = `
+            <div class="model-edit-dialog" role="dialog" aria-modal="true">
+                <div class="model-edit-title">编辑模型</div>
+                <div class="model-edit-subtitle">${LumenLight.escapeHtml(id || '（未选择模型 ID）')}</div>
+                <div class="model-edit-field">
+                    <label for="modelEditName">显示名称</label>
+                    <input type="text" id="modelEditName" class="settings-input" maxlength="60"
+                           placeholder="留空显示模型 ID"
+                           value="${LumenLight.escapeHtml(model.displayName || '')}">
+                </div>
+                <div class="model-edit-field">
+                    <label for="modelEditCtx">上下文窗口（tokens）</label>
+                    <input type="text" inputmode="numeric" id="modelEditCtx" class="settings-input"
+                           placeholder="默认 ${SettingsApiPanel.CTX_DEFAULT_LABEL}"
+                           value="${LumenLight.escapeHtml(SettingsApiPanel.formatTokenField(model.contextWindow))}">
+                    <div class="model-edit-hint">agent（pi）自动压缩的触发依据，不改变模型真实上限；支持 ${SettingsApiPanel.CTX_DEFAULT_LABEL} 或 ${SettingsApiPanel.CTX_DEFAULT_TOKENS} 写法</div>
+                </div>
+                <div class="model-edit-field">
+                    <label for="modelEditMaxtok">输出上限（tokens）</label>
+                    <input type="text" inputmode="numeric" id="modelEditMaxtok" class="settings-input"
+                           placeholder="默认 ${SettingsApiPanel.MAXTOK_DEFAULT_LABEL}"
+                           value="${LumenLight.escapeHtml(SettingsApiPanel.formatTokenField(model.maxTokens))}">
+                    <div class="model-edit-hint">单次回复输出预算，推理类模型可调大；绘图/视频模型不走 agent，这两项不生效</div>
+                </div>
+                <div class="model-edit-footer">
+                    <button type="button" class="settings-models-btn" id="modelEditCancel">取消</button>
+                    <button type="button" class="settings-models-btn primary" id="modelEditConfirm">确定</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.addEventListener('mousedown', (e) => {
+            if (e.target === overlay) this.closeModelEditModal();
+        });
+        overlay.querySelector('#modelEditCancel').addEventListener('click', () => this.closeModelEditModal());
+        overlay.querySelector('#modelEditConfirm').addEventListener('click', () => this.applyModelEdit(index));
+        overlay.querySelectorAll('input').forEach((inp) => {
+            inp.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); this.applyModelEdit(index); }
+            });
+        });
+        // Esc 关闭挂在 document 上（弹窗内焦点才收得到键盘），关闭时移除
+        this._modelEditKeyHandler = (e) => {
+            if (e.key === 'Escape') this.closeModelEditModal();
+        };
+        document.addEventListener('keydown', this._modelEditKeyHandler);
+        overlay.querySelector('#modelEditName').focus();
+    }
+
+    /** 关闭模型编辑弹窗（幂等）：移除遮罩与 document 级 Esc 监听 */
+    closeModelEditModal() {
+        if (this._modelEditKeyHandler) {
+            document.removeEventListener('keydown', this._modelEditKeyHandler);
+            this._modelEditKeyHandler = null;
+        }
+        document.getElementById('modelEditOverlay')?.remove();
+    }
+
+    /**
+     * 应用模型编辑：校验 → 合入对应下标的存储条目 → 重渲染。
+     * 走 collectApiFromForm 既有管线（行 DOM 只贡献 id/类型/开关，
+     * 弹窗字段在此覆盖），保存落盘仍由「保存设置」统一负责
+     * @param {number} index - 模型行下标
+     */
+    applyModelEdit(index) {
+        const name = document.getElementById('modelEditName')?.value.trim() || '';
+        const ctxRaw = document.getElementById('modelEditCtx')?.value ?? '';
+        const maxtokRaw = document.getElementById('modelEditMaxtok')?.value ?? '';
+        const contextWindow = SettingsApiPanel.parseTokenField(
+            ctxRaw, SettingsApiPanel.CTX_TOKEN_MIN, SettingsApiPanel.CTX_TOKEN_MAX);
+        const maxTokens = SettingsApiPanel.parseTokenField(
+            maxtokRaw, SettingsApiPanel.MAXTOK_TOKEN_MIN, SettingsApiPanel.MAXTOK_TOKEN_MAX);
+        if ((ctxRaw.trim() && contextWindow === null) ||
+            (maxtokRaw.trim() && maxTokens === null)) {
+            alert(`上下文/输出上限格式不正确，示例：${SettingsApiPanel.CTX_DEFAULT_LABEL} 或 ${SettingsApiPanel.CTX_DEFAULT_TOKENS}`);
+            return;
+        }
+
+        // 对位收集（keepEmptyRows）：弹窗字段按行下标覆盖，再过滤空位
+        // 落回 settings——与添加/删除模型同一条数据路径
+        const api = this.collectApiFromForm(true);
+        const provider = api.currentProvider || 'Deepseek';
+        const entry = ((api.providers[provider] || {}).models || [])[index];
+        if (entry) {
+            entry.displayName = name;
+            // 清空 = 删除字段走后端默认（300K/8192，与 piAgentManager 透传默认一致）
+            if (contextWindow !== null) entry.contextWindow = contextWindow; else delete entry.contextWindow;
+            if (maxTokens !== null) entry.maxTokens = maxTokens; else delete entry.maxTokens;
+        }
+        if (api.providers[provider]) {
+            api.providers[provider].models = (api.providers[provider].models || []).filter(Boolean);
+        }
+        this.settings.api = api;
+        this.closeModelEditModal();
+        this.render();
+        this.flashStatus('模型编辑已应用，点击「保存设置」后落盘');
+    }
+
+    // ==================== 测试链接 ====================
+    // 轻量检查：POST /api/settings/models（复用「获取模型列表」接口），
+    // 报告端点可达性 + 该模型 ID 是否在清单。清单不含只作黄色提醒
+    // （很多中转 /models 返回不全但模型实际可用），不做真实对话调用
+
+    /**
+     * 测试某行模型的连接。只读表单（端点/Key 直接读输入框），
+     * 不经 collectApiFromForm 落 settings，避免测试动作触发重渲染
+     * 打断其他行的未落盘编辑
+     * @param {number} index - 模型行下标
+     * @param {HTMLElement} btn - 触发测试的按钮（结果态写在其 class 上）
+     */
+    async testModelConnection(index, btn) {
+        const endpoint = document.getElementById('settingsApiEndpoint')?.value.trim() || '';
+        const apiKey = document.getElementById('settingsApiKey')?.value.trim() || '';
+        if (!endpoint || !apiKey) {
+            this.flashStatus('测试链接前请先填写端点地址和 API Key');
+            return;
+        }
+        const row = btn.closest('.settings-models-row');
+        const id = row?.querySelector('.settings-model-id')?.value.trim() || '';
+        if (!id) {
+            this.flashStatus('请先选择模型 ID 再测试链接');
+            return;
+        }
+
+        btn.classList.remove('is-ok', 'is-warn', 'is-bad');
+        btn.classList.add('is-testing');
+        try {
+            const response = await fetch('/api/settings/models', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint, apiKey })
+            });
+            const result = await response.json();
+            if (result.status !== 'ok') throw new Error(result.message || '获取失败');
+            const list = Array.isArray(result.models) ? result.models : [];
+            if (list.includes(id)) {
+                btn.classList.add('is-ok');
+                this.flashStatus(`「${id}」测试通过：端点可达，模型在清单中（共 ${list.length} 个）`);
+            } else {
+                btn.classList.add('is-warn');
+                this.flashStatus(`端点可达，但模型清单（${list.length} 个）不含「${id}」——部分中转 /models 不全，实际可能仍可用`);
+            }
+        } catch (error) {
+            btn.classList.add('is-bad');
+            this.flashStatus('测试失败：' + error.message);
+        } finally {
+            btn.classList.remove('is-testing');
+            // 结果色停留 4s 后恢复；期间行可能被重渲染替换，isConnected 容错
+            setTimeout(() => {
+                if (btn.isConnected) btn.classList.remove('is-ok', 'is-warn', 'is-bad');
+            }, 4000);
+        }
     }
 
     // ==================== RunningHub 云端配置 ====================

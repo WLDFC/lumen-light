@@ -1,0 +1,415 @@
+/**
+ * ==========================================================================
+ * LumenLight 图像编辑器（ImageStudio）样式 —— 右侧面板区
+ * ==========================================================================
+ * 自 image-studio.css 拆出（拆分契约见主文件头）：右侧面板内容层——
+ * 色板容器与图层透明度行、图层面板（行/缩略图/类型徽标/锁标/眼睛/
+ * 拖放排序）、图层右键菜单、PS 式内嵌取色器、右侧工具栏与历史面板。
+ * 加载顺序：image-studio.css → 本文件 → image-studio-picker.css
+ * 对应组件：StudioLayerPanel.js / StudioColorPicker.js / StudioHistory.js
+ * ==========================================================================
+ */
+
+/* ==================== 色板容器与图层透明度 ==================== */
+
+/* 色板容器（蒙版激活时整体禁用）：内嵌取色器 + 色块网格两层 */
+.is-palette {
+    flex: none;
+    padding: 0 12px 12px;
+    transition: opacity 0.15s ease;
+}
+
+/* 遮罩层激活时色板禁用（遮罩只有全强度红一种语义） */
+.is-palette.disabled {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.is-palette-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+
+.image-studio .is-palette-grid .ie-swatch {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 6px;
+}
+
+/* 图层透明度（激活图层的透明度，PS 同语义） */
+.is-opacity-row {
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.is-opacity-row input[type="range"] {
+    flex: 1;
+    accent-color: #3b82f6;
+}
+
+/* ==================== 图层面板 ==================== */
+.is-layer-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.is-layer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    margin: 2px 0;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.is-layer-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* 激活图层：强调蓝描边（绘制的目标层） */
+.is-layer-row.active {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.12);
+}
+
+/* 遮罩层：遮罩模式下激活行 = 当前遮罩涂画目标，PS 式暗红底 +
+   红描边（与遮罩笔迹同色系），和普通激活蓝一眼区分 */
+.is-layer-row.active.masking {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.18);
+}
+
+/* 像素层缩略图：棋盘格垫透明区（PS 同款语义，空图层即纯棋盘格）。
+   position:static 必须显式声明——全局规则 css/style.css 对裸 canvas
+   有 position:fixed;top:0;left:0（主画布专用），不压住的话缩略图
+   会被拽出图层行钉死在视口左上角（即"左上角神秘色块"） */
+.is-layer-thumb {
+    position: static;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background:
+        conic-gradient(#3d3d3d 25%, #2c2c2c 0 50%, #3d3d3d 0 75%, #2c2c2c 0) 0 0 / 10px 10px;
+}
+
+/* 文字层 T 徽标：白色衬线 T（PS 同款；不随文字颜色——图标只表类型） */
+.is-layer-type-t {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    font: 700 17px/1 Georgia, 'Times New Roman', serif;
+    user-select: none;
+}
+
+/* 形状图层徽标（行首）：▢ 字形，与文字层 T 徽标同一视觉体系 */
+.is-layer-type-s {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    font: 700 16px/1 sans-serif;
+    user-select: none;
+}
+
+/* 背景层锁标（行尾）：锁变换/不可排序/不可删的约束前置可见 */
+.is-layer-lock {
+    flex: none;
+    display: flex;
+    align-items: center;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.is-layer-lock svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* 拖放排序落点指示：插入到目标行的上/下缘 */
+.is-layer-row.drop-above {
+    box-shadow: 0 -2px 0 0 #3b82f6;
+}
+
+.is-layer-row.drop-below {
+    box-shadow: 0 2px 0 0 #3b82f6;
+}
+
+/* 拖拽中的源行半透明（行本身不动，落点只看蓝色插入条） */
+.is-layer-row.dragging {
+    opacity: 0.45;
+}
+
+.is-layer-name {
+    flex: 1;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 眼睛可见性开关 */
+.is-layer-eye {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+}
+
+.is-layer-eye svg {
+    width: 14px;
+    height: 14px;
+}
+
+.is-layer-eye:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.is-layer-eye.hidden-layer {
+    color: rgba(255, 255, 255, 0.25);
+}
+
+/* ==================== 图层右键菜单 ==================== */
+.is-ctxmenu {
+    position: fixed;
+    z-index: 1300;            /* 浮在灯箱（1200）之上 */
+    min-width: 120px;
+    padding: 4px;
+    background: var(--icon-bg, #1b1c21);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.is-ctxmenu-item {
+    padding: 7px 12px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    border-radius: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.is-ctxmenu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+/* 删除守卫：仅剩一个可涂图层时禁用 */
+.is-ctxmenu-item.disabled {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+/* ==================== 色板：PS 式内嵌取色器（StudioColorPicker） ==================== */
+
+.is-color-picker {
+    padding-bottom: 10px;
+}
+
+/* 主区：SV 渐变方框 + 垂直色相条 */
+.is-cp-main {
+    display: flex;
+    gap: 8px;
+    height: 140px;
+}
+
+.is-cp-sv {
+    position: relative;
+    flex: 1;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    cursor: crosshair;
+    /* 底色两层渐变由 StudioColorPicker._render 内联写入：
+       黑（自下）+ 白→当前色相纯色（自右） */
+}
+
+.is-cp-sv-cursor {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+    pointer-events: none;       /* 游标不挡方框拖拽 */
+}
+
+.is-cp-hue {
+    position: relative;
+    width: 14px;
+    flex: none;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 2px;
+    background: linear-gradient(to bottom,
+        #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+    cursor: ns-resize;
+}
+
+.is-cp-hue-cursor {
+    position: absolute;
+    left: -3px;
+    right: -3px;
+    height: 5px;
+    border: 2px solid #fff;
+    border-radius: 3px;
+    transform: translateY(-50%);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+}
+
+/* 当前色/上次色叠放块 + Hex 输入 */
+.is-cp-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 10px;
+}
+
+.is-cp-pair {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex: none;
+}
+
+.is-cp-cur {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 21px;
+    height: 21px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    z-index: 1;
+}
+
+.is-cp-prev {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 21px;
+    height: 21px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+}
+
+.is-cp-hex {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #fff;
+    font-size: 12px;
+    font-family: monospace;
+    outline: none;
+}
+
+.is-cp-hex:focus {
+    border-color: #3b82f6;
+}
+
+/* ==================== 右侧工具栏（PS 面板栏同位）+ 历史面板 ==================== */
+
+/* 右侧竖排工具栏：宽度与左栏一致（52px），历史面板锚定其左 */
+.is-rail {
+    position: relative;
+    width: 52px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 0;
+    background: var(--icon-bg, #1b1c21);
+    border-left: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.is-history-panel {
+    position: absolute;
+    right: 100%;                /* 右缘贴合工具栏 */
+    top: 0;                     /* 顶缘贴合顶栏，零边距 */
+    width: 190px;
+    z-index: 30;
+    background: var(--icon-bg, #1b1c21);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+
+.is-history-header {
+    padding: 8px 12px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.is-history-list {
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.is-history-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.is-history-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* 当前所处状态：强调蓝；其后的条目 = 未来状态（点击重做），弱化 */
+.is-history-row.active {
+    background: #3b82f6;
+    color: #fff;
+}
+
+.is-history-row.future {
+    opacity: 0.4;
+}

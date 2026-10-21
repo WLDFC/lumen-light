@@ -139,3 +139,46 @@ describe('grid（宫格布局）', () => {
         }
     });
 });
+
+describe('waterfall（瀑布流布局）', () => {
+    test('最矮列优先：高成员独占一列后，短成员回流矮列（瀑布流语义）', () => {
+        // 3 张 2 列（⌈√3⌉=2）：a→列0；b(高300)→列1；c 回到更矮的列0
+        const a = member('a', 0, 0, 100, 100);
+        const b = member('b', 0, 0, 100, 300);
+        const c = member('c', 0, 0, 100, 100);
+        const { placements, width, height } = GroupLayout.arrange('waterfall', [a, b, c]);
+        const gap = GroupLayout.GAP;
+
+        expect(placements[0]).toMatchObject({ obj: a, x: 0, y: 0 });
+        expect(placements[1]).toMatchObject({ obj: b, x: 100 + gap, y: 0 });
+        expect(placements[2]).toMatchObject({ obj: c, x: 0, y: 100 + gap });
+        expect(width).toBe(100 * 2 + gap);
+        // 列1 总高 300+gap 为最深列，去掉尾部 gap
+        expect(height).toBe(300);
+    });
+
+    test('列宽 = 成员最大宽，窄成员列内水平居中', () => {
+        const a = member('a', 0, 0, 400, 100);
+        const b = member('b', 0, 0, 200, 100);
+        const { placements, width } = GroupLayout.arrange('waterfall', [a, b]);
+        expect(width).toBe(400 * 2 + GroupLayout.GAP);
+        // b 落列1（空列更矮），在 400 宽列内居中：(400-200)/2 = 100
+        expect(placements[1].x).toBe(400 + GroupLayout.GAP + 100);
+    });
+
+    test('4 张等尺寸 → 2 列各 2 张（⌈√4⌉），等高并列取最左', () => {
+        const members = ['a', 'b', 'c', 'd'].map(id => member(id, 0, 0, 100, 100));
+        const { placements } = GroupLayout.arrange('waterfall', members);
+        expect(placements.map(p => p.obj.id)).toEqual(['a', 'b', 'c', 'd']);
+        expect(placements[2]).toMatchObject({ x: 0, y: 100 + GroupLayout.GAP });
+        expect(placements[3]).toMatchObject({ x: 100 + GroupLayout.GAP, y: 100 + GroupLayout.GAP });
+    });
+
+    test('只移动不缩放：成员宽高不被修改', () => {
+        const a = member('a', 0, 0, 100, 300);
+        const b = member('b', 0, 0, 400, 80);
+        GroupLayout.arrange('waterfall', [a, b]);
+        expect(a).toMatchObject({ width: 100, height: 300 });
+        expect(b).toMatchObject({ width: 400, height: 80 });
+    });
+});

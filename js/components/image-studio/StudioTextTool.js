@@ -303,12 +303,32 @@ class StudioTextTool {
             }
             h = Math.max(maxCol, size);
         }
+        // 旋转/镜像折入渲染：文字先画进未旋转的 src 位图（mirror 在此
+        // 水平镜像），再整体旋入图层画布（rot 90/270 宽高互换）——
+        // 属性自洽，再次编辑重渲染不丢旋转态
+        const rot = (((t.rot || 0) % 360) + 360) % 360;
+        const swap = rot === 90 || rot === 270;
+        const srcW = Math.ceil(w) + pad * 2;
+        const srcH = Math.ceil(h) + pad * 2;
+        const src = document.createElement('canvas');
+        src.width = srcW; src.height = srcH;
+        const g = src.getContext('2d');
+        if (t.mirror) { g.translate(srcW, 0); g.scale(-1, 1); }
         const cv = layer.paintCv;
-        cv.width = Math.ceil(w) + pad * 2;
-        cv.height = Math.ceil(h) + pad * 2;
-        const g = cv.getContext('2d');
-        g.clearRect(0, 0, cv.width, cv.height);
-        if (!t.content) { layer.empty = true; return; }
+        const blit = () => {
+            if (rot === 0) {
+                cv.width = srcW; cv.height = srcH;
+                cv.getContext('2d').drawImage(src, 0, 0);
+            } else {
+                cv.width = swap ? srcH : srcW;
+                cv.height = swap ? srcW : srcH;
+                const g2 = cv.getContext('2d');
+                g2.translate(cv.width / 2, cv.height / 2);
+                g2.rotate(rot * Math.PI / 180);
+                g2.drawImage(src, -srcW / 2, -srcH / 2);
+            }
+        };
+        if (!t.content) { blit(); layer.empty = true; return; }
         layer.empty = false;
         g.font = font;
         g.fillStyle = t.color;
@@ -336,8 +356,8 @@ class StudioTextTool {
         } else {
             g.textAlign = 'center';
             g.textBaseline = 'middle';
-            // 列自右向左：首列中心 = 画布右缘内缩半列
-            let colCx = cv.width - pad - (size * StudioTextTool.LINE_H) / 2;
+            // 列自右向左：首列中心 = 位图右缘内缩半列
+            let colCx = srcW - pad - (size * StudioTextTool.LINE_H) / 2;
             for (const line of lines) {
                 let cy = pad;
                 for (const run of this._splitRuns(line)) {
@@ -361,6 +381,7 @@ class StudioTextTool {
                 colCx -= size * StudioTextTool.LINE_H;
             }
         }
+        blit();
     }
 
     /** 按行拆 CJK/西文段：CJK（含全角标点）直立，其余整段旋转 */

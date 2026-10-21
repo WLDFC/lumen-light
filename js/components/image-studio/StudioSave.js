@@ -20,6 +20,30 @@ class StudioSave {
     }
 
     /**
+     * 按图层变换把内容画进合成上下文（文档坐标）。
+     * 左右翻转（layer.flipX）时以图层矩形右缘为轴水平镜像——与编辑期
+     * 画布元素的 scaleX(-1) 视觉一致，保存结果与所见相同
+     * @param {CanvasRenderingContext2D} g - 目标上下文（已含文档→画幅平移）
+     * @param {Object} layer - 图层
+     * @param {HTMLCanvasElement} cv - 图层画布（paintCv 或 maskCv）
+     */
+    _blitLayer(g, layer, cv) {
+        const w = cv.width * layer.tscale;
+        const h = cv.height * layer.tscale;
+        // 形状层的翻转已由 _render 烘焙进画布内容（尾巴换向后重绘），
+        // 这里不能再镜像一次
+        if (layer.flipX && !layer.isShape) {
+            g.save();
+            g.translate(layer.tx + w, layer.ty);
+            g.scale(-1, 1);
+            g.drawImage(cv, 0, 0, w, h);
+            g.restore();
+            return;
+        }
+        g.drawImage(cv, layer.tx, layer.ty, w, h);
+    }
+
+    /**
      * 拍平上层笔迹：图层栈 1..n 自下而上，跳过隐藏层、逐层乘透明度。
      * （原图层不参与——它的涂画走烘焙通道，见 save）。
      * 返回 data URL（透明 PNG）
@@ -37,9 +61,7 @@ class StudioSave {
         for (const layer of studio.layers) {
             if (!studio._bakesIntoBase(layer) || !layer.visible) continue;
             g.globalAlpha = layer.opacity;
-            g.drawImage(layer.paintCv, layer.tx, layer.ty,
-                layer.paintCv.width * layer.tscale,
-                layer.paintCv.height * layer.tscale);
+            this._blitLayer(g, layer, layer.paintCv);
         }
         g.globalAlpha = 1;
         return cv.toDataURL('image/png');
@@ -56,9 +78,7 @@ class StudioSave {
         for (const layer of studio.layers) {
             if (studio._bakesIntoBase(layer) || !layer.visible) continue;
             g.globalAlpha = layer.opacity;
-            g.drawImage(layer.paintCv, layer.tx, layer.ty,
-                layer.paintCv.width * layer.tscale,
-                layer.paintCv.height * layer.tscale);
+            this._blitLayer(g, layer, layer.paintCv);
         }
         g.globalAlpha = 1;
         return cv.toDataURL('image/png');
@@ -76,9 +96,7 @@ class StudioSave {
         cv.height = studio.ih;
         const g = cv.getContext('2d');
         for (const layer of studio.layers) {
-            g.drawImage(layer.maskCv, layer.tx, layer.ty,
-                layer.maskCv.width * layer.tscale,
-                layer.maskCv.height * layer.tscale);
+            this._blitLayer(g, layer, layer.maskCv);
         }
         return cv.toDataURL('image/png');
     }
@@ -110,6 +128,8 @@ class StudioSave {
                 x: (layer.tx || 0) + (layer._shapeExt ? layer._shapeExt.left : 0),
                 y: (layer.ty || 0) + (layer._shapeExt ? layer._shapeExt.top : 0),
                 scale: layer.tscale || 1,
+                // 左右翻转标记（非破坏式镜像，恢复时重新应用到显示/拍平）
+                flipX: !!layer.flipX,
                 mask: layer.maskCv.toDataURL('image/png'),
                 paint: layer.paintCv.toDataURL('image/png')
             };
@@ -196,9 +216,7 @@ class StudioSave {
                 for (const layer of studio.layers) {
                     if (!layer.visible) continue;
                     g.globalAlpha = layer.opacity;
-                    g.drawImage(layer.paintCv, layer.tx, layer.ty,
-                        layer.paintCv.width * layer.tscale,
-                        layer.paintCv.height * layer.tscale);
+                    this._blitLayer(g, layer, layer.paintCv);
                 }
                 window.dispatchEvent(new CustomEvent('outpaintComplete', {
                     detail: { originalImage: studio.image, imageDataUrl: out.toDataURL('image/png') }

@@ -2,7 +2,7 @@
  * ==========================================================================
  * LumenLight 编组成员布局算法（GroupLayout）
  * ==========================================================================
- * 作用：编组工具栏「布局」按钮的三种排列算法（宫格/水平/垂直），纯函数、
+ * 作用：编组工具栏「布局」按钮的四种排列算法（宫格/瀑布流/水平/垂直），纯函数、
  *       可单测。输入成员数组（含 x/y/width/height 的画布对象），输出
  *       每个成员的新左上角坐标与内容总尺寸；应用坐标、移动 DOM 节点、
  *       重_fit 组矩形等副作用由调用方（GroupToolbar）负责。
@@ -23,7 +23,7 @@ class GroupLayout {
 
     /**
      * 排列入口
-     * @param {string} mode - 'grid' | 'horizontal' | 'vertical'
+     * @param {string} mode - 'grid' | 'waterfall' | 'horizontal' | 'vertical'
      * @param {Array} members - 成员对象数组（不修改入参）
      * @returns {{placements: Array<{obj, x, y}>, width: number, height: number}}
      *   placements 归一化到 (0,0) 起点；width/height 为内容包围盒
@@ -32,6 +32,7 @@ class GroupLayout {
         const ordered = GroupLayout.sortReadingOrder(members);
         if (mode === 'horizontal') return GroupLayout.horizontal(ordered);
         if (mode === 'vertical') return GroupLayout.vertical(ordered);
+        if (mode === 'waterfall') return GroupLayout.waterfall(ordered);
         return GroupLayout.grid(ordered);
     }
 
@@ -144,6 +145,43 @@ class GroupLayout {
             placements,
             width: colWidths.reduce((sum, w) => sum + w, 0) + gap * (cols - 1),
             height: y - gap
+        };
+    }
+
+    /**
+     * 瀑布流布局：定宽列 + 最矮列优先（提示词收藏页 CSS 多列瀑布流的
+     * 画布几何移植——收藏页是 column-count 交给浏览器排卡片，画布需要
+     * 输出坐标，算法在此实现，可见 groupLayout.test.js）。列数 = ⌈√n⌉
+     * （与宫格同规则）；列宽 = 成员最大宽（只移动不缩放，保证任何成员
+     * 不越列）；按阅读顺序把成员放进当前最矮的列、列内水平居中——
+     * 高低错落的竖排流，底部参差是瀑布流语义（与宫格的行对齐相对）。
+     * @param {Array} ordered - 已按阅读顺序排序的成员
+     */
+    static waterfall(ordered) {
+        const gap = GroupLayout.GAP;
+        const cols = Math.ceil(Math.sqrt(ordered.length));
+        const colWidth = Math.max(...ordered.map(o => o.width));
+
+        // 各列当前填充高度；最矮列优先（并列取最左——严格小于才换列，
+        // 等尺寸成员稳定落在前侧列，重复执行结果稳定）
+        const colHeights = new Array(cols).fill(0);
+        const placements = ordered.map(obj => {
+            let target = 0;
+            for (let c = 1; c < cols; c++) {
+                if (colHeights[c] < colHeights[target]) target = c;
+            }
+            const p = {
+                obj,
+                x: target * (colWidth + gap) + (colWidth - obj.width) / 2,
+                y: colHeights[target]
+            };
+            colHeights[target] += obj.height + gap;
+            return p;
+        });
+        return {
+            placements,
+            width: cols * colWidth + gap * (cols - 1),
+            height: Math.max(...colHeights) - gap
         };
     }
 }

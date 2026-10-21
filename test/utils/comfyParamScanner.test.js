@@ -68,6 +68,7 @@ describe('ComfyParamScanner.scan', () => {
         expect(ckpt).toMatchObject({ nodeId: '1', field: 'ckpt_name', current: 'modelA.safetensors' });
         expect(lora).toMatchObject({ nodeId: '2', field: 'lora_name', current: 'detail.safetensors' });
         expect(lora.strengthFields).toEqual(['strength_model', 'strength_clip']);
+        expect(lora.strengths).toEqual({ strength_model: 0.8, strength_clip: 1.0 });
     });
 
     test('步数/CFG/采样器/降噪/尺寸/批次按字段分桶并记录工作流当前值', () => {
@@ -110,18 +111,83 @@ describe('ComfyParamScanner.buildOverrides', () => {
         });
     });
 
-    test('LoRA 未启用时强度注入 0（软关闭）', () => {
+    test('LoRA 显式取消勾选时强度注入 0（软关闭）；缺省视为启用不碰强度', () => {
         const d = Scanner.scan(sampleWorkflow());
         const overrides = Scanner.buildOverrides(d, {
-            models: {}, loraEnabled: {}, steps: null, cfg: null,
+            models: {}, loraEnabled: { '2': false }, steps: null, cfg: null,
             sampler: null, sizeW: null, sizeH: null, denoise: null, count: 1
         });
         expect(overrides['2']).toEqual({ strength_model: 0, strength_clip: 0 });
         // 未设置的数值参数不产生覆盖，走工作流原值
         expect(overrides['3']).toBeUndefined();
+
+        // 缺省（未记录）= 启用，不产生任何 lora 覆盖
+        const untouched = Scanner.buildOverrides(d, {
+            models: {}, loraEnabled: {}, steps: null, cfg: null,
+            sampler: null, sizeW: null, sizeH: null, denoise: null, count: 1
+        });
+        expect(untouched['2']).toBeUndefined();
+    });
+
+    test('内嵌 lora 的用户强度改值注入对应字段；已删除条目跳过全部覆盖', () => {
+        const d = Scanner.scan(sampleWorkflow());
+        // 只改模型强度：仅 strength_model 被覆盖
+        const patched = Scanner.buildOverrides(d, {
+            models: {}, loraEnabled: {}, loraStrengths: { '2': { strengthModel: 1.2 } },
+            steps: null, cfg: null, sampler: null, sizeW: null, sizeH: null,
+            denoise: null, count: 1
+        });
+        expect(patched['2']).toEqual({ strength_model: 1.2 });
+
+        // 已删除的内嵌 lora：bypass 剔除，文件/强度/开关均不注入
+        const deleted = Scanner.buildOverrides(d, {
+            models: { '2': 'loraX.safetensors' }, loraEnabled: { '2': false },
+            loraStrengths: { '2': { strengthModel: 1.2 } }, loraDeleted: { '2': true },
+            steps: null, cfg: null, sampler: null, sizeW: null, sizeH: null,
+            denoise: null, count: 1
+        });
+        expect(deleted['2']).toBeUndefined();
     });
 
     test('detected 为 null 时返回空覆盖表', () => {
         expect(Scanner.buildOverrides(null, {})).toEqual({});
+    });
+});
+
+// ==================== scanLoadImageInputs（免节点 LoadImage 直注） ====================
+
+describe('scanLoadImageInputs：图片输入侧特征扫描', () => {
+    test('无 lumen 节点：LoadImage 按数值 id 升序输出（「从左往右」排序口径）', () => {
+        const wf = {
+            '9': { class_type: 'SaveImage', inputs: {} },
+            '100': { class_type: 'LoadImage', inputs: { image: 'a.png' } },
+            '15': { class_type: 'LoadImage', inputs: { image: 'b.png' } },
+            '3': { class_type: 'KSampler', inputs: { seed: 1 } }
+        };
+        expect(Scanner.scanLoadImageInputs(wf)).toEqual({
+            hasReceiveNode: false,
+            loadImageIds: ['15', '100']   // 数值升序而非字符串序（'100' < '15' 字符串序）
+        });
+    });
+
+    test('有画布取图节点：hasReceiveNode=true，LoadImage 清单照常返回（升格判定由调用方做）', () => {
+        const wf = {
+            '5': { class_type: 'LumenReceiveImageFromCanvas', inputs: { slot: '1' } },
+            '9': { class_type: 'LoadImage', inputs: { image: 'a.png' } }
+        };
+        expect(Scanner.scanLoadImageInputs(wf)).toEqual({
+            hasReceiveNode: true,
+            loadImageIds: ['9']
+        });
+    });
+
+    test('空工作流/null 返回空清单', () => {
+        expect(Scanner.scanLoadImageInputs(null)).toEqual({ hasReceiveNode: false, loadImageIds: [] });
+        expect(Scanner.scanLoadImageInputs({})).toEqual({ hasReceiveNode: false, loadImageIds: [] });
+    });
+
+    test('纯文生图工作流：无取图节点无 LoadImage', () => {
+        const wf = { '3': { class_type: 'KSampler', inputs: { seed: 1 } } };
+        expect(Scanner.scanLoadImageInputs(wf)).toEqual({ hasReceiveNode: false, loadImageIds: [] });
     });
 });

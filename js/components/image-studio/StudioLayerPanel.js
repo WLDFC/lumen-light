@@ -133,6 +133,7 @@ class StudioLayerPanel {
         copy.tx = src.tx;
         copy.ty = src.ty;
         copy.tscale = src.tscale;
+        copy.flipX = src.flipX;
         copy.empty = src.empty;
         if (src.isText) {
             copy.isText = true;
@@ -180,10 +181,16 @@ class StudioLayerPanel {
     _applyLayerStyles(layer) {
         const studio = this.studio;
         const display = layer.visible ? '' : 'none';
+        // 左右翻转：画布元素按中心轴水平镜像（盒子尺寸不变，选中框/命中
+        // 矩形仍是轴对齐矩形，无需换算）。形状层除外——它由 _render 按
+        // 镜像后的尾巴方位重渲染（外伸不对称，叠加 CSS 镜像会偏移/裁切）
+        const flip = (layer.flipX && !layer.isShape) ? 'scaleX(-1)' : '';
         layer.paintCv.style.display = display;
         layer.paintCv.style.opacity = layer.opacity;
+        layer.paintCv.style.transform = flip;
         layer.maskCv.style.display = display;
         layer.maskCv.style.opacity = layer.opacity * ImageStudio.MASK_DISPLAY_OPACITY;
+        layer.maskCv.style.transform = flip;
     }
 
     // ==================== 图层面板 UI ====================
@@ -201,8 +208,17 @@ class StudioLayerPanel {
         if (!cv.width || !cv.height) return;
         const s = Math.min(thumb.width / cv.width, thumb.height / cv.height);
         g.imageSmoothingQuality = 'high';
+        // 翻转态：缩略图同步水平镜像（内容居中，按缩略图宽镜像即可）。
+        // 形状层的镜像已烘焙进画布，再镜像会翻回去
+        const mirrorThumb = layer.flipX && !layer.isShape;
+        if (mirrorThumb) {
+            g.save();
+            g.translate(thumb.width, 0);
+            g.scale(-1, 1);
+        }
         g.drawImage(cv, (thumb.width - cv.width * s) / 2, (thumb.height - cv.height * s) / 2,
             cv.width * s, cv.height * s);
+        if (mirrorThumb) g.restore();
     }
 
     /** 落笔后增量刷新单行缩略图（_onPaintUp 调用；文字层无缩略图） */
@@ -440,6 +456,28 @@ class StudioLayerPanel {
         // 删除项守卫：激活层是背景层（不可删）时禁用
         studio.deleteItemEl.classList.toggle('disabled',
             !layer || layer.isBackground);
+        // 顶栏翻转按钮：无选中层 / 背景层（锁定白底）时禁用
+        if (studio.flipBtn) {
+            const canFlip = !!layer && !layer.isBackground;
+            studio.flipBtn.disabled = !canFlip;
+            studio.flipBtn.classList.toggle('on', canFlip && !!layer.flipX);
+        }
+        // 顶栏旋转按钮：同翻转按钮的禁用条件（无 .on 态——旋转不可再点回）
+        if (studio.rotateBtn) {
+            studio.rotateBtn.disabled = !layer || layer.isBackground;
+        }
+        // 左栏调色按钮：无选中层 / 背景层 / 空图层时禁用（没有可调的像素）
+        if (studio.adjustBtn) {
+            studio.adjustBtn.disabled =
+                !layer || layer.isBackground || layer.empty;
+        }
+        // 左栏抠图按钮：同调色按钮的禁用条件，另排除文字/形状层
+        // （属性驱动层像素会被下次重渲染覆盖，抠了也白抠）
+        if (studio.rembgBtn) {
+            studio.rembgBtn.disabled =
+                !layer || layer.isBackground || layer.empty
+                || layer.isText || layer.isShape;
+        }
     }
 
     /** 图层右键菜单定位显示 */

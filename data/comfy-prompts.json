@@ -1,0 +1,27 @@
+{
+    "positive": [
+        {
+            "id": "6df73931-7ea3-4aba-b32d-3887f275938e",
+            "name": "anima质量词",
+            "content": "masterpiece,best quality,good quality,absurdres,score_9,score_8,score_7",
+            "createdAt": 1793288328269,
+            "updatedAt": 1793288328269
+        }
+    ],
+    "negative": [
+        {
+            "id": "fe45c717-294a-4187-87d3-e13ca272091c",
+            "name": "moss负面词",
+            "content": "nsfw, worst quality, bad anatomy, watermark, jpeg artifact",
+            "createdAt": 1793288358717,
+            "updatedAt": 1793288358717
+        },
+        {
+            "id": "6213cad6-78d3-4150-8d01-f4111046adb3",
+            "name": "anima负面词",
+            "content": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, low contrast, signature, flexible deformity, abstract, low contrast,score_1, score_2, score_3,score_4,",
+            "createdAt": 1793288408001,
+            "updatedAt": 1793288408001
+        }
+    ]
+}

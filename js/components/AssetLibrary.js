@@ -138,6 +138,8 @@ class AssetLibrary {
             this.hide();
             return;
         }
+        // 与任务中心互斥：同列弹窗不叠开（点击哪个哪个开，另一个收起）
+        window.taskCenter?.hide();
         this.el.classList.add('show');
         this.btn.classList.add('active');
         await this.refreshTags();

@@ -119,6 +119,13 @@ class CanvasContextMenu {
                 action: () => this.addImageGenNode(this.targetCanvasPos)
             },
             {
+                label: '视频生成节点',
+                // 摄像机（Feather video：机身矩形 + 右侧镜头三角，
+                // 表达"走厂商 API 生成视频"的语义）
+                icon: svgIcon('<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>'),
+                action: () => this.addVideoGenNode(this.targetCanvasPos)
+            },
+            {
                 label: 'Comfy 生图节点',
                 // 芯片（CPU：外框 + 内核 + 四边引脚，与 Feather cpu 图标一致，
                 // 表达"走本地 ComfyUI 工作流"的语义）
@@ -283,6 +290,24 @@ class CanvasContextMenu {
             this.canvas,
             pos.x - ImageGenNode.DEFAULT_WIDTH / 2,
             pos.y - ImageGenNode.DEFAULT_HEIGHT / 2
+        );
+        this.canvas.images.images.push(node);
+        // 新节点默认选中，便于立即拖动定位
+        this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建节点');
+        this.canvas.draw();
+    }
+
+    /**
+     * 在指定画布坐标添加一个 API 视频生成节点（新节点居中于鼠标位置）
+     * @param {{x: number, y: number}} pos - 画布坐标
+     */
+    addVideoGenNode(pos) {
+        const node = new VideoGenNode(
+            this.canvas,
+            pos.x - VideoGenNode.DEFAULT_WIDTH / 2,
+            pos.y - VideoGenNode.DEFAULT_HEIGHT / 2
         );
         this.canvas.images.images.push(node);
         // 新节点默认选中，便于立即拖动定位

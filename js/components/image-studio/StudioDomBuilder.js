@@ -38,14 +38,12 @@ class StudioDomBuilder {
         studio.fileMenuEl = document.createElement('div');
         studio.fileMenuEl.className = 'is-file-menu';
         studio.fileMenuEl.hidden = true;
-        const fileLocalItem = document.createElement('button');
-        fileLocalItem.type = 'button';
-        fileLocalItem.className = 'is-file-item';
-        fileLocalItem.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>置入本地图片…`;
-        const fileCanvasItem = document.createElement('button');
-        fileCanvasItem.type = 'button';
-        fileCanvasItem.className = 'is-file-item';
-        fileCanvasItem.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>从画布选择图片…`;
+        const fileLocalItem = this._menuItem('置入本地图片…',
+            () => studio._openLocalFileDialog(),
+            '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>');
+        const fileCanvasItem = this._menuItem('从画布选择图片…',
+            () => studio._openPicker(),
+            '<rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>');
         studio.fileMenuEl.append(fileLocalItem, fileCanvasItem);
         fileWrap.append(fileBtn, studio.fileMenuEl);
         fileBtn.addEventListener('click', () => {
@@ -54,22 +52,45 @@ class StudioDomBuilder {
         fileLocalItem.addEventListener('click', () => studio._openLocalFileDialog());
         fileCanvasItem.addEventListener('click', () => studio._openPicker());
 
+        // ---- 顶栏「左右翻转」：作用于当前选中图层（非破坏式水平镜像） ----
+        // 图标 = 镜像三角 + 虚线中轴（Lucide flip-horizontal-2 同款线条风格）
+        studio.flipBtn = this._iconBtn(
+            '左右翻转选中图层（再次点击翻回；笔迹、遮罩与保存拍平一并镜像）',
+            '<path d="m3 7 5 5-5 5V7"></path><path d="m21 7-5 5 5 5V7"></path><path d="M12 20v2"></path><path d="M12 14v2"></path><path d="M12 8v2"></path><path d="M12 2v2"></path>',
+            () => studio.flipActiveLayer(), 'is-flip-btn');
+
+        // ---- 顶栏「旋转」：下拉选择 90°（顺时针）/ 180°，作用于当前选中图层 ----
+        // 菜单壳复用「文件」菜单的 .is-file-wrap / .is-file-menu 结构；
+        // 图标 = 顺时针旋转箭头（Lucide rotate-cw 同款线条风格）
+        const rotateWrap = document.createElement('div');
+        rotateWrap.className = 'is-file-wrap';
+        studio.rotateBtn = this._iconBtn(
+            '旋转选中图层（90° 顺时针 / 180°；笔迹、遮罩与保存拍平一并旋转）',
+            '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path>',
+            () => { studio.rotateMenuEl.hidden = !studio.rotateMenuEl.hidden; },
+            'is-rotate-btn');
+        studio.rotateMenuEl = document.createElement('div');
+        studio.rotateMenuEl.className = 'is-file-menu';
+        studio.rotateMenuEl.hidden = true;
+        const mkRotateItem = (deg, label) => this._menuItem(label, () => {
+            studio.rotateMenuEl.hidden = true;
+            studio.rotateActiveLayer(deg);
+        });
+        studio.rotateMenuEl.append(
+            mkRotateItem(90, '旋转 90°（顺时针）'),
+            mkRotateItem(180, '旋转 180°'));
+        rotateWrap.append(studio.rotateBtn, studio.rotateMenuEl);
+
         const sizeRow = document.createElement('div');
         sizeRow.className = 'ie-group is-size-row';
-        const sizeLabel = document.createElement('span');
-        sizeLabel.className = 'ie-size-label';
-        sizeLabel.textContent = '粗细';
-        studio.sizeSlider = document.createElement('input');
-        studio.sizeSlider.type = 'range';
-        studio.sizeSlider.min = ImageStudio.MIN_SIZE;
-        studio.sizeSlider.max = ImageStudio.MAX_SIZE;
-        studio.sizeSlider.addEventListener('input', () => {
-            studio.sizes[studio._maskMode ? 'mask' : 'strokes'] = Number(studio.sizeSlider.value);
-            studio.sizeValueEl.textContent = studio.sizeSlider.value;   // 数值标签随拖动实时刷新
-            studio._updateCursor();
-        });
-        studio.sizeValueEl = document.createElement('span');
-        studio.sizeValueEl.className = 'ie-size-value';
+        const sizeLabel = this._sizeLabel('粗细');
+        studio.sizeValueEl = this._sizeLabel('', true);
+        studio.sizeSlider = this._slider(ImageStudio.MIN_SIZE, ImageStudio.MAX_SIZE,
+            ImageStudio.MIN_SIZE, '', (v) => {
+                studio.sizes[studio._maskMode ? 'mask' : 'strokes'] = v;
+                studio.sizeValueEl.textContent = v;   // 数值标签随拖动实时刷新
+                studio._updateCursor();
+            });
         sizeRow.append(sizeLabel, studio.sizeSlider, studio.sizeValueEl);
         studio.sizeRowEl = sizeRow;
 
@@ -94,9 +115,7 @@ class StudioDomBuilder {
         fontWrap.className = 'is-file-wrap';
         fontWrap.append(studio.fontBtn, studio.fontMenuEl);
         this._buildFontMenu(StudioTextTool.FONTS);
-        const textSizeLabel = document.createElement('span');
-        textSizeLabel.className = 'ie-size-label';
-        textSizeLabel.textContent = '字号';
+        const textSizeLabel = this._sizeLabel('字号');
         studio.textSizeInput = document.createElement('input');
         studio.textSizeInput.type = 'number';
         studio.textSizeInput.className = 'is-text-size';
@@ -130,22 +149,13 @@ class StudioDomBuilder {
         const fxRow = document.createElement('div');
         fxRow.className = 'ie-size-row';
         fxRow.style.display = 'none';
-        const fxLabel = document.createElement('span');
-        fxLabel.className = 'ie-size-label';
-        fxLabel.textContent = '强度';
-        studio.fxStrengthSlider = document.createElement('input');
-        studio.fxStrengthSlider.type = 'range';
-        studio.fxStrengthSlider.min = 4;
-        studio.fxStrengthSlider.max = 40;
-        studio.fxStrengthSlider.value = studio.fxStrength;
-        studio.fxStrengthSlider.title = '模糊强度：σ = 强度/10，值越大单次涂抹越糊';
-        studio.fxStrengthSlider.addEventListener('input', () => {
-            studio.fxStrength = Number(studio.fxStrengthSlider.value);
-            studio.fxStrengthValueEl.textContent = studio.fxStrengthSlider.value;
-        });
-        studio.fxStrengthValueEl = document.createElement('span');
-        studio.fxStrengthValueEl.className = 'ie-size-value';
-        studio.fxStrengthValueEl.textContent = studio.fxStrength;
+        const fxLabel = this._sizeLabel('强度');
+        studio.fxStrengthValueEl = this._sizeLabel(String(studio.fxStrength), true);
+        studio.fxStrengthSlider = this._slider(4, 40, studio.fxStrength,
+            '模糊强度：σ = 强度/10，值越大单次涂抹越糊', (v) => {
+                studio.fxStrength = v;
+                studio.fxStrengthValueEl.textContent = v;
+            });
         fxRow.append(fxLabel, studio.fxStrengthSlider, studio.fxStrengthValueEl);
         // 形状属性行（形状工具激活时替换粗细显示，与文字选项同机制）：
         // 类型四选一 / 填充色 / 描边色 / 描边宽（0 = 无边框，或点「无」去边框）/ 圆角
@@ -174,9 +184,7 @@ class StudioDomBuilder {
             studio.shapeTypeBtns[type] = btn;
             shapeRow.append(btn);
         }
-        const fillLabel = document.createElement('span');
-        fillLabel.className = 'ie-size-label';
-        fillLabel.textContent = '填充';
+        const fillLabel = this._sizeLabel('填充');
         studio.shapeFillInput = document.createElement('input');
         studio.shapeFillInput.type = 'color';
         studio.shapeFillInput.className = 'is-color-input';
@@ -204,9 +212,7 @@ class StudioDomBuilder {
             this._syncShapeNoFillBtn();
             studio._shape.applyOpts();
         });
-        const strokeLabel = document.createElement('span');
-        strokeLabel.className = 'ie-size-label';
-        strokeLabel.textContent = '边框';
+        const strokeLabel = this._sizeLabel('边框');
         studio.shapeStrokeInput = document.createElement('input');
         studio.shapeStrokeInput.type = 'color';
         studio.shapeStrokeInput.className = 'is-color-input';
@@ -216,25 +222,16 @@ class StudioDomBuilder {
             studio.shapeOpts.strokeColor = studio.shapeStrokeInput.value;
             studio._shape.applyOpts();
         });
-        const strokeWLabel = document.createElement('span');
-        strokeWLabel.className = 'ie-size-label';
-        strokeWLabel.textContent = '边宽';
-        studio.shapeStrokeSlider = document.createElement('input');
-        studio.shapeStrokeSlider.type = 'range';
-        studio.shapeStrokeSlider.min = 0;
-        studio.shapeStrokeSlider.max = 60;
-        studio.shapeStrokeSlider.value = studio.shapeOpts.strokeWidth;
-        studio.shapeStrokeSlider.title = '边框宽度（0 = 无边框）';
-        studio.shapeStrokeSlider.addEventListener('input', () => {
-            studio.shapeOpts.strokeWidth = Number(studio.shapeStrokeSlider.value);
-            if (studio.shapeOpts.strokeWidth > 0) studio._lastStrokeWidth = studio.shapeOpts.strokeWidth;
-            studio.shapeStrokeValueEl.textContent = studio.shapeStrokeSlider.value;
-            this._syncShapeNoStrokeBtn();
-            studio._shape.applyOpts();
-        });
-        studio.shapeStrokeValueEl = document.createElement('span');
-        studio.shapeStrokeValueEl.className = 'ie-size-value';
-        studio.shapeStrokeValueEl.textContent = studio.shapeOpts.strokeWidth;
+        const strokeWLabel = this._sizeLabel('边宽');
+        studio.shapeStrokeValueEl = this._sizeLabel(String(studio.shapeOpts.strokeWidth), true);
+        studio.shapeStrokeSlider = this._slider(0, 60, studio.shapeOpts.strokeWidth,
+            '边框宽度（0 = 无边框）', (v) => {
+                studio.shapeOpts.strokeWidth = v;
+                if (v > 0) studio._lastStrokeWidth = v;
+                studio.shapeStrokeValueEl.textContent = v;
+                this._syncShapeNoStrokeBtn();
+                studio._shape.applyOpts();
+            });
         // 去边框（PS 红斜杠同款）：宽度归零；再点恢复上次边宽（与滑杆双向同步）
         studio.shapeNoStrokeBtn = document.createElement('button');
         studio.shapeNoStrokeBtn.type = 'button';
@@ -252,23 +249,14 @@ class StudioDomBuilder {
             this._syncShapeNoStrokeBtn();
             studio._shape.applyOpts();
         });
-        const radiusLabel = document.createElement('span');
-        radiusLabel.className = 'ie-size-label';
-        radiusLabel.textContent = '圆角';
-        studio.shapeRadiusSlider = document.createElement('input');
-        studio.shapeRadiusSlider.type = 'range';
-        studio.shapeRadiusSlider.min = 0;
-        studio.shapeRadiusSlider.max = 120;
-        studio.shapeRadiusSlider.value = studio.shapeOpts.radius;
-        studio.shapeRadiusSlider.title = '圆角半径（仅矩形类形状生效）';
-        studio.shapeRadiusSlider.addEventListener('input', () => {
-            studio.shapeOpts.radius = Number(studio.shapeRadiusSlider.value);
-            studio.shapeRadiusValueEl.textContent = studio.shapeRadiusSlider.value;
-            studio._shape.applyOpts();
-        });
-        studio.shapeRadiusValueEl = document.createElement('span');
-        studio.shapeRadiusValueEl.className = 'ie-size-value';
-        studio.shapeRadiusValueEl.textContent = studio.shapeOpts.radius;
+        const radiusLabel = this._sizeLabel('圆角');
+        studio.shapeRadiusValueEl = this._sizeLabel(String(studio.shapeOpts.radius), true);
+        studio.shapeRadiusSlider = this._slider(0, 120, studio.shapeOpts.radius,
+            '圆角半径（仅矩形类形状生效）', (v) => {
+                studio.shapeOpts.radius = v;
+                studio.shapeRadiusValueEl.textContent = v;
+                studio._shape.applyOpts();
+            });
         shapeRow.append(fillLabel, studio.shapeFillInput, studio.shapeNoFillBtn,
             strokeLabel, studio.shapeStrokeInput, studio.shapeNoStrokeBtn,
             strokeWLabel, studio.shapeStrokeSlider, studio.shapeStrokeValueEl,
@@ -280,12 +268,12 @@ class StudioDomBuilder {
         saveBtn.textContent = '保存';
         saveBtn.title = '保存：图层拍平写回图片（画幅变更导出新图），保存后不退出；退出请点右侧 ×';
         saveBtn.addEventListener('click', () => studio.save());
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'ie-close-btn';
-        closeBtn.title = '关闭';
-        closeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-        closeBtn.addEventListener('click', () => studio.requestClose());
-        topbar.append(fileWrap, sizeRow, textRow, fxRow, shapeRow, studio.msgEl, saveBtn, closeBtn);
+        const closeBtn = this._iconBtn('关闭',
+            '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>',
+            () => studio.requestClose(), 'ie-close-btn');
+        closeBtn.removeAttribute('type');
+        topbar.append(fileWrap, studio.flipBtn, rotateWrap, sizeRow, textRow, fxRow, shapeRow,
+            studio.msgEl, saveBtn, closeBtn);
         studio.fxRowEl = fxRow;
         studio._syncShapeOptsDom = () => this._syncShapeRow();
 
@@ -293,63 +281,56 @@ class StudioDomBuilder {
         const body = document.createElement('div');
         body.className = 'is-body';
 
-        // 左侧竖排工具栏：移动 / 画笔 / 橡皮 / 遮罩模式开关 / 分隔线 / 还原 / 裁剪
+        // 左侧竖排工具栏：数据驱动装配（每项 = 工厂入参，新增工具加一行）。
+        // tool = 切工具（dataset.tool + active 高亮由 setTool 管）；
+        // once = 一次性动作（遮罩开关/移除/调色弹窗等自带状态机）
         const toolbar = document.createElement('div');
         toolbar.className = 'is-toolbar';
-        // 移动工具（PS 的 V 工具同位）：点击选中图层、拖动移动、拖角等比缩放
-        studio.moveBtn = document.createElement('button');
-        studio.moveBtn.className = 'ie-tool-btn';
-        studio.moveBtn.title = '移动 / 缩放图层：点击选中，拖动移动，拖角等比缩放';
-        studio.moveBtn.dataset.tool = 'move';
-        studio.moveBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 9 22 12 19 15"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>`;
-        studio.moveBtn.addEventListener('click', () => studio.setTool('move'));
-        studio.brushBtn = this._makeToolBtn('画笔', 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z', 'brush');
-        studio.eraserBtn = this._makeToolBtn('橡皮', 'm7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21M22 21H7m-2-10 9 9', 'eraser');
-        // 模糊笔刷：像素效果工具（涂抹柔化），图标 = 水滴
-        studio.fxBtn = document.createElement('button');
-        studio.fxBtn.className = 'ie-tool-btn';
-        studio.fxBtn.dataset.tool = 'fx';
-        studio.fxBtn.title = '模糊笔刷：涂抹柔化局部（顶栏「强度」调轻重）';
-        studio.fxBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>`;
-        studio.fxBtn.addEventListener('click', () => studio.setTool('fx'));
-        // 文字工具：点击画布新建文字层就地输入，点击已有文字层再次编辑
-        //（图标 = Lucide type，与魔杖/画笔系均不混淆）
-        studio.textBtn = document.createElement('button');
-        studio.textBtn.className = 'ie-tool-btn';
-        studio.textBtn.title = '文字工具：点击画布添加文字（顶部选字体/字号/横竖排），点击已有文字再次编辑';
-        studio.textBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>`;
-        studio.textBtn.addEventListener('click', () => studio.setTool('text'));
-        studio.shapeBtn = document.createElement('button');
-        studio.shapeBtn.className = 'ie-tool-btn';
-        studio.shapeBtn.title = '形状工具：拖拽画矩形/椭圆/气泡框（顶栏选形状/填充/边框；Shift 约束正方；点击已有形状改属性）';
-        studio.shapeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>`;
-        studio.shapeBtn.addEventListener('click', () => studio.setTool('shape'));
-        // 遮罩模式开关：按下后画笔/橡皮涂出遮罩（落到激活
-        // 图层的遮罩画布），弹起即普通画笔；激活态红色呼应遮罩视觉
-        studio.maskBtn = document.createElement('button');
-        studio.maskBtn.className = 'ie-tool-btn is-mask-btn';
-        studio.maskBtn.title = '遮罩模式：按下后涂画即遮罩（局部重绘区域），弹起恢复普通画笔';
-        studio.maskBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><rect x="8" y="8" width="8" height="8" fill="currentColor" stroke="none"></rect></svg>`;
-        studio.maskBtn.addEventListener('click', () => studio.setMaskMode(!studio._maskMode));
-        // 移除工具（AI 抹除）：自带遮罩涂抹的模式工具——激活后直接涂抹，
-        // 松手自动提交后端 LaMa 模型本地推理抹除并智能填充。
-        // 图标用创可贴（Lucide bandage）——PS 移除工具同款隐喻，
-        // 与魔杖系图标（易误读为魔棒/选区）区分
-        studio.removeBtn = document.createElement('button');
-        studio.removeBtn.className = 'ie-tool-btn';
-        studio.removeBtn.title = '移除工具：涂抹要移除的区域，松手自动 AI 抹除并智能填充（本地模型，再点一次退出）';
-        studio.removeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 10.01h.01"></path><path d="M10 14.01h.01"></path><path d="M14 10.01h.01"></path><path d="M14 14.01h.01"></path><path d="M18 6v11.5"></path><path d="M6 6v12"></path><rect x="2" y="6" width="20" height="12" rx="2"></rect></svg>`;
-        studio.removeBtn.addEventListener('click', () => studio.setRemoveMode());
-        studio.cropBtn = this._makeToolBtn('裁剪 / 扩图（拖四边锚点调整画幅）', 'M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2', 'crop');
-        const revertBtn = document.createElement('button');
-        revertBtn.className = 'ie-tool-btn';
-        revertBtn.title = '还原（清空全部遮罩 / 重置画幅 / 还原图层像素）';
-        revertBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>`;
-        revertBtn.addEventListener('click', () => studio.revert());
+        const toolDefs = [
+            { key: 'moveBtn', tool: 'move', title: '移动 / 缩放图层：点击选中，拖动移动，拖角等比缩放',
+              svg: '<polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 9 22 12 19 15"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line>' },
+            { key: 'brushBtn', tool: 'brush', title: '画笔',
+              path: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z' },
+            { key: 'rembgBtn', once: () => studio.removeBackground(),          // 图标与图片工具栏「去除背景」同款
+              title: '抠图去背景：对选中图层 AI 分离主体，主体之外变透明（本地模型推理；结果写回该图层）',
+              svg: '<rect x="3" y="4" width="12" height="16" rx="2"></rect><circle cx="7.5" cy="9" r="1.5"></circle><path d="m5 17 3.5-3.5 2.5 2.5 2-2"></path><path d="m15 14 3.5-3.5 3 3-5.5 5.5H13v-3z"></path><path d="m17 12 2 2"></path>' },
+            { key: 'eraserBtn', tool: 'eraser', title: '橡皮',
+              path: 'm7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21M22 21H7m-2-10 9 9' },
+            { key: 'fxBtn', tool: 'fx', title: '模糊笔刷：涂抹柔化局部（顶栏「强度」调轻重）',   // 图标 = 水滴
+              svg: '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>' },
+            { key: 'textBtn', tool: 'text', title: '文字工具：点击画布添加文字（顶部选字体/字号/横竖排），点击已有文字再次编辑',
+              svg: '<polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line>' },
+            { key: 'shapeBtn', tool: 'shape', title: '形状工具：拖拽画矩形/椭圆/气泡框（顶栏选形状/填充/边框；Shift 约束正方；点击已有形状改属性）',
+              svg: '<rect x="4" y="4" width="16" height="16" rx="2"></rect>' },
+            { key: 'adjustBtn', once: () => studio.openAdjust(),                  // 图标 = 调音台推子
+              title: '调色：对选中图层调节亮度/对比度/饱和度/色温/锐化/颗粒（关闭丢弃，保存生效）',
+              svg: '<line x1="21" y1="4" x2="14" y2="4"></line><line x1="10" y1="4" x2="3" y2="4"></line><line x1="21" y1="12" x2="12" y2="12"></line><line x1="8" y1="12" x2="3" y2="12"></line><line x1="21" y1="20" x2="16" y2="20"></line><line x1="12" y1="20" x2="3" y2="20"></line><line x1="14" y1="2" x2="14" y2="6"></line><line x1="8" y1="10" x2="8" y2="14"></line><line x1="16" y1="18" x2="16" y2="22"></line>' },
+            { key: 'maskBtn', once: () => studio.setMaskMode(!studio._maskMode),
+              title: '遮罩模式：按下后涂画即遮罩（局部重绘区域），弹起恢复普通画笔',
+              cls: 'is-mask-btn',
+              svg: '<rect x="3" y="3" width="18" height="18" rx="2"></rect><rect x="8" y="8" width="8" height="8" fill="currentColor" stroke="none"></rect>' },
+            { key: 'removeBtn', once: () => studio.setRemoveMode(),               // 图标 = 创可贴（Lucide bandage）
+              title: '移除工具：涂抹要移除的区域，松手自动 AI 抹除并智能填充（本地模型，再点一次退出）',
+              svg: '<path d="M10 10.01h.01"></path><path d="M10 14.01h.01"></path><path d="M14 10.01h.01"></path><path d="M14 14.01h.01"></path><path d="M18 6v11.5"></path><path d="M6 6v12"></path><rect x="2" y="6" width="20" height="12" rx="2"></rect>' },
+            { key: 'cropBtn', tool: 'crop', title: '裁剪 / 扩图（拖四边锚点调整画幅）',
+              path: 'M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2' }
+        ];
+        for (const d of toolDefs) {
+            const act = d.tool ? () => studio.setTool(d.tool) : d.once;
+            studio[d.key] = this._iconBtn(d.title,
+                d.svg || `<path d="${d.path}"></path>`,
+                act, 'ie-tool-btn' + (d.cls ? ' ' + d.cls : ''));
+            if (d.tool) studio[d.key].dataset.tool = d.tool;
+        }
+        const revertBtn = this._iconBtn(
+            '还原（清空全部遮罩 / 重置画幅 / 还原图层像素）',
+            '<polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>',
+            () => studio.revert(), 'ie-tool-btn');
         const sep = document.createElement('div');
         sep.className = 'is-toolbar-sep';
-        toolbar.append(studio.moveBtn, studio.brushBtn, studio.eraserBtn, studio.fxBtn,
-            studio.textBtn, studio.shapeBtn, studio.maskBtn, studio.removeBtn, sep, revertBtn, studio.cropBtn);
+        toolbar.append(studio.moveBtn, studio.brushBtn, studio.rembgBtn, studio.eraserBtn,
+            studio.fxBtn, studio.textBtn, studio.shapeBtn, studio.adjustBtn,
+            studio.maskBtn, studio.removeBtn, sep, revertBtn, studio.cropBtn);
 
         // 舞台 + 画布承载区：图层画布（动态）/ 绘制面 / 选中框 / 裁剪覆盖层
         const stage = document.createElement('div');
@@ -440,24 +421,17 @@ class StudioDomBuilder {
         layersLabel.textContent = '图层';
         const opacityRow = document.createElement('div');
         opacityRow.className = 'is-opacity-row';
-        const opacityLabel = document.createElement('span');
-        opacityLabel.className = 'ie-size-label';
-        opacityLabel.textContent = '透明度';
-        studio.opacitySlider = document.createElement('input');
-        studio.opacitySlider.type = 'range';
-        studio.opacitySlider.min = 0;
-        studio.opacitySlider.max = 100;
-        studio.opacitySlider.addEventListener('input', () => {
+        const opacityLabel = this._sizeLabel('透明度');
+        studio.opacityValueEl = this._sizeLabel('', true);
+        studio.opacitySlider = this._slider(0, 100, 0, '', (v) => {
             const layer = studio._activeLayer();
             if (!layer) return;
-            layer.opacity = Number(studio.opacitySlider.value) / 100;
+            layer.opacity = v / 100;
             // 透明度参与拍平合成与图层栈序列化
             studio.dirty.layers = true;
-            studio.opacityValueEl.textContent = studio.opacitySlider.value;
+            studio.opacityValueEl.textContent = v;
             studio._applyLayerStyles(layer);
         });
-        studio.opacityValueEl = document.createElement('span');
-        studio.opacityValueEl.className = 'ie-size-value';
         opacityRow.append(opacityLabel, studio.opacitySlider, studio.opacityValueEl);
         // 透明度历史：change（松手/确认）记一条，input 拖动中不刷历史
         studio.opacitySlider.addEventListener('change', () =>
@@ -478,11 +452,10 @@ class StudioDomBuilder {
         // ---- 右侧工具栏（PS 面板栏同位，宽度同左栏）：历史记录入口 ----
         const rail = document.createElement('div');
         rail.className = 'is-rail';
-        studio.historyBtn = document.createElement('button');
-        studio.historyBtn.className = 'ie-tool-btn';
-        studio.historyBtn.title = '历史记录：查看/回退到任意一步（Ctrl+Z 后退、Ctrl+Shift+Z 前进）';
-        studio.historyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><polyline points="12 7 12 12 15 15"></polyline></svg>`;
-        studio.historyBtn.addEventListener('click', () => studio._history.togglePanel());
+        studio.historyBtn = this._iconBtn(
+            '历史记录：查看/回退到任意一步（Ctrl+Z 后退、Ctrl+Shift+Z 前进）',
+            '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><polyline points="12 7 12 12 15 15"></polyline>',
+            () => studio._history.togglePanel(), 'ie-tool-btn');
         rail.append(studio.historyBtn);
         studio._history.buildPanel(rail);
         studio._history.renderList = () => studio._history.renderListDefault();
@@ -535,9 +508,9 @@ class StudioDomBuilder {
         studio.zoomPill.addEventListener('click', () => studio.setZoom(1));
         zoomCtrl.append(studio.zoomPill);
 
-        // ---- 笔刷光标与丢弃确认框（复用画笔灯箱样式） ----
-        studio.cursorEl = document.createElement('div');
-        studio.cursorEl.className = 'ie-cursor';
+        // ---- 丢弃确认框（复用画笔灯箱样式） ----
+        // （笔刷光标圈不设 DOM 元素——直接画在 selCanvas 覆盖层上，
+        //  见 ImageStudio._redrawCursorOverlay）
         studio.confirmEl = document.createElement('div');
         studio.confirmEl.className = 'ie-confirm';
         studio.confirmEl.hidden = true;
@@ -595,7 +568,7 @@ class StudioDomBuilder {
                 }
             });
 
-        studio.overlayEl.append(topbar, body, zoomCtrl, studio.cursorEl, studio.confirmEl,
+        studio.overlayEl.append(topbar, body, zoomCtrl, studio.confirmEl,
             studio.layerMenuEl, studio.pickerEl);
         studio.overlayEl.style.display = 'none';
         document.body.appendChild(studio.overlayEl);
@@ -603,16 +576,53 @@ class StudioDomBuilder {
         this._bindEvents();
     }
 
-    /** 左侧工具按钮（画笔/橡皮/裁剪），点击切换并高亮 */
-    /** 左侧工具按钮（画笔/橡皮/裁剪），点击切换并高亮 */
-    _makeToolBtn(title, iconPath, tool) {
+    // ==================== DOM 小工厂 ====================
+    // （createElement + 类名 + title + 内容 + 事件 的重复样板收口于此，
+    //   装配代码每个按钮/菜单项/标签从 5-6 行缩到 1-3 行；仅收「纯装配」
+    //   ——有额外逻辑的控件仍就地展开，不硬塞进工厂）
+
+    /** 通用按钮：title + SVG 图标 + 点击回调（图标 = Lucide 线条风，
+     *  传完整 inner 片段而非 path，支持多元素图标） */
+    _iconBtn(title, svgInner, onClick, className = '') {
         const btn = document.createElement('button');
-        btn.className = 'ie-tool-btn';
+        btn.type = 'button';
         btn.title = title;
-        btn.dataset.tool = tool;
-        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${iconPath}"></path></svg>`;
-        btn.addEventListener('click', () => this.studio.setTool(tool));
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgInner}</svg>`;
+        btn.addEventListener('click', onClick);
+        if (className) btn.className = className;
         return btn;
+    }
+
+    /** 浮起菜单项（.is-file-item）：可选 SVG 图标 + 文字 + 点击回调 */
+    _menuItem(label, onClick, svgInner = '') {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'is-file-item';
+        item.innerHTML = svgInner
+            ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgInner}</svg>${label}`
+            : label;
+        item.addEventListener('click', onClick);
+        return item;
+    }
+
+    /** 滑杆行标签 / 数值显示（.ie-size-label / .ie-size-value） */
+    _sizeLabel(text, isValue = false) {
+        const span = document.createElement('span');
+        span.className = isValue ? 'ie-size-value' : 'ie-size-label';
+        span.textContent = text;
+        return span;
+    }
+
+    /** range 滑杆：范围/初值/title + input 回调（回调收 value 数值） */
+    _slider(min, max, value, title, onInput) {
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = min;
+        input.max = max;
+        input.value = value;
+        input.title = title;
+        input.addEventListener('input', () => onInput(Number(input.value)));
+        return input;
     }
 
     // ==================== 顶栏文字选项 ====================
@@ -741,13 +751,17 @@ class StudioDomBuilder {
         });
         studio.stageEl.addEventListener('pointermove', (e) => {
             // move 兜底复活：滑杆拖动等 pointer capture 场景会吞掉
-            // pointerenter，只信 enter 会让光标圈一去不回。圈是否点亮由
+            // pointerenter，只信 enter 会让光标圈一去不回。圈是否画由
             // _updateCursor 按「笔刷类工具 + 指针在舞台内」判定
             studio._cursorInStage = true;
             if (!studio._brushCursorTool) return;
-            if (studio.cursorEl.style.display === 'none') studio._updateCursor();
-            studio.cursorEl.style.left = e.clientX + 'px';
-            studio.cursorEl.style.top = e.clientY + 'px';
+            // 光标圈画进 selCanvas（舞台局部坐标）：局部清旧圈画新圈，
+            // 无独立 DOM 层——独立层移动在部分环境不走合成器快速路径，
+            // 大圈悬停掉帧（JS/DOM 层实测干净后定位到的最终方案）
+            const r = studio.stageEl.getBoundingClientRect();
+            studio._cursorPos = { x: e.clientX - r.left, y: e.clientY - r.top };
+            if (studio._cursorD == null) studio._updateCursor();
+            else studio._redrawCursorOverlay();
         });
 
         // 裁剪覆盖层：锚点拖拽（仅裁剪工具下显示）
@@ -804,7 +818,7 @@ class StudioDomBuilder {
             if (!studio.isOpen()) return;
             // 模型推理忙碌期：键盘操作全部冻结（Esc 关闭/Delete 删层
             // 都会改动图层栈，与推理结果写回冲突）
-            if (studio._removing) { e.preventDefault(); return; }
+            if (studio._removing || studio._removingBg) { e.preventDefault(); return; }
             // 输入控件聚焦（粗细/透明度滑杆等）时按键交给原生行为，快捷键失效
             if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) return;
             // 历史步进：Ctrl+Z 后退 / Ctrl+Shift+Z 或 Ctrl+Y 前进

@@ -10,7 +10,8 @@
  *       会自动转为 base64 随请求发送，作为参考图。
  *
  * 结构（复用 .text-node 基础样式，扩展 .image-gen-node 修饰类）：
- *   - 标题栏：Generate + 「生图节点」徽标
+ *   - 标题栏：Generate + 「API 生图」徽标（与 Comfy 生图节点的
+ *     「Comfy 生图」对仗，标明这是走厂商 API 的生图链路）
  *   - 状态栏：仅左端口（in），无右端口（生图节点不对外输出）
  *   - 工具栏：模型下拉 + 比例/分辨率双段下拉（复用 LlmSizePicker）
  *             + 质量下拉（gpt-image 系模型时显示）
@@ -79,7 +80,7 @@ class ImageGenNode extends BaseCanvasNode {
         this.el.innerHTML = `
             <div class="text-node-header">
                 <span class="text-node-title">Generate</span>
-                <span class="text-node-badge">生图节点</span>
+                <span class="text-node-badge">API 生图</span>
             </div>
             <div class="text-node-statusbar">
                 <div class="text-node-port text-node-port-in" title="输入端口：连接提示词节点"></div>
@@ -246,15 +247,21 @@ class ImageGenNode extends BaseCanvasNode {
             const api = result.settings?.api || {};
             const { models, providerCount } = LumenLight.collectConfiguredModels(api);
 
-            this.modelsConfig = models;
+            // 只保留生图模型（分类口径与 LLM 窗口三分类统一：手动 type 标记
+            // 优先，auto 按关键词识别，见 LumenLight.classifyModel）——对话/
+            // 视频模型不再混进生图下拉。旧存档若选中的是已被过滤的模型，
+            // 恢复匹配落空后按既有逻辑回落到清单第一项
+            const imageModels = models.filter((m) => LumenLight.classifyModel(m) === 'image');
 
-            if (models.length === 0) {
-                this.modelSelect.innerHTML = '<option value="">未配置模型</option>';
+            this.modelsConfig = imageModels;
+
+            if (imageModels.length === 0) {
+                this.modelSelect.innerHTML = '<option value="">未配置生图模型</option>';
                 return;
             }
 
             const showProvider = providerCount > 1;
-            this.modelSelect.innerHTML = models.map((model) => {
+            this.modelSelect.innerHTML = imageModels.map((model) => {
                 const label = showProvider
                     ? `${model.displayName || model.id} · ${model.provider}`
                     : (model.displayName || model.id);
@@ -264,7 +271,7 @@ class ImageGenNode extends BaseCanvasNode {
             }).join('');
 
             // 恢复之前/存档中的选择（旧存档存的是裸模型 ID，两种形态都认）
-            if (this.model && models.some((m) => m.key === this.model || m.id === this.model)) {
+            if (this.model && imageModels.some((m) => m.key === this.model || m.id === this.model)) {
                 this.modelSelect.value = this.model;
             }
             // 同步当前选中值（新建节点时 model 为空，取下拉框默认第一项），
@@ -393,6 +400,16 @@ class ImageGenNode extends BaseCanvasNode {
         this.generateBtn.textContent = `生成中 0/${count}`;
         const signal = this.stopControl.begin();
 
+        // 任务中心登记：一轮 N 张为一个任务（进度随完成数推进）。停止与
+        // 节点 X 同一内核（stopControl.abort），定位聚焦本节点
+        const taskRef = window.taskRegistry?.register({
+            kind: 'api',
+            label: prompt,
+            total: count,
+            onStop: () => this.stopControl.abort(),
+            locateTarget: this
+        });
+
         // 共享请求体：N 个并发请求使用同一份提示词/参考图/尺寸。
         // 下拉 value 为"厂商||模型ID"复合键：拆开后显式指定厂商，
         // 后端直接路由（同名模型在多个中转站共存时可区分）
@@ -401,6 +418,20 @@ class ImageGenNode extends BaseCanvasNode {
         if (quality) requestBody.quality = quality;
         // 有连入图片时随请求发送（图生图 I2I，与 LLM 对话框行为一致）
         if (images.length > 0) requestBody.images = images;
+
+        // 生成参数记录（溯源/生成同款）：随占位图绑定到回图（imageObj.genInfo，
+        // GenInfoPopup 展示与回填）——本节点名下所有占位图共用同一份
+        this._activeGenInfo = window.GenRecord ? GenRecord.forApi({
+            positive: prompt,
+            model: this.modelSelect.value,
+            provider: this.getModelProvider(),
+            size,
+            quality,
+            ratio,
+            tier,
+            refCount: images.length,
+            node: this
+        }) : null;
 
         // 清理可能残留的旧占位图后，按数量沿对角线级联创建占位图
         this.removePlaceholder();
@@ -440,6 +471,7 @@ class ImageGenNode extends BaseCanvasNode {
             const tasks = placeholders.map(async (placeholder) => {
                 const result = await runOne(placeholder);
                 done++;
+                taskRef?.update({ done });
                 // 每张结束（无论成败）都刷新按钮进度
                 this.generateBtn.textContent = `生成中 ${done}/${count}`;
                 return result;
@@ -449,6 +481,13 @@ class ImageGenNode extends BaseCanvasNode {
             const okCount = results.filter((r) => r.ok).length;
             const failCount = count - okCount;
             const abortedCount = results.filter((r) => r.aborted).length;
+
+            // 任务中心结算：全部停止=中性，全失败=红驻留，其余=完成
+            if (taskRef) {
+                if (abortedCount > 0 && okCount === 0) taskRef.end('stopped', '已停止');
+                else if (okCount === 0) taskRef.end('failed', results[0]?.message || '生成失败');
+                else taskRef.end('done', count > 1 ? `完成 ${okCount}/${count}` : '');
+            }
 
             // 结果提示显示 8 秒：默认 2 秒在并发落图时容易错过。
             // 有中止时走中性提示（用户主动停止不是失败），完成数照报
@@ -466,6 +505,9 @@ class ImageGenNode extends BaseCanvasNode {
         } finally {
             this.isGenerating = false;
             this.stopControl.end();
+            // 兜底结算：走到这里仍未 end（异常早退）不许任务悬挂在运行态
+            if (taskRef?.isRunning()) taskRef.end('failed', '生成中断');
+            this._activeGenInfo = null;
             this.generateBtn.disabled = false;
             this.generateBtn.textContent = '生成';
         }
@@ -515,7 +557,8 @@ class ImageGenNode extends BaseCanvasNode {
             name: `image_gen_${Date.now()}.png`,
             source: 'image-gen',
             prompt: prompt,
-            negativePrompt: ''
+            negativePrompt: '',
+            genInfo: this._activeGenInfo || null
         });
     }
 

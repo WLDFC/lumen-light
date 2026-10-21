@@ -1,9 +1,11 @@
-/**
+﻿/**
  * ==========================================================================
  * LumenLight 提示词面板样式
  * 作用：定义右上角提示词面板的样式，包括触发按钮、可拖拽面板容器、
  *       头部区域、提示词输入框、发送按钮以及图片缩略图区域。
- *       工作流管理区域样式已拆分至 workflow-manager.css。
+ *       工作流管理区域样式已拆分至 workflow-manager.css；
+ *       Comfy 动态参数区（参数行/LoRA 叠加区/步进器，#comfyContent
+ *       作用域）已拆分至 comfy-params.css（对应 ComfyParamRows.js）。
  * 当前默认宽度：420px（可通过拖拽左边框调整，范围 260px-500px）
  * ==========================================================================
  */
@@ -33,8 +35,11 @@
     color: white;
 }
 
-/* 面板打开时隐藏触发按钮 */
-.prompt-panel-btn.hidden {
+/* 面板打开时隐藏触发按钮。
+   专属类名不叫 .hidden——lora-manager.css 的全局 .hidden 是 display:none
+   !important，会把按钮摘出布局，顶栏中段居中图标随之整体位移（本规则用
+   visibility 隐形保占位） */
+.prompt-panel-btn.prompt-hidden {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -361,6 +366,10 @@
     padding-left: 26px;            /* 左边多加一点空间，避开拖拽条 */
     gap: 16px;
     overflow-y: auto;
+    /* 滚动条槽位常驻：展开提示词框内容触顶时滚动条出现/消失不再挤压
+       内容宽度（全局滚动条 6px，此前每次出条整列内容左移 6px 再弹回，
+       面板与输入框肉眼可见地抖一下） */
+    scrollbar-gutter: stable;
     border-radius: 0 0 12px 12px;
 }
 
@@ -438,6 +447,15 @@
     border-color: rgba(128, 128, 128, 0.4);
 }
 
+/* 正面提示词 1 / 2 标题栏文字纯白：label 基础色已是 #ffffff，被 0.8
+   透明度压灰，这里解除。栏体（边框+底色）保持基类原样——2026-10-29
+   曾试过整块去除（裸文字形态），用户实测打回恢复；负面提示词与其余
+   label 维持原样不动 */
+#posPrompt1Header label,
+#posPrompt2Header label {
+    opacity: 1;
+}
+
 /* 折叠/展开按钮 */
 .collapse-toggle {
     width: 22px;
@@ -513,9 +531,11 @@
 
 /* ==================== 图片缩略图区域 ==================== */
 
-/* 缩略图容器（与各提示词框的间距统一交给内容区的 gap: 16px） */
+/* 缩略图容器（与各提示词框的间距统一交给内容区的 gap: 16px）；
+ * 槽位按工作流取图节点数自动扩展（上限 9），放不下自动换行 */
 .image-thumbnails {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
 }
 
@@ -594,318 +614,44 @@
     background: rgba(239, 68, 68, 1);
 }
 
-
-/* ==================== Comfy 动态参数区 ==================== */
-/* 与画布 Comfy 生图节点共用 ComfyParamRows 控制器渲染的参数行
-   （comfy-param-* / comfy-* 系类名）。文字与控件规格对齐本面板的
-   comfy 模式（标签/控件 12px，同 .workflow-selector 一档），
-   在 #comfyContent 作用域内定义，不影响画布节点的 --ns 体系样式 */
-#comfyContent .comfy-params {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-/* 单行配置项：标签在上，控件在下（与画布节点同构） */
-#comfyContent .comfy-param-row {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-#comfyContent .comfy-param-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: #ffffff;
-    opacity: 0.8;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    user-select: none;
-}
-
-/* 下拉与数值输入：对齐 .workflow-selector 的凹陷控件规格 */
-#comfyContent .comfy-model-select,
-#comfyContent .comfy-sampler-select,
-#comfyContent .comfy-count-select,
-#comfyContent .comfy-num-input {
-    width: 100%;
-    height: 32px;
-    padding: 0 10px;
-    border-radius: 6px;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    background: rgba(0, 0, 0, 0.2);
-    color: #ffffff;
-    font-size: 12px;
-    font-family: inherit;
-    outline: none;
-    cursor: pointer;
-}
-
-#comfyContent .comfy-num-input {
-    cursor: text;
-    caret-color: #6cebff;
-    -moz-appearance: textfield;
-    appearance: textfield;
-}
-
-#comfyContent .comfy-model-select:focus,
-#comfyContent .comfy-sampler-select:focus,
-#comfyContent .comfy-count-select:focus,
-#comfyContent .comfy-num-input:focus {
-    border-color: #3b82f6;
-}
-
-/* 原生 spinner 在深色主题下过亮，隐藏后用键盘/滚轮调值 */
-#comfyContent .comfy-num-input::-webkit-outer-spin-button,
-#comfyContent .comfy-num-input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-}
-
-#comfyContent .comfy-model-select option,
-#comfyContent .comfy-sampler-select option,
-#comfyContent .comfy-count-select option {
-    background: #0f0f12;
-    color: #ffffff;
-}
-
-/* 参数合并行：两组「标签+输入框」左右并排各占一半 */
-#comfyContent .comfy-param-pair {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-}
-
-#comfyContent .comfy-param-pair > .comfy-param-row {
-    flex: 1 1 0;
-    min-width: 0;
-}
-
-/* 尺寸行：宽 × 高 同行 */
-#comfyContent .comfy-size-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-#comfyContent .comfy-size-x {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-}
-
-/* LoRA 行：文件下拉 + 启用勾选框 */
-#comfyContent .comfy-lora-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-#comfyContent .comfy-lora-row .comfy-model-select {
-    flex: 1;
-    min-width: 0;
-}
-
-#comfyContent .comfy-lora-enable {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.6);
-    white-space: nowrap;
-    cursor: pointer;
-    user-select: none;
-}
-
-/* 未启用的 LoRA 下拉半透明置灰（与画布节点一致） */
-#comfyContent .comfy-model-select[data-lora-off] {
-    opacity: 0.4;
-}
-
-/* LoRA 叠加区：可折叠的堆叠条目（loraStack 模式，面板独有）。
-   折叠结构复用提示词框的 .collapsible-header / .collapsible-body /
-   .collapse-toggle，展开态的显隐规则在本作用域补充定义 */
-#comfyContent .comfy-lorastack {
-    display: flex;
-    flex-direction: column;
-}
-
-#comfyContent .comfy-lorastack .collapsible-body {
-    max-height: 45vh;
-    overflow-y: auto;
-}
-
-#comfyContent .comfy-lorastack.collapsed .collapsible-body {
-    max-height: 0;
-    opacity: 0;
-    margin-top: 0;
-    overflow-y: hidden;
-}
-
-#comfyContent .comfy-lorastack.collapsed .collapsible-header {
-    opacity: 0.7;
-}
-
-#comfyContent .comfy-lorastack.collapsed .collapsible-header:hover {
-    opacity: 1;
-}
-
-/* 单个叠加条目：凹陷卡片，容纳「lora 文件下拉」+「强度合并行」 */
-#comfyContent .comfy-lorastack-entry {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px;
-    border: 1px solid rgba(128, 128, 128, 0.2);
-    border-radius: 8px;
-    background: rgba(0, 0, 0, 0.12);
-}
-
-#comfyContent .comfy-lorastack-entry + .comfy-lorastack-entry {
-    margin-top: 8px;
-}
-
-/* 条目头行：文件下拉占满 + 右侧删除按钮 */
-#comfyContent .comfy-lorastack-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-#comfyContent .comfy-lorastack-head .comfy-model-select {
-    flex: 1;
-    min-width: 0;
-}
-
-#comfyContent .comfy-lorastack-remove {
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    background: rgba(0, 0, 0, 0.2);
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-#comfyContent .comfy-lorastack-remove:hover {
-    border-color: rgba(239, 68, 68, 0.6);
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-}
-
-/* 空列表提示文字 */
-#comfyContent .comfy-lorastack-empty {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
-    padding: 2px 0 4px;
-    line-height: 1.5;
-}
-
-/* 添加按钮：虚线边框弱化样式，整行宽度 */
-#comfyContent .comfy-lorastack-add {
-    width: 100%;
-    padding: 8px;
-    border-radius: 6px;
-    border: 1px dashed rgba(128, 128, 128, 0.4);
-    background: transparent;
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    margin-top: 8px;
-}
-
-#comfyContent .comfy-lorastack-add:hover {
-    border-color: #3b82f6;
-    color: #ffffff;
-    background: rgba(59, 130, 246, 0.1);
-}
-
-
-/* ==================== 数量步进器（运行按钮左侧） ==================== */
-/* 运行行：数量步进器 + 运行按钮同排；原按钮的沉底外边距移到行上 */
-#comfyContent .prompt-send-row {
-    display: flex;
-    align-items: stretch;
-    gap: 8px;
-    margin-top: auto;
-    margin-bottom: 10px;
-}
-
-#comfyContent .prompt-send-row .prompt-send-btn {
-    flex: 1;
-    margin-top: 0;
-    margin-bottom: 0;
-}
-
-/* 步进器：数值框 + 右侧上下箭头列（工作流含批次输入时显示），
-   深色凹陷规格与工作流下拉一致 */
-#comfyContent .count-stepper {
-    display: flex;
-    align-items: stretch;
-    flex-shrink: 0;
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.2);
-    overflow: hidden;
-}
-
-#comfyContent .count-stepper[hidden] {
+/* 视频槽播放角标（仅 is-video 槽位显示，左下角常驻小三角） */
+.thumbnail-video-badge {
     display: none;
-}
-
-#comfyContent .count-stepper-input {
-    width: 40px;
-    border: none;
-    outline: none;
-    background: transparent;
-    color: #ffffff;
-    font-size: 12px;
-    font-family: inherit;
+    position: absolute;
+    left: 3px;
+    bottom: 3px;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.65);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 7px;
+    line-height: 14px;
     text-align: center;
-    padding: 0;
-    -moz-appearance: textfield;
-    appearance: textfield;
+    pointer-events: none;
+    user-select: none;
 }
 
-#comfyContent .count-stepper-input::-webkit-outer-spin-button,
-#comfyContent .count-stepper-input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
+/* 视频槽（含内容时）显示角标 */
+.thumbnail-slot.is-video .thumbnail-video-badge {
+    display: block;
 }
 
-#comfyContent .count-stepper-arrows {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 1px;
-    padding: 0 3px;
-    border-left: 1px solid rgba(128, 128, 128, 0.2);
+/* LoadImage 直注槽的节点角标（免节点通道：左上角小标签显示对应
+ * 工作流节点 id，提交时按「节点 id → 槽位内容」映射直注） */
+.thumbnail-node-badge {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: rgba(37, 99, 235, 0.85);
+    color: #fff;
+    font-size: 8px;
+    line-height: 13px;
+    pointer-events: none;
+    user-select: none;
+    z-index: 2;
 }
 
-#comfyContent .count-stepper-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 13px;
-    padding: 0;
-    border: none;
-    border-radius: 3px;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.6);
-    cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease;
-}
 
-#comfyContent .count-stepper-arrow:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #ffffff;
-}
-
-#comfyContent .count-stepper-arrow:active {
-    background: rgba(255, 255, 255, 0.18);
-}

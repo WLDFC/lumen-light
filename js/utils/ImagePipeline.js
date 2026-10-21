@@ -155,6 +155,8 @@ class ImagePipeline {
      * 每张图产出 { image, mask }——image 为所见即所得合成图（原图+笔迹），
      * mask 为黑白遮罩 PNG（白=重绘区，无遮罩时 null）。数组按位对齐：
      * 第 i 项对应槽位 i+1，mask 为 null 时提交端清空对应遮罩槽。
+     * 视频对象不进图片收集——连线进链路的画布视频走 collectVideos
+     * 单独收集写视频槽位，其首帧封面不应被当参考图塞进图片槽
      * @param {string} nodeId - 生图节点 id
      * @returns {Promise<Array<{image: string|null, mask: string|null}>>}
      */
@@ -165,7 +167,9 @@ class ImagePipeline {
         );
 
         // 从上述节点的连入连线中收集画布图片；命中后继续沿图片串联链
-        // 向上游遍历，把链上所有图片一并收入
+        // 向上游遍历，把链上所有图片一并收入。
+        // 视频对象（source='video'，带首帧封面 img）在此排除——它有 img
+        // 会通过 isRealCanvasImage 判定，但语义是视频参考不是图片参考
         const collected = [];           // 画布图片对象（保序）
         const seen = new Set();
         const queue = [];               // 待向上游遍历的图片对象
@@ -173,6 +177,7 @@ class ImagePipeline {
             if (!upstreamIds.has(c.toId)) continue;
             const from = this.findById(c.fromId);
             if (!ImagePipeline.isCanvasImage(from) || seen.has(from.id)) continue;
+            if (NodeTypes.isVideo(from.source)) continue;
             seen.add(from.id);
             queue.push(from);
         }
@@ -184,6 +189,7 @@ class ImagePipeline {
                 if (c.toId !== img.id || seen.has(c.fromId)) continue;
                 const from = this.findById(c.fromId);
                 if (!ImagePipeline.isCanvasImage(from)) continue;
+                if (NodeTypes.isVideo(from.source)) continue;
                 seen.add(from.id);
                 queue.push(from);
             }
@@ -193,6 +199,33 @@ class ImagePipeline {
         // 并发生成槽位载荷（image + mask 按位对齐）
         const entries = await Promise.all(collected.map((obj) => ImagePipeline.slotPayload(obj)));
         return entries;
+    }
+
+    /**
+     * 收集连线进生图节点 / 上游提示词链的画布视频（视频参考 V2V）。
+     * 与图片收集同一遍历入口（连线进链上任意节点都算），但视频不参与
+     * 图片串联链遍历（视频不做中间节点——它的上游连线无消费语义）。
+     * 视频对象带 videoUrl（指向后端 data/videos/ 已落盘文件），提交时
+     * 由后端把引用按位写入 canvas-video 槽位（引用式传输不搬字节），
+     * 工作流里的 LumenReceiveVideoFromCanvas 节点从槽位取回
+     * @param {string} nodeId - 生图节点 id
+     * @returns {string[]} videoUrl 数组（按连线顺序，去重）
+     */
+    collectVideos(nodeId) {
+        const upstreamIds = new Set(
+            [nodeId, ...this.collectUpstreamPromptNodes(nodeId).map(n => n.id)]
+        );
+        const videos = [];
+        const seen = new Set();
+        for (const c of this.connections) {
+            if (!upstreamIds.has(c.toId)) continue;
+            const from = this.findById(c.fromId);
+            if (!from || !NodeTypes.isVideo(from.source) || seen.has(from.id)) continue;
+            if (!from.videoUrl) continue;
+            seen.add(from.id);
+            videos.push(from.videoUrl);
+        }
+        return videos;
     }
 
     /**

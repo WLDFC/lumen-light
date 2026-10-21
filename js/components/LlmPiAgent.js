@@ -29,6 +29,34 @@ const PI_BASE64_RUN = 300;
 /** 思考块图标（cpu 线稿，与工具图标同风格） */
 const PI_THINK_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>';
 
+/** pi 完成提示音：Web Audio 合成上行双音（E6→A6，正弦 + 指数衰减包络），
+ *  与常见 IDE 的任务完成音同风格——零音频文件依赖。AudioContext 惰性
+ *  创建：发送消息本身就是用户手势，首次播放即可满足浏览器自动播放
+ *  策略（此前从未交互过的页面才会被拦，对话场景不存在） */
+let _chimeCtx = null;
+function _playDoneChime() {
+    try {
+        if (!_chimeCtx) {
+            _chimeCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (_chimeCtx.state === 'suspended') _chimeCtx.resume();
+        const t0 = _chimeCtx.currentTime;
+        // [频率, 起始偏移]：第二音略延迟形成"叮-叮"上行的完成感
+        [[1318.5, 0], [1760, 0.09]].forEach(([freq, at]) => {
+            const osc = _chimeCtx.createOscillator();
+            const gain = _chimeCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0, t0 + at);
+            gain.gain.linearRampToValueAtTime(0.16, t0 + at + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.36);
+            osc.connect(gain).connect(_chimeCtx.destination);
+            osc.start(t0 + at);
+            osc.stop(t0 + at + 0.4);
+        });
+    } catch { /* 音频不可用（极旧浏览器等）：静默跳过，不影响主流程 */ }
+}
+
 class LlmPiAgent {
     constructor(chat) {
         this.chat = chat;
@@ -348,6 +376,27 @@ class LlmPiAgent {
         this._blocks = keep;
     }
 
+    /** 文本块去重：pi 流式层偶发把同一段文本分两段输出（与思考块复读
+     *  同构，见 _dedupeThinking——序列形如"回复→思考→回复"，第二段
+     *  因中间插了思考块走 _ensureTextBlock 新建，界面出现两段相同
+     *  文本）。以先出现的为准，按定稿源文本归一化比较，移除其后
+     *  重复块。在 message_end / agent_end 收尾时调用 */
+    _dedupeText() {
+        const norm = (s) => this._stripCursor(String(s == null ? '' : s)).trim();
+        const seen = new Set();
+        const keep = [];
+        for (const b of this._blocks) {
+            if (b.type === 'text') {
+                const key = norm(typeof b.srcText === 'string'
+                    ? b.srcText : b.content.textContent);
+                if (key && seen.has(key)) { b.el.remove(); continue; }
+                if (key) seen.add(key);
+            }
+            keep.push(b);
+        }
+        this._blocks = keep;
+    }
+
     /** 移除"仅有光标、尚无实质内容"的占位文本块（真实块开始时调用） */
     _dropEmptyCursor() {
         const last = this._blocks[this._blocks.length - 1];
@@ -420,7 +469,172 @@ class LlmPiAgent {
         return block;
     }
 
-    /** 执行中指示器：挂在最新消息框下方，分段环以 steps(8) 逐帧循环。
+    // ==================== 迷你 Markdown 渲染 ====================
+    // pi 底层模型按 Markdown 语法写回答（**粗体** / `代码` / 列表 / 标题），
+    // 纯文本裸排会让符号漏出来。这里做零依赖的轻量渲染（对齐 Trae 等
+    // 客户端的段落观感）：只覆盖模型回答里实际出现的语法，未覆盖语法
+    // 按普通文本降级。安全性：先整体 HTML 转义再按标记切分，标记以外
+    // 的内容永不产生 HTML——模型输出不可信，注入面收在转义这一道闸。
+
+    /** HTML 转义（渲染的第一道闸：所有原文先过这里） */
+    _mdEscape(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    /** 行内渲染：粗体 / 行内代码（先保护代码段再处理粗体，代码内的
+     *  星号不参与粗体解析——`**这样**` 应显示为字面量） */
+    _mdInline(s) {
+        const codes = [];
+        // 行内代码先摘出来（内容原样保留，不再吃粗体解析）
+        let out = s.replace(/`([^`]+)`/g, (_, code) => {
+            codes.push(`<code class="pi-md-code">${code}</code>`);
+            return `\u0000${codes.length - 1}\u0000`;
+        });
+        out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        // 占位符还原（顺序倒放不需要——占位符本身不含 ** ）
+        return out.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
+    }
+
+    /**
+     * 把 pi 的 Markdown 回答渲染成 DOM（覆盖：代码块 / 标题 / 有序·无序
+     * 列表含两档嵌套 / 分隔线 / 粗体 / 行内代码；表格等未支持语法整行
+     * 按普通文本降级）。返回 DocumentFragment，调用方替换文本块内容。
+     * @param {string} src - pi 的原始回答文本
+     * @returns {DocumentFragment}
+     */
+    _renderMarkdown(src) {
+        const frag = document.createDocumentFragment();
+        const esc = (t) => this._mdEscape(t);
+        const inline = (t) => this._mdInline(esc(t));
+        const lines = String(src ?? '').replace(/\r\n/g, '\n').split('\n');
+        let i = 0;
+        const mk = (tag, cls, html) => {
+            const el = document.createElement(tag);
+            if (cls) el.className = cls;
+            el.innerHTML = html;
+            frag.appendChild(el);
+            return el;
+        };
+        const isUl = (t) => /^\s*[-*]\s+/.test(t);
+        const isOl = (t) => /^\s*\d+[.、)]\s+/.test(t);
+        const isListItem = (t) => isUl(t) || isOl(t);
+        // 表格行：以 | 开头或包含 | 的行（由下一行的 |---| 分隔行确认）
+        const isPipeRow = (t) => /^\s*\|.*\|\s*$/.test(t);
+        const isTableSep = (t) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(t);
+        const splitPipeRow = (t) => t.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+        // 表格单元格里也可能有粗体/行内代码——逐格走 inline
+        const buildTable = (rows) => {
+            const table = document.createElement('table');
+            table.className = 'pi-md-table';
+            // 首行为表头，第二行是 |---| 分隔（调用方已校验）
+            const thead = document.createElement('thead');
+            const trh = document.createElement('tr');
+            for (const cell of rows[0]) {
+                const th = document.createElement('th');
+                th.innerHTML = inline(cell);
+                trh.appendChild(th);
+            }
+            thead.appendChild(trh);
+            table.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            for (let r = 2; r < rows.length; r++) {
+                const tr = document.createElement('tr');
+                // 列数不齐时按表头列数补空格/截断（模型输出常见轻度错位）
+                for (let c = 0; c < rows[0].length; c++) {
+                    const td = document.createElement('td');
+                    td.innerHTML = inline(rows[r][c] ?? '');
+                    tr.appendChild(td);
+                }
+                tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+            return table;
+        };
+
+        while (i < lines.length) {
+            const line = lines[i];
+            // ---- 代码块（``` 围栏）：内容原样转义，不出 inline 解析 ----
+            if (/^\s*```/.test(line)) {
+                const buf = [];
+                i++;
+                while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
+                i++;   // 跳过收尾围栏（缺失也安全：循环条件兜底）
+                mk('pre', 'pi-md-pre', `<code>${esc(buf.join('\n'))}</code>`);
+                continue;
+            }
+            // ---- 表格：首行 |…| + 次行 |---|---| 分隔（GFM 管道表）----
+            // 连续管道行聚合成一张表；列数不齐按表头补齐/截断
+            if (isPipeRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+                const rows = [splitPipeRow(line)];
+                i += 2;   // 跳过表头与分隔行
+                while (i < lines.length && isPipeRow(lines[i])) {
+                    rows.push(splitPipeRow(lines[i++]));
+                }
+                frag.appendChild(buildTable(rows));
+                continue;
+            }
+            // ---- 分隔线 ----
+            if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { mk('hr', 'pi-md-hr'); i++; continue; }
+            // ---- 标题（#### 最多吃到四级，粗体更大）----
+            const h = line.match(/^(#{1,4})\s+(.*)$/);
+            if (h) { mk('div', `pi-md-h pi-md-h${h[1].length}`, inline(h[2])); i++; continue; }
+            // ---- 列表（连续列表行聚合成一个 ul/ol，支持两档嵌套）----
+            if (isListItem(line)) {
+                const ordered = isOl(line);
+                const list = document.createElement(ordered ? 'ol' : 'ul');
+                list.className = 'pi-md-list';
+                while (i < lines.length && isListItem(lines[i])) {
+                    const cur = lines[i];
+                    const indent = cur.match(/^\s*/)[0].length;
+                    const item = cur.replace(/^\s*(?:[-*]|\d+[.、)])\s+/, '');
+                    if (indent >= 2 && list.lastElementChild) {
+                        // 嵌套档：挂到上一条目的子列表（没有则现建）
+                        let sub = list.lastElementChild.querySelector('ul,ol');
+                        if (!sub) {
+                            sub = document.createElement(isUl(cur) ? 'ul' : 'ol');
+                            sub.className = 'pi-md-list';
+                            list.lastElementChild.appendChild(sub);
+                        }
+                        const li = document.createElement('li');
+                        li.innerHTML = inline(item);
+                        sub.appendChild(li);
+                    } else {
+                        const li = document.createElement('li');
+                        li.innerHTML = inline(item);
+                        list.appendChild(li);
+                    }
+                    i++;
+                }
+                frag.appendChild(list);
+                continue;
+            }
+            // ---- 空行：段落分隔 ----
+            if (!line.trim()) { i++; continue; }
+            // ---- 普通段落：连续非空非结构行聚合为一段 ----
+            const buf = [];
+            while (i < lines.length && lines[i].trim() && !isListItem(lines[i]) &&
+                   !/^\s*```/.test(lines[i]) && !/^#{1,4}\s/.test(lines[i]) &&
+                   !/^\s*(-{3,}|\*{3,})\s*$/.test(lines[i])) {
+                buf.push(lines[i++]);
+            }
+            mk('p', 'pi-md-p', buf.map(inline).join('<br>'));
+        }
+        return frag;
+    }
+
+    /** 把文本块内容替换为 Markdown 渲染结果（定稿时调用；流式中不动）。
+     *  同时在块上记录源文本 srcText——收尾去重按它精确比较：渲染后的
+     *  textContent 已丢失 markdown 符号（**、- 等），拿它比对原始文本
+     *  永远不等，是文本复读漏去重的根因 */
+    _renderMarkdownInto(block, text) {
+        block.srcText = text;
+        block.content.innerHTML = '';
+        block.content.appendChild(this._renderMarkdown(text));
+    }
+
+    /** 执行中指示器：挂在最新消息框下方，圆弧 spinner 匀速旋转。
      *  长沉默（长工具/长模型调用/磁盘扫描）期间给用户"还活着"的判断依据，
      *  避免误判为死掉而人工干预（停止/重启/重发）——那才是回合的真正杀手 */
     _showRunning(text) {
@@ -429,6 +643,10 @@ class LlmPiAgent {
         el.className = 'pi-running';
         const spin = document.createElement('span');
         spin.className = 'pi-running-spinner';
+        // 圆弧 + 圆头线帽的转圈图标（stroke 颜色经 currentColor 交给 CSS）
+        spin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+            '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" ' +
+            'stroke-width="2.5" stroke-linecap="round" stroke-dasharray="40 16.55"/></svg>';
         const t = document.createElement('span');
         t.textContent = text;
         el.append(spin, t);
@@ -515,11 +733,15 @@ class LlmPiAgent {
             });
 
         try {
+            // 指定技能注记（永驻兜底）：用户在「指定技能」下拉选了技能时随
+            // 消息注入"先 skill_load 再执行"；「自动」= 空串不注入。只进 pi
+            // 消息，用户气泡仍显示原文（chat.getMandatedSkillNote，见 LlmChat）
+            const mandatedNote = chat.getMandatedSkillNote ? chat.getMandatedSkillNote() : '';
             const resp = await fetch('/api/pi/prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: text,
+                    message: (text || '') + mandatedNote,
                     images: imagesPayload,
                     // chat 场景系统提示词随消息上送：pi RPC 的 prompt 命令无
                     // system 参数，后端在会话首条消息时拼入消息头部（见 piAgentManager）
@@ -540,7 +762,9 @@ class LlmPiAgent {
             // 被静默丢弃，界面永久定格（无停止提示）
             if (result.queued) {
                 this._skipNextAgentEnd = true;
-                this._ensureTextBlock().content.textContent = '⏳ pi 正在执行上一任务，本条已加入队列…';
+                const qb = this._ensureTextBlock();
+                qb.srcText = null;   // 占位文本：源文本未定，清掉防旧值参与去重
+                qb.content.textContent = '⏳ pi 正在执行上一任务，本条已加入队列…';
                 this._setRunningText('⏳ 上一任务仍在执行，本条排队中…');
             }
         } catch (err) {
@@ -580,11 +804,13 @@ class LlmPiAgent {
             const ev = event.assistantMessageEvent || {};
             if (ev.type === 'text_delta') {
                 this._textBuf += ev.delta || '';
-                this._ensureTextBlock().content.textContent = this._textBuf + ' ▍';
+                const b = this._ensureTextBlock();
+                b.srcText = null;   // 裸排累积中：源文本未定，清掉防上段残留
+                b.content.textContent = this._textBuf + ' ▍';
                 this.chat.followBottom();
             } else if (ev.type === 'text_end' && ev.content !== undefined) {
                 this._textBuf = ev.content;
-                this._ensureTextBlock().content.textContent = this._stripCursor(ev.content);
+                this._renderMarkdownInto(this._ensureTextBlock(), ev.content);
                 this._textBuf = '';   // 消息边界：重置缓冲，下条消息重新累积
             } else if (ev.type === 'thinking_delta') {
                 const b = this._ensureThinkingBlock();
@@ -662,20 +888,30 @@ class LlmPiAgent {
                         this._endThinking(b); // 收尾：冻结时长并保持默认折叠
                     } else if (p.type === 'text' && p.text) {
                         // 以 pi 的 assistant 消息为权威单位：完整文本覆盖当前文本块；
-                        // 若与已有文本块完全相同（模型复读），丢弃本轮新建的重复块
+                        // 若与已有文本块相同（流式复读），丢弃本轮新建的重复块。
+                        // 比较优先用渲染时记下的 srcText——textContent 已丢
+                        // markdown 符号，拿它比原始文本永远不等（去重失效根因）
                         const clean = this._stripCursor(p.text);
-                        const dup = this._blocks.find((b) => b.type === 'text' &&
-                            this._stripCursor(b.content.textContent) === clean);
+                        const sameText = (b) => {
+                            if (typeof b.srcText === 'string') {
+                                return this._stripCursor(b.srcText) === clean;
+                            }
+                            return this._stripCursor(b.content.textContent) === clean;
+                        };
+                        const dup = this._blocks.find((b) => b.type === 'text' && sameText(b));
                         if (dup) {
                             const cur = this._blocks[this._blocks.length - 1];
                             if (cur && cur.type === 'text' && cur !== dup) {
                                 cur.el.remove();
                                 this._blocks.pop();
                             }
-                            dup.content.textContent = clean;
+                            if (dup.srcText !== clean) {
+                                // dup 是裸排态（流式中被截）或内容有偏差：统一渲染定稿
+                                this._renderMarkdownInto(dup, clean);
+                            }
                         } else {
                             this._textBuf = clean;
-                            this._ensureTextBlock().content.textContent = clean;
+                            this._renderMarkdownInto(this._ensureTextBlock(), clean);
                         }
                         this._textBuf = '';   // 消息边界：重置缓冲，下条消息重新累积
                     } else if (p.type === 'toolCall') {
@@ -697,8 +933,9 @@ class LlmPiAgent {
                         b.claimed = true;
                     }
                 });
-                // 收尾去重：清掉流式阶段可能重复输出的同内容思考块
+                // 收尾去重：清掉流式阶段可能重复输出的同内容思考/文本块
                 this._dedupeThinking();
+                this._dedupeText();
             }
         } else if (event.type === 'agent_end') {
             if (this._skipNextAgentEnd) {
@@ -715,15 +952,27 @@ class LlmPiAgent {
             this._blocks.forEach((b) => {
                 if (b.type === 'tool' && !b.done) this._markToolDone(b, false);
             });
-            // 兜底去重：message_end 丢失时流式重复思考块也能在此清理
+            // 兜底去重：message_end 丢失时流式重复思考/文本块也能在此清理
             this._dedupeThinking();
+            this._dedupeText();
             // 没有实质回答时清掉空光标块；若整轮无任何块则给占位提示
             if (this._textBuf === '') {
                 this._dropEmptyCursor();
                 if (this._blocks.length === 0) {
                     this._ensureTextBlock().content.textContent = '（无输出）';
                 }
+            } else {
+                // 兜底渲染：text_end 丢失（流被中止等）时缓冲里还留着
+                // 未定稿文本——此处一次性渲染，杜绝符号裸漏
+                const last = this._blocks[this._blocks.length - 1];
+                if (last && last.type === 'text') {
+                    this._renderMarkdownInto(last, this._stripCursor(this._textBuf));
+                }
+                this._textBuf = '';
             }
+            // 完成提示音：仅正常收尾路径响——排队分支已提前 return，
+            // 用户点停止（abort）不产生 agent_end 事件，均不会误响
+            _playDoneChime();
             this._finish();
             this.chat.followBottom();
         } else if (event.type === 'pi_process_exit') {

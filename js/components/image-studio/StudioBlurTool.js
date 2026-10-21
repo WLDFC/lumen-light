@@ -45,7 +45,12 @@ class StudioBlurTool {
         const layer = studio._activeLayer();
         if (!layer || layer.isText) return;
         const ts = layer.tscale || 1;
-        const lx = (p) => ({ x: (p.x - layer.tx) / ts, y: (p.y - layer.ty) / ts });
+        // 翻转态图层：局部 x 镜像，笔刷落点与显示位置一致（形状层已烘焙，不镜像）
+        const lx = (p) => {
+            let x = (p.x - layer.tx) / ts;
+            if (layer.flipX && !layer.isShape) x = layer.paintCv.width - x;
+            return { x, y: (p.y - layer.ty) / ts };
+        };
         const lf = lx(from), lt = lx(to);
         const r = (studio.sizes.strokes * ImageStudio.SIZE_SCALE) / 2 / ts;
         const mg = this._mask.getContext('2d');

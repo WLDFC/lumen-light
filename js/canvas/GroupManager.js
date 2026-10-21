@@ -9,6 +9,9 @@
  *      拖动组时按拖动开始瞬间的成员快照联动，组不存储成员清单）
  *   4. 标题双击改名（浮动输入框，回车/失焦提交、Esc 取消、IME 兼容）
  *   5. 标题栏配色（工具栏下拉选择，颜色键存组对象 color 字段，随存档持久化）
+ *   6. 聚集开关（collect 字段，随存档持久化）：开启后新生成占位图统一
+ *      落入本组（落点路由在 CollectZone/CollectSlotLayout）；全局至多
+ *      一个，开启时自动关闭其他组，唯一性还由存档恢复归一收口
  * 组本身画在 canvas 里（CanvasRenderer.drawGroupBodies，垫在连线与图片
  * 之下），不是 DOM 节点——组背景必须压在成员图片下面，DOM 方案做不到。
  * 存档走 project.json 顶层 groups 字段（ProjectSerializer 收集/恢复），
@@ -106,6 +109,8 @@ class GroupManager {
             height: h,
             // 标题栏缩放系数：按创建时尺寸定格（见 getTitleNS），调整宽高不变
             titleNS: Math.max(Math.min(w, h) / GroupManager.DESIGN_BASE, 0.01),
+            // 聚集开关（全局至多一个，见 setCollect）；缺省 false
+            collect: false,
             selected: false
         };
         this.groups.push(group);
@@ -146,6 +151,60 @@ class GroupManager {
         // 撤销记账：配色可回退（值未变不记）
         this.canvas.history?.recordValue(g, 'color', from, g.color, '标题栏配色');
         this.canvas.draw();
+    }
+
+    /**
+     * 设置聚集开关（GroupToolbar「聚集」按钮调用）。
+     * 全局至多一个聚集区：开启时先关掉其他组。撤销按「先记其他组的
+     * 关闭、再记本组的开启」两段入栈——undo 先弹本组变化，任何单步
+     * 回退后的状态都满足「至多一个」不变量（先弹本组=零聚集区的
+     * 合法中间态，不会出现双开）。重绘经 draw hook 被
+     * CanvasChangeWatcher 捕获，实时保存自动落盘
+     * @param {string} id - 组 ID
+     * @param {boolean} enabled - true 开启聚集（联动关闭其他组）/ false 关闭
+     */
+    setCollect(id, enabled) {
+        const g = this.groups.find(g => g.id === id);
+        if (!g) return;
+        const next = !!enabled;
+        if (!!g.collect === next) return;
+        if (next) {
+            for (const other of this.groups) {
+                if (other !== g && other.collect) {
+                    this.canvas.history?.recordValue(other, 'collect', true, false, '聚集开关');
+                    other.collect = false;
+                }
+            }
+        }
+        this.canvas.history?.recordValue(g, 'collect', !!g.collect, next, '聚集开关');
+        g.collect = next;
+        this.canvas.draw();
+    }
+
+    /**
+     * 当前聚集编组（至多一个，无则 null）。
+     * CollectZone 落点路由与视口判定消费
+     * @returns {Object|null}
+     */
+    getCollectGroup() {
+        return this.groups.find(g => g.collect) || null;
+    }
+
+    /**
+     * 聚集唯一性归一：多个 collect=true 时保留第一个、其余关闭
+     * （存档恢复收口——脏数据/手工编辑的存档可能带出双开）。
+     * @param {Array<Object>} groups - 组对象数组（就地修改）
+     * @returns {boolean} 归一后是否仍存在聚集编组
+     */
+    static normalizeCollectGroups(groups) {
+        let seen = false;
+        for (const g of groups || []) {
+            if (g.collect) {
+                if (seen) g.collect = false;
+                else seen = true;
+            }
+        }
+        return seen;
     }
 
     /**

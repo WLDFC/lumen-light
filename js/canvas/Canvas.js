@@ -91,10 +91,15 @@ class Canvas {
         this.history = new CanvasHistory(this);         // 撤销/重做命令栈
         // 命令淘汰时的视频文件清理接线（引用计数与后端 DELETE 在 ImageManager）
         this.history.onFlushVideoFile = (url) => this.images.cleanupVideoFileByUrl(url);
+        this.history.onFlushAudioFile = (url) => this.images.cleanupAudioFileByUrl(url);
         this.groups = new GroupManager(this);           // 编组管理器
+        // 聚集区控制器（编组 collect 字段的落点路由/落图提示接线，
+        // PlaceholderManager 经画布实例访问）
+        this.collectZone = new CollectZone(this);
         this.renderer = new CanvasRenderer(this);       // 渲染器
         this.interaction = new CanvasInteraction(this); // 交互管理器
         this.videoManager = new CanvasVideoManager(this); // 视频播放管理器
+        this.audioManager = new CanvasAudioManager(this); // 音频播放管理器
         this.clipboard = new CanvasClipboard(this);     // 剪贴板管理器
         this.connections = new CanvasConnections(this); // 连线管理器
         this.contextMenu = new CanvasContextMenu(this); // 右键节点菜单

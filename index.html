@@ -31,26 +31,46 @@
     -->
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/prompt-panel.css">
+    <link rel="stylesheet" href="css/comfy-params.css">
     <link rel="stylesheet" href="css/lora-manager.css">
     <link rel="stylesheet" href="css/workflow-manager.css">
     <link rel="stylesheet" href="css/image-toolbar.css">
+    <link rel="stylesheet" href="css/gen-info.css">
     <link rel="stylesheet" href="css/image-editor.css">
+    <!-- ImageStudio 三件套按此顺序加载（拆分契约见 image-studio.css 文件头） -->
     <link rel="stylesheet" href="css/image-studio.css">
+    <link rel="stylesheet" href="css/image-studio-panel.css">
+    <link rel="stylesheet" href="css/image-studio-picker.css">
+    <link rel="stylesheet" href="css/image-studio-adjust.css">
     <link rel="stylesheet" href="css/save-manager.css">
+    <link rel="stylesheet" href="css/backup.css">
     <link rel="stylesheet" href="css/prompt-autocomplete.css">
     <link rel="stylesheet" href="css/llm-chat.css">
     <link rel="stylesheet" href="css/lumen-dropdown.css">
+    <!-- 通用预制件：右键菜单 / 批量管理 / 层级树列表 / 确认弹窗
+         （收藏页与 LoRA 管理器共用，见 js/components/Lumen*.js） -->
+    <link rel="stylesheet" href="css/lumen-context-menu.css">
+    <link rel="stylesheet" href="css/lumen-batch.css">
+    <link rel="stylesheet" href="css/lumen-tree-list.css">
+    <link rel="stylesheet" href="css/lumen-confirm.css">
+    <link rel="stylesheet" href="css/lora-file-select.css">
+    <link rel="stylesheet" href="css/lora-trigger.css">
     <link rel="stylesheet" href="css/llm-system-prompt.css">
+    <link rel="stylesheet" href="css/comfy-prompt-presets.css">
     <link rel="stylesheet" href="css/llm-skills.css">
     <link rel="stylesheet" href="css/settings.css">
     <link rel="stylesheet" href="css/side-toolbar.css">
     <link rel="stylesheet" href="css/asset-library.css">
+    <link rel="stylesheet" href="css/task-center.css">
     <link rel="stylesheet" href="css/recipe-manager.css">
     <!-- 提示词收藏页左侧模型标签栏样式 -->
     <link rel="stylesheet" href="css/recipe-models-sidebar.css">
     <!-- 保存提示词弹窗 / 收藏详情编辑弹窗样式（从 recipe-manager.css 按组件拆分） -->
     <link rel="stylesheet" href="css/save-tag-dialog.css">
     <link rel="stylesheet" href="css/tag-detail-dialog.css">
+    <!-- 坐标编辑器（顶栏按钮：bbox 布局 → MOSS/Flux3 坐标提示词）；窗口壳复用
+         recipe-manager.css 的 recipe-dialog 骨架，须在其后加载 -->
+    <link rel="stylesheet" href="css/coordinate-editor.css">
     <link rel="stylesheet" href="css/node.css">
     <!-- 顶栏样式放在 save-manager.css / prompt-panel.css 之后，
          以便覆盖被收纳进顶栏的按钮原有的 fixed 定位相关声明 -->
@@ -106,6 +126,8 @@
         <button class="file-menu-item" id="newCanvasBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>新建画布</button>
         <button class="file-menu-item" id="saveProjectBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>保存画布</button>
         <button class="file-menu-item" id="saveAsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>另存为</button>
+        <button class="file-menu-item" id="backupExportBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>备份导出</button>
+        <button class="file-menu-item" id="backupImportBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>备份导入</button>
         <button class="file-menu-item" id="settingsBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</button>
         <button class="file-menu-item" id="helpBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>帮助</button>
     </div>
@@ -202,11 +224,22 @@
                 <div class="image-thumbnails" id="imageThumbnails"></div>
             </div>
 
-            <!-- 负面提示词输入区域，默认可折叠以节省空间 -->
+            <!--
+                负面提示词输入区域，默认可折叠以节省空间。
+                标题条与「提示词」按钮同排（cpp-topbar，与 LORA 叠加栏的
+                「触发词」按钮同款结构：标题条 flex:1 近乎通栏、按钮在栏外
+                右侧独立成钮 stretch 等高）；按钮唤出提示词预设管理弹窗
+                （ComfyPromptPresets，一键注入正面 1/2 与负面框）
+            -->
             <div class="prompt-input-wrap collapsible collapsed" id="negPromptWrap">
-                <div class="collapsible-header" id="negPromptHeader">
-                    <label for="negPrompt">负面提示词</label>
-                    <button class="collapse-toggle" id="negPromptToggle" aria-label="展开/收起负面提示词" type="button">▶</button>
+                <div class="cpp-topbar">
+                    <div class="collapsible-header" id="negPromptHeader">
+                        <label for="negPrompt">负面提示词</label>
+                        <button class="collapse-toggle" id="negPromptToggle" aria-label="展开/收起负面提示词" type="button">▶</button>
+                    </div>
+                    <button type="button" class="cpp-topbar-btn" id="comfyPresetBtn" title="提示词预设：管理正面/负面提示词，一键注入">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>提示词
+                    </button>
                 </div>
                 <div class="collapsible-body">
                     <textarea id="negPrompt" rows="6" placeholder="low quality, blurry..."></textarea>
@@ -294,6 +327,7 @@
                     <div class="llm-chat-toolbar">
                         <button class="llm-tool-btn" id="llmUploadBtn" type="button" title="上传文件（图片/视频/文档）"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
                         <button type="button" class="llm-quality-select" id="llmQualitySelect" aria-label="选择图片生成质量" title="图片生成质量" aria-haspopup="listbox"></button>
+                        <button type="button" class="llm-skill-select" id="llmSkillSelect" aria-label="指定技能" aria-haspopup="listbox"></button>
                         <button type="button" class="llm-model-select" id="llmModelSelect" aria-label="选择模型" aria-haspopup="listbox"></button>
                         <div class="llm-size-select-wrap">
                             <select class="llm-size-select" id="llmSizeSelect" aria-label="选择生成图片尺寸" title="图片生成尺寸">
@@ -311,7 +345,7 @@
                         <button class="llm-send-btn" id="llmSendBtn" type="button">发送</button>
                         <button class="llm-stop-btn" id="llmStopBtn" type="button" title="停止生图" aria-label="停止图片生成" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                     </div>
-                    <input type="file" id="llmFileInput" accept="image/*,video/*,.txt,.md,.markdown,.csv,.tsv,.log,.json,.xml,.yaml,.yml,.ini,.conf,.srt,.vtt,.pdf,.docx,.xls,.xlsx,.xlsm" multiple style="display: none;">
+                    <input type="file" id="llmFileInput" accept="image/*,video/*,audio/*,.mp3,.wav,.ogg,.m4a,.flac,.aac,.txt,.md,.markdown,.csv,.tsv,.log,.json,.xml,.yaml,.yml,.ini,.conf,.srt,.vtt,.pdf,.docx,.xls,.xlsx,.xlsm" multiple style="display: none;">
                 </div>
             </div>
         </section>
@@ -376,6 +410,9 @@
 
         5. 图片工具栏与视图控制
            js/utils/ImageExport.js              图片源导出工具（data URL/blob 统一转换）
+           js/utils/GenRecord.js                生成参数记录（溯源/生成同款数据层）
+           js/components/GenReplay.js           生成同款回放器（回填/重跑动作）
+           js/components/GenInfoPopup.js        生成参数弹窗（图片下方参数卡）
            js/components/UpscaleManager.js      高清放大管理
            js/components/ImageToolbar.js        图片选中工具栏
            js/components/GroupToolbar.js        编组选中工具栏（按钮预留）
@@ -412,6 +449,9 @@
     <script defer src="js/canvas/GroupManager.js"></script>
     <!-- 编组布局算法：布局按钮的纯函数排列器（GroupToolbar 依赖） -->
     <script defer src="js/canvas/GroupLayout.js"></script>
+    <!-- 聚集区槽位布局纯函数层：区内空槽扫描/编组位置级联（CollectZone 依赖） -->
+    <script defer src="js/utils/CollectSlotLayout.js"></script>
+    <script defer src="js/utils/OcclusionLayout.js"></script>
     <script defer src="js/canvas/CanvasConnections.js"></script>
     <!-- 节点文本镜像层（@引用高亮 + 自绘光标），PromptNode/TextNode 共用 -->
     <script defer src="js/canvas/NodeTextMirror.js"></script>
@@ -430,13 +470,21 @@
     <script defer src="js/utils/RhAppImporter.js"></script>
     <!-- 提示词段合并（节点链/面板双正面框共用，拼接处自动补逗号区分中英文） -->
     <script defer src="js/utils/PromptMerge.js"></script>
+    <script defer src="js/utils/LoraTriggerText.js"></script>
     <script defer src="js/utils/ImageExport.js"></script>
+    <!-- 坐标编辑 Layout 纯函数层：MOSS 草稿 schema/校验/编译（compile_prompt.py
+         的 JS 移植），CoordinateEditor 消费，须先于其加载 -->
+    <script defer src="js/utils/CoordinateLayout.js"></script>
     <!-- 生成任务停止控件（任务级 X 按钮 + AbortController 内核）：
          面板 ■停止与生图节点 X 共用，需先于使用方加载 -->
     <script defer src="js/components/GenStopControl.js"></script>
     <script defer src="js/canvas/nodes/ImageGenNode.js"></script>
+    <!-- API 视频生成节点：任务提交+轮询链路（复用 ImageGenNode 表单样式与 GenStopControl） -->
+    <script defer src="js/canvas/nodes/VideoGenNode.js"></script>
     <!-- Comfy 动态参数行控制器：画布 Comfy 生图节点与右侧面板共用 -->
     <script defer src="js/components/ComfyParamRows.js"></script>
+    <!-- LoRA 封面选择器：面板叠加区 / 画布 LoRA 节点 / Comfy 内嵌 LoRA 行共用的下拉替换组件 -->
+    <script defer src="js/components/LoraFileSelect.js"></script>
     <!-- 数量步进器行为层：节点生成按钮旁与面板运行按钮旁共用 -->
     <script defer src="js/components/CountStepper.js"></script>
     <script defer src="js/canvas/nodes/ComfyGenNode.js"></script>
@@ -453,10 +501,21 @@
     <script defer src="js/canvas/CanvasClipboard.js"></script>
     <script defer src="js/canvas/CanvasContextMenu.js"></script>
     <script defer src="js/canvas/CanvasVideoManager.js"></script>
+    <!-- 画布音频管理器：音频卡片对象 + 原生控件播放器覆盖层（与视频管理器同构） -->
+    <script defer src="js/canvas/CanvasAudioManager.js"></script>
     <script defer src="js/canvas/CanvasHistory.js"></script>
     <script defer src="js/components/AssetLibrary.js"></script>
+    <!-- 任务中心：注册表（纯数据单例）+ 左侧工具栏弹出窗口（纯视图）。
+         各生成链路在 begin/end 处登记，窗口订阅 lumen-tasks-changed 重渲 -->
+    <script defer src="js/components/TaskRegistry.js"></script>
+    <script defer src="js/components/TaskCenter.js"></script>
     <script defer src="js/canvas/Canvas.js"></script>
     <script defer src="js/api/LumenSocket.js"></script>
+    <!-- LumenSocket 子模块：桥接命令按能力域混入（partial-class，ADR 027），须后于主类加载 -->
+    <script defer src="js/api/bridge/BridgeState.js"></script>
+    <script defer src="js/api/bridge/BridgeMedia.js"></script>
+    <script defer src="js/api/bridge/BridgeGraph.js"></script>
+    <script defer src="js/api/bridge/BridgeView.js"></script>
     <script defer src="js/components/PromptInputManager.js"></script>
     <script defer src="js/components/WorkflowManager.js"></script>
     <script defer src="js/components/PromptAutocomplete.js"></script>
@@ -466,20 +525,31 @@
     <script defer src="js/utils/llmQuality.js"></script>
     <script defer src="js/components/LlmSizePicker.js"></script>
     <script defer src="js/components/LlmImageDrag.js"></script>
+    <!-- 音频上传入口：聊天上传按钮等画布外入口的音频送画布单一出口 -->
+    <script defer src="js/utils/AudioIngest.js"></script>
     <script defer src="js/components/LlmVideoGen.js"></script>
     <script defer src="js/components/LlmPiAgent.js"></script>
     <script defer src="js/components/LlmWebBridge.js"></script>
     <script defer src="js/components/PiStatusLight.js"></script>
     <script defer src="js/components/LumenDropdown.js"></script>
     <script defer src="js/components/ChatHistoryStore.js"></script>
+    <script defer src="js/components/BackupManager.js"></script>
     <script defer src="js/components/LlmHistoryController.js"></script>
     <script defer src="js/components/LlmApiSender.js"></script>
     <script defer src="js/components/LlmChat.js"></script>
     <script defer src="js/components/LlmMessageRail.js"></script>
     <script defer src="js/components/LlmSystemPrompt.js"></script>
+    <!-- Comfy 提示词预设：面板三行提示词标题栏入口按钮 + 管理弹窗 + 一键注入 -->
+    <script defer src="js/components/ComfyPromptPresets.js"></script>
     <script defer src="js/components/LlmSkillManager.js"></script>
     <script defer src="js/components/PanelThumbnailManager.js"></script>
     <script defer src="js/components/PanelComfyRunner.js"></script>
+    <script defer src="js/components/LoraTriggerManager.js"></script>
+    <!-- 生成同款三件套：GenRecord（数据层）→ GenReplay（回填/重跑）→
+         GenInfoPopup（参数卡弹窗），ImageToolbar「生成同款」按钮唤出 -->
+    <script defer src="js/utils/GenRecord.js"></script>
+    <script defer src="js/components/GenReplay.js"></script>
+    <script defer src="js/components/GenInfoPopup.js"></script>
     <script defer src="js/components/PromptPanel.js"></script>
     <script defer src="js/components/UpscaleManager.js"></script>
     <script defer src="js/components/ImageToolbar.js"></script>
@@ -492,24 +562,44 @@
     <script defer src="js/components/image-studio/StudioTextTool.js"></script>
     <script defer src="js/components/image-studio/StudioShapeTool.js"></script>
     <script defer src="js/components/image-studio/StudioBlurTool.js"></script>
+    <script defer src="js/components/image-studio/StudioAdjustTool.js"></script>
     <script defer src="js/components/image-studio/StudioColorPicker.js"></script>
     <script defer src="js/components/image-studio/StudioHistory.js"></script>
     <script defer src="js/components/image-studio/StudioCropTool.js"></script>
     <script defer src="js/components/image-studio/StudioSave.js"></script>
     <script defer src="js/components/ImageStudio.js"></script>
     <script defer src="js/components/SaveTagDialog.js"></script>
+    <!-- 提示词写入目标预制件：TagDetailDialog 构造时接线「写入」钮，须先于其加载 -->
+    <script defer src="js/components/PromptWriteTargets.js"></script>
     <script defer src="js/components/TagDetailDialog.js"></script>
     <script defer src="js/components/TagReferenceSlots.js"></script>
     <script defer src="js/components/SideToolbar.js"></script>
+    <script defer src="js/components/OcclusionTool.js"></script>
     <script defer src="js/components/Controls.js"></script>
     <script defer src="js/components/NewCanvasManager.js"></script>
     <!-- 存档三件套需先于 SaveManager 加载：SaveManager 构造时会实例化它们 -->
     <script defer src="js/components/save/ProjectSerializer.js"></script>
     <script defer src="js/components/save/SaveModal.js"></script>
     <script defer src="js/components/SaveManager.js"></script>
+    <!-- 通用预制件：右键菜单 / 批量管理 / 层级树列表 / 确认弹窗
+         （须先于使用它们的 RecipeManager / LoraManager 加载） -->
+    <script defer src="js/components/LumenContextMenu.js"></script>
+    <script defer src="js/components/LumenBatchManager.js"></script>
+    <script defer src="js/components/LumenTreeList.js"></script>
+    <script defer src="js/components/LumenConfirmDialog.js"></script>
     <script defer src="js/components/RecipeManager.js"></script>
     <!-- 工作流编辑器（顶栏 Comfy 按钮：节点图 + 全参数编辑，写回 workflows/*.json） -->
     <script defer src="js/components/WorkflowEditor.js"></script>
+    <!-- 坐标编辑器（顶栏「坐标编辑」按钮：bbox 布局 + AI 文案 + 编译导出
+         MOSS/Flux3 坐标提示词，见 js/components/CoordinateEditor.js） -->
+    <script defer src="js/components/CoordinateEditor.js"></script>
+    <!-- 坐标编辑器子模块：原型混入（partial-class，ADR 026），须后于主类加载 -->
+    <script defer src="js/components/coordinate-editor/CoordDom.js"></script>
+    <script defer src="js/components/coordinate-editor/CoordPanel.js"></script>
+    <script defer src="js/components/coordinate-editor/CoordStage.js"></script>
+    <script defer src="js/components/coordinate-editor/CoordHistory.js"></script>
+    <script defer src="js/components/coordinate-editor/CoordDraftStore.js"></script>
+    <script defer src="js/components/coordinate-editor/CoordAi.js"></script>
     <!-- 设置分类面板需先于 SettingsManager 加载：SettingsManager 构造时会实例化它们 -->
     <script defer src="js/components/settings/SettingsGeneralPanel.js"></script>
     <script defer src="js/components/settings/SettingsApiPanel.js"></script>
@@ -517,11 +607,18 @@
     <script defer src="js/components/settings/SettingsMcpPanel.js"></script>
     <script defer src="js/components/settings/SettingsWebBridgePanel.js"></script>
     <script defer src="js/components/SettingsManager.js"></script>
+    <!-- 聚集区控制器：编组 collect 开关的落点路由/落图提示（PlaceholderManager 依赖） -->
+    <script defer src="js/components/CollectZone.js"></script>
     <script defer src="js/components/PlaceholderManager.js"></script>
     <script defer src="js/components/GenerationFeedback.js"></script>
     <!-- 画布实时保存：依赖 SaveManager.serializer，变更捕获器需先于消费者加载 -->
     <script defer src="js/components/save/CanvasChangeWatcher.js"></script>
     <script defer src="js/components/save/RealtimeSaveManager.js"></script>
+    <!-- LoRA 管理器：弹层子模块先于主类加载（与 image-studio/ 同款拆分） -->
+    <script defer src="js/components/lora-manager/LoraInfoModal.js"></script>
+    <script defer src="js/components/lora-manager/LoraCoverPicker.js"></script>
+    <script defer src="js/components/lora-manager/LoraSendPopup.js"></script>
+    <script defer src="js/components/lora-manager/LoraConfirmDelete.js"></script>
     <script defer src="js/components/LoraManager.js"></script>
     <script defer src="js/app.js"></script>
 </body>

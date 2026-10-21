@@ -4,7 +4,8 @@
  * 作用：管理界面右上角可拖拽调整大小的提示词面板，负责协调以下子模块：
  *       1. PromptInputManager：正向 / 负向提示词输入、负面提示词折叠
  *       2. WorkflowManager：工作流选择、加载、保存、删除
- *       3. PanelThumbnailManager：图片缩略图槽位（最多 3 张）与上传
+ *       3. PanelThumbnailManager：图片缩略图槽位（按工作流取图节点数自动
+ *          扩展，上限 9）与上传
  *       4. PanelComfyRunner："发送到 ComfyUI"运行流程与按钮反馈
  *       5. ComfyParamRows：Comfy 动态参数行（与画布 Comfy 生图节点共用）
  *       本类保留职责：
@@ -44,6 +45,10 @@ class PromptPanel {
         // ===== 子管理器 =====
         // 提示词输入管理器
         this.promptInputManager = new PromptInputManager();
+        // 全局别名：桥接命令（BridgeState/BridgeView）与生成同款回放
+        // （GenReplay）按惯例读 window.promptInputManager——与
+        // window.promptPanel.promptInputManager 同一实例的两条路径
+        window.promptInputManager = this.promptInputManager;
         // Comfy 动态参数行（与画布 Comfy 生图节点共用 ComfyParamRows；
         // 切换工作流即重置为模板默认值，参数不持久化）。
         // 数量下拉不在参数行内渲染（countRow=false），由运行按钮旁的
@@ -55,12 +60,17 @@ class PromptPanel {
             { resetOnWorkflowChange: true, countRow: false, maxCount: 9999, loraStack: true }
         );
         // 工作流管理器，工作流切换时更新当前工作流引用并刷新参数行，
-        // 同时让缩略图槽位数跟随工作流的取图节点数（0 = 隐藏缩略图区）
+        // 同时让内容槽位（图片/视频混合）跟随工作流的内容节点清单
+        // （空清单 = 隐藏缩略图区）
         this.workflowManager = new WorkflowManager((workflow) => {
             this.currentWorkflow = workflow;
-            this.comfyParams.setWorkflow(workflow ? workflow.workflow : null);
-            this.thumbnailManager?.setSlotCount(
-                this.countReceiveNodes(workflow ? workflow.workflow : null));
+            // 传工作流 id（上下文标识）；重新加载工作流会清空内嵌 lora
+            // 删除记录——内嵌 lora 自动恢复
+            this.comfyParams.setWorkflow(
+                workflow ? workflow.workflow : null,
+                this.workflowManager.getCurrentWorkflowId());
+            this.thumbnailManager?.setSlots(
+                this.collectContentSlots(workflow ? workflow.workflow : null));
             this.updateCountStepper();
         });
         // 当前工作流引用（由 WorkflowManager 回调同步）
@@ -74,11 +84,50 @@ class PromptPanel {
             getWorkflowId: () => this.workflowManager.getCurrentWorkflowId(),
             getOverrides: (batchCount) => this.comfyParams.getOverrides(batchCount),
             getLoras: () => this.comfyParams.getLoras(),
+            getDeletedLoraIds: () => this.comfyParams.getDeletedLoraIds(),
             getBatchCount: () =>
                 this.comfyParams.hasBatchInput() ? this.comfyParams.getCount() : 1,
             updateWorkflowStatus: (message, isError) =>
                 this.workflowManager.updateWorkflowStatus(message, isError),
-            uploadThumbnails: () => this.thumbnailManager.sendThumbnailsToBackend()
+            uploadThumbnails: () => this.thumbnailManager.sendThumbnailsToBackend(),
+            // 免节点 LoadImage 直注载荷（无取图节点的工作流）：非 null 时
+            // 跳过槽位上传，图片随提交体直注（见 PanelComfyRunner）
+            getNodelessImages: () => this.collectNodelessImagePayload(),
+            // 生成参数记录（溯源/生成同款）：本轮提交的提示词/工作流/参数
+            // 快照（GenRecord），随占位图绑定到回图——params 取面板参数行
+            // 状态（null = 工作流模板值），主模型取第一个 checkpoint/unet 加载器
+            getGenInfo: () => {
+                const prompts = this.promptInputManager.getPrompts();
+                const st = this.comfyParams.state;
+                const loader = (this.comfyParams.detected?.loaders || [])
+                    .find((l) => l.kind === 'checkpoint' || l.kind === 'unet');
+                return GenRecord.forComfy({
+                    positive: prompts.positive,
+                    negative: prompts.negative,
+                    workflowId: this.workflowManager.getCurrentWorkflowId(),
+                    workflowName: this.currentWorkflow?.name || '',
+                    params: {
+                        steps: st.steps,
+                        cfg: st.cfg,
+                        sampler: st.sampler,
+                        sizeW: st.sizeW,
+                        sizeH: st.sizeH,
+                        denoise: st.denoise
+                    },
+                    model: loader
+                        ? (st.models[loader.nodeId] || loader.current || '')
+                        : '',
+                    loras: this.comfyParams.getLoras(),
+                    node: null
+                });
+            }
+        });
+        // LoRA 触发词管理器（叠加区标题栏「触发词」按钮唤出弹窗）：监听
+        // 叠加区变更，把生效 LoRA 的 Civitai 触发词按开关/权重配置自动写入
+        // 正向框末尾（托管块契约见 utils/LoraTriggerText.js）
+        this.triggerManager = new LoraTriggerManager({
+            getStackLoras: () => this.comfyParams.getStackTriggerLoras(),
+            promptInputManager: this.promptInputManager
         });
 
         // ===== 拖拽调整宽度状态 =====
@@ -170,19 +219,71 @@ class PromptPanel {
     }
 
     /**
-     * 统计工作流 JSON 里取图节点（LumenReceiveImageFromCanvas）的个数，
-     * 作为面板缩略图槽位数（0 = 纯文生图工作流，隐藏缩略图区）
+     * 统计工作流 JSON 里的内容槽位（按节点 id 升序），返回槽位定义清单：
+     *   - LumenReceiveImageFromCanvas → {kind:'image'}（图片槽，base64 传输）
+     *   - LumenReceiveVideoFromCanvas → {kind:'video'}（视频槽，引用式传输）
+     *   - 免节点直注：工作流没有取图节点时，原生 LoadImage 升格为
+     *     {kind:'image', loadImageId: 节点id} 直注槽（角标显示节点 id，
+     *     运行时按「节点 id → 槽位内容」组 imageMapping 直注）；
+     *     有取图节点时 LoadImage 不升格（一个工作流一条输入通道）
+     * 图片槽上限 9 与 LumenReceiveImageFromCanvas.MAX_SLOTS 对齐（多图
+     * 编辑模型按取图节点数自动扩展）；视频槽上限 3 跟随其 Python 节点；
+     * LoadImage 直注槽不经过后端槽位、按节点数自动扩展不设上限。
+     * 清单传给 PanelThumbnailManager.setSlots 决定槽位数与每槽类型
+     * （空数组 = 纯文生图工作流，隐藏缩略图区）
      * @param {Object|null} workflowJson - ComfyUI API 格式工作流
-     * @returns {number} 取图节点数（0-3，上限与后端 MAX_SLOTS 一致）
+     * @returns {Array<{kind: string, loadImageId?: string}>} 槽位定义清单
      */
-    countReceiveNodes(workflowJson) {
-        if (!workflowJson) return 0;
-        let n = 0;
-        for (const id in workflowJson) {
+    collectContentSlots(workflowJson) {
+        if (!workflowJson) return [];
+        const scan = window.ComfyParamScanner?.scanLoadImageInputs?.(workflowJson);
+        const nodelessIds = scan && !scan.hasReceiveNode ? scan.loadImageIds : [];
+        const nodelessSet = new Set(nodelessIds);
+        const defs = [];
+        let imageCount = 0;
+        let videoCount = 0;
+        for (const id of Object.keys(workflowJson).sort((a, b) => Number(a) - Number(b))) {
             const cls = workflowJson[id].class_type || workflowJson[id].type || '';
-            if (cls === 'LumenReceiveImageFromCanvas') n++;
+            if (cls === 'LumenReceiveImageFromCanvas') {
+                if (imageCount < 9) { defs.push({ kind: 'image' }); imageCount++; }
+            } else if (cls === 'LumenReceiveVideoFromCanvas') {
+                if (videoCount < 3) { defs.push({ kind: 'video' }); videoCount++; }
+            } else if (nodelessSet.has(id)) {
+                defs.push({ kind: 'image', loadImageId: id });
+            }
         }
-        return Math.min(n, 3);
+        return defs;
+    }
+
+    /**
+     * 收集免节点 LoadImage 直注载荷（PanelComfyRunner 运行前调用）：
+     * 工作流没有画布取图节点时，把带 loadImageId 的直注槽内容按
+     * 「节点 id → images 下标」组装映射；空槽不出条目，对应 LoadImage
+     * 保持 ComfyUI 侧已选图不碰。有取图节点（或无工作流）返回 null——
+     * 走既有槽位上传链路
+     * @returns {Promise<{images: string[], imageMapping: Object}|null>}
+     */
+    async collectNodelessImagePayload() {
+        const wf = this.currentWorkflow ? this.currentWorkflow.workflow : null;
+        if (!wf) return null;
+        const scan = window.ComfyParamScanner?.scanLoadImageInputs?.(wf);
+        if (!scan || scan.hasReceiveNode || scan.loadImageIds.length === 0) return null;
+        const images = [];
+        const imageMapping = {};
+        const slots = this.thumbnailManager;
+        for (let i = 0; i < slots.slotCount; i++) {
+            const loadImageId = slots.slotLoadImageId(i);
+            const data = slots.thumbnails[i];
+            if (!loadImageId || !data || !data.src) continue;
+            // 已是 data URL 原样传（保真扩展名）；画布快照等其它来源经
+            // imageToBase64 转裸 base64（后端按 PNG 上传）
+            const payload = data.src.startsWith('data:image/')
+                ? data.src
+                : await slots.imageToBase64(data.src);
+            imageMapping[loadImageId] = images.length;
+            images.push(payload);
+        }
+        return { images, imageMapping };
     }
 
     // ==================== 数量步进器（运行按钮左侧） ====================
@@ -226,7 +327,9 @@ class PromptPanel {
      */
     show() {
         this.panel.classList.add('show');
-        this.toggleBtn.classList.add('hidden');
+        // 用专属类而非 .hidden——后者被 lora-manager.css 定义为 display:none
+        // !important，会把按钮摘出布局，顶栏中段居中图标随之整体位移
+        this.toggleBtn.classList.add('prompt-hidden');
         this.panel.setAttribute('aria-hidden', 'false');
     }
 
@@ -235,7 +338,7 @@ class PromptPanel {
      */
     hide() {
         this.panel.classList.remove('show');
-        this.toggleBtn.classList.remove('hidden');
+        this.toggleBtn.classList.remove('prompt-hidden');
         this.panel.setAttribute('aria-hidden', 'true');
     }
 

@@ -1,0 +1,368 @@
+/**
+ * ==========================================================================
+ * LumenLight Comfy 动态参数区样式（面板侧）
+ * ==========================================================================
+ * 作用：右侧面板 Comfy 模式的动态参数行样式，从 prompt-panel.css 拆出
+ *       （与 ComfyParamRows.js 控制器对应——JS 画布/面板共用，样式分两侧：
+ *       画布节点在 css/node.css 的 --ns 体系，本文件是面板 12px 档）。
+ * 内容：参数行/合并行/控件规格、LoRA 行与 LoRA 叠加区（含模板内嵌条目、
+ *       自绘启用勾选框、删除/恢复）、数量步进器、运行行。
+ * 作用域：全部锁在 #comfyContent 内，不影响画布节点样式。
+ * ==========================================================================
+ */
+
+/* ==================== Comfy 动态参数区 ==================== */
+/* 与画布 Comfy 生图节点共用 ComfyParamRows 控制器渲染的参数行
+   （comfy-param-* / comfy-* 系类名）。文字与控件规格对齐本面板的
+   comfy 模式（标签/控件 12px，同 .workflow-selector 一档），
+   在 #comfyContent 作用域内定义，不影响画布节点的 --ns 体系样式 */
+#comfyContent .comfy-params {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* 单行配置项：标签在上，控件在下（与画布节点同构） */
+#comfyContent .comfy-param-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#comfyContent .comfy-param-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #ffffff;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    user-select: none;
+}
+
+/* 下拉与数值输入：对齐 .workflow-selector 的凹陷控件规格 */
+#comfyContent .comfy-model-select,
+#comfyContent .comfy-sampler-select,
+#comfyContent .comfy-count-select,
+#comfyContent .comfy-num-input {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.2);
+    color: #ffffff;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    cursor: pointer;
+}
+
+#comfyContent .comfy-num-input {
+    cursor: text;
+    caret-color: #6cebff;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+#comfyContent .comfy-model-select:focus,
+#comfyContent .comfy-sampler-select:focus,
+#comfyContent .comfy-count-select:focus,
+#comfyContent .comfy-num-input:focus {
+    border-color: #3b82f6;
+}
+
+/* 原生 spinner 在深色主题下过亮，隐藏后用键盘/滚轮调值 */
+#comfyContent .comfy-num-input::-webkit-outer-spin-button,
+#comfyContent .comfy-num-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#comfyContent .comfy-model-select option,
+#comfyContent .comfy-sampler-select option,
+#comfyContent .comfy-count-select option {
+    background: #0f0f12;
+    color: #ffffff;
+}
+
+/* 参数合并行：两组「标签+输入框」左右并排各占一半 */
+#comfyContent .comfy-param-pair {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+#comfyContent .comfy-param-pair > .comfy-param-row {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* 尺寸行：宽 × 高 同行 */
+#comfyContent .comfy-size-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#comfyContent .comfy-size-x {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* ==================== LoRA 行与叠加区 ==================== */
+
+/* LoRA 行：文件下拉 + 启用勾选框 */
+#comfyContent .comfy-lora-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#comfyContent .comfy-lora-row .comfy-model-select {
+    flex: 1;
+    min-width: 0;
+}
+
+/* 未启用的 LoRA 下拉半透明置灰（与画布节点一致） */
+#comfyContent .comfy-model-select[data-lora-off] {
+    opacity: 0.4;
+}
+
+/* 叠加条目未启用（勾选框取消）：文件下拉与强度输入一并置灰 */
+#comfyContent .comfy-lorastack-entry.is-off .comfy-model-select,
+#comfyContent .comfy-lorastack-entry.is-off .comfy-num-input {
+    opacity: 0.4;
+}
+
+/* LoRA 启用勾选框（模板内嵌 LoRA 行 .comfy-lora-enable-input 与
+   叠加区条目 .comfy-lorastack-enable 共用）：自绘方格，边框/底色与
+   X 删除按钮同款（32×32），勾选态画居中对勾（native checkbox 外观
+   无法与按钮风格统一，appearance 覆盖） */
+#comfyContent .comfy-lorastack-enable,
+#comfyContent .comfy-lora-enable-input {
+    flex-shrink: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#comfyContent .comfy-lorastack-enable:checked,
+#comfyContent .comfy-lora-enable-input:checked {
+    border-color: rgba(59, 130, 246, 0.6);
+    background-color: rgba(59, 130, 246, 0.15);
+    /* 居中蓝色对勾（内联 SVG，尺寸随方格铺满） */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+    background-size: 60%;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+/* LoRA 叠加区：可折叠的堆叠条目（loraStack 模式，面板独有）。
+   折叠结构复用提示词框的 .collapsible-header / .collapsible-body /
+   .collapse-toggle，展开态的显隐规则在本作用域补充定义 */
+#comfyContent .comfy-lorastack {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 内嵌条目的「模板」小标签：紧跟 lora 标签文字之后 */
+#comfyContent .comfy-lorastack-tag {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    vertical-align: 1px;
+}
+
+#comfyContent .comfy-lorastack .collapsible-body {
+    max-height: 45vh;
+    overflow-y: auto;
+}
+
+#comfyContent .comfy-lorastack.collapsed .collapsible-body {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    overflow-y: hidden;
+}
+
+#comfyContent .comfy-lorastack.collapsed .collapsible-header {
+    opacity: 0.7;
+}
+
+#comfyContent .comfy-lorastack.collapsed .collapsible-header:hover {
+    opacity: 1;
+}
+
+/* 单个叠加条目：凹陷卡片，容纳「lora 文件下拉」+「强度合并行」 */
+#comfyContent .comfy-lorastack-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+#comfyContent .comfy-lorastack-entry + .comfy-lorastack-entry {
+    margin-top: 8px;
+}
+
+/* 条目头行：文件下拉占满 + 右侧删除按钮 */
+#comfyContent .comfy-lorastack-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#comfyContent .comfy-lorastack-head .comfy-model-select {
+    flex: 1;
+    min-width: 0;
+}
+
+#comfyContent .comfy-lorastack-remove {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.2);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#comfyContent .comfy-lorastack-remove:hover {
+    border-color: rgba(239, 68, 68, 0.6);
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+/* 空列表提示文字 */
+#comfyContent .comfy-lorastack-empty {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    padding: 2px 0 4px;
+    line-height: 1.5;
+}
+
+/* 添加按钮：虚线边框弱化样式，整行宽度 */
+#comfyContent .comfy-lorastack-add {
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px dashed rgba(128, 128, 128, 0.4);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-top: 8px;
+}
+
+#comfyContent .comfy-lorastack-add:hover {
+    border-color: #3b82f6;
+    color: #ffffff;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* ==================== 数量步进器与运行行 ==================== */
+
+/* 运行行：数量步进器 + 运行按钮同排；原按钮的沉底外边距移到行上 */
+#comfyContent .prompt-send-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    margin-top: auto;
+    margin-bottom: 10px;
+}
+
+#comfyContent .prompt-send-row .prompt-send-btn {
+    flex: 1;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* 步进器：数值框 + 右侧上下箭头列（工作流含批次输入时显示），
+   深色凹陷规格与工作流下拉一致 */
+#comfyContent .count-stepper {
+    display: flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+}
+
+#comfyContent .count-stepper[hidden] {
+    display: none;
+}
+
+#comfyContent .count-stepper-input {
+    width: 40px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #ffffff;
+    font-size: 12px;
+    font-family: inherit;
+    text-align: center;
+    padding: 0;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+#comfyContent .count-stepper-input::-webkit-outer-spin-button,
+#comfyContent .count-stepper-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#comfyContent .count-stepper-arrows {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    padding: 0 3px;
+    border-left: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+#comfyContent .count-stepper-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 13px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+#comfyContent .count-stepper-arrow:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+#comfyContent .count-stepper-arrow:active {
+    background: rgba(255, 255, 255, 0.18);
+}

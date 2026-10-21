@@ -628,14 +628,16 @@
 
 /* 模型选择触发器（LumenDropdown 文本模式）：图标 + 当前模型名 + 展开箭头。
    宽度用变量收口——调按钮宽度只改 --llm-model-btn-width 一处；
-   长模型名超出按省略号截断（悬停 title 看全文，由组件写入） */
+   长模型名超出按省略号截断（悬停 title 看全文，由组件写入）。
+   允许收缩（min-width 兜底）：质量按钮等控件按模型条件显隐，空间不足时
+   模型名多截两个字让行，而不是把行尾的停止 X 挤出框（实测修复） */
 .llm-chat-toolbar .llm-model-select.lumen-dd-trigger {
     width: var(--llm-model-btn-width, 150px);
     min-width: 110px;
     max-width: 260px;
     height: 32px;
     padding: 0 8px;
-    flex: 0 0 auto;
+    flex: 0 1 auto;
     background: #1b1c21;                            /* 与质量按钮同面板色 */
     border: 1px solid rgba(128, 128, 128, 0.3);
     border-radius: 8px;
@@ -644,6 +646,38 @@
 
 .llm-chat-toolbar .llm-model-select.lumen-dd-trigger:hover {
     border-color: rgba(128, 128, 128, 0.4);
+}
+
+/* 指定技能触发器（LumenDropdown 文本模式）：agent 每回合优先加载的技能
+   兜底选择。「自动」= 模型按技能描述自行判断；选定技能后描边转蓝以示
+   永驻生效中（.has-skill 由 LlmChat 切换）。
+   宽度收窄到 84px（内边距同收 6px）：「自动」两字 + 图标/箭头刚好放下
+   （内容实测约 79px），长技能名多截几个字换行内空间——质量按钮出现时
+   停止 X 不再出框（实测修复，悬停 title 看全文） */
+.llm-chat-toolbar .llm-skill-select.lumen-dd-trigger {
+    width: var(--llm-skill-btn-width, 84px);
+    min-width: 68px;
+    max-width: 150px;
+    height: 32px;
+    padding: 0 6px;
+    flex: 0 0 auto;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    font-size: 12px;
+}
+
+.llm-chat-toolbar .llm-skill-select.lumen-dd-trigger:hover {
+    border-color: rgba(128, 128, 128, 0.4);
+}
+
+.llm-chat-toolbar .llm-skill-select.has-skill {
+    border-color: rgba(120, 170, 255, 0.55);
+}
+
+/* 指定技能菜单（挂 body，向上弹）：比触发器宽，长技能名不截断 */
+.llm-skill-menu {
+    min-width: 240px;
 }
 
 /* 工具栏小方块按钮（上传图片），内含 16px SVG 线条图标 */
@@ -1071,6 +1105,109 @@
     word-break: break-word;
 }
 
+/* ==================== pi Markdown 渲染样式 ==================== */
+/* 定稿文本块按迷你渲染器输出结构化段落（Trae 式观感）；流式期间仍
+   裸排 + 光标（pre-wrap 继承），定稿后由下方规则接管。
+   注意：容器 white-space:pre-wrap 会让渲染元素间多出空行——
+   .pi-md-* 统一关掉继承，间距全部由 margin 控制 */
+
+.pi-block-text .pi-block-content .pi-md-p,
+.pi-block-text .pi-block-content .pi-md-h,
+.pi-block-text .pi-block-content .pi-md-list,
+.pi-block-text .pi-block-content .pi-md-pre,
+.pi-block-text .pi-block-content .pi-md-table {
+    white-space: normal;
+}
+
+/* 段落：首段贴顶，段间距 0.6em */
+.pi-md-p {
+    margin: 0 0 0.6em;
+}
+
+/* 标题（#### → 四级，粗体 + 级联字号） */
+.pi-md-h {
+    font-weight: 700;
+    margin: 0.8em 0 0.4em;
+}
+.pi-md-h1 { font-size: 17px; }
+.pi-md-h2 { font-size: 16px; }
+.pi-md-h3 { font-size: 14.5px; }
+.pi-md-h4 { font-size: 13.5px; color: rgba(255, 255, 255, 0.92); }
+
+/* 有序/无序列表：项目标号用原生标记（色彩随正文） */
+.pi-md-list {
+    margin: 0 0 0.6em;
+    padding-left: 1.6em;
+}
+.pi-md-list li {
+    margin: 0.2em 0;
+}
+/* 嵌套列表：去上下外距（贴住父条目），缩进由内层 padding-left 提供 */
+.pi-md-list .pi-md-list {
+    margin: 0.2em 0 0.3em;
+}
+
+/* 行内代码：凹陷底色 + 圆角（与工具块内 pre 同族，字号同正文） */
+.pi-md-code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    color: #93c5fd;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+}
+
+/* 代码块：等宽 + 凹陷衬底（同 .pi-block-content 的深色底语义） */
+.pi-md-pre {
+    margin: 0.4em 0 0.8em;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.35);
+    overflow-x: auto;
+}
+.pi-md-pre code {
+    color: #cbd5e1;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre;         /* 代码块内保留换行缩进 */
+}
+
+/* 分隔线：弱化细线 */
+.pi-md-hr {
+    border: none;
+    border-top: 1px solid rgba(128, 128, 128, 0.25);
+    margin: 0.8em 0;
+}
+
+/* 表格（GFM 管道表）：满宽 + 分隔线骨架（《配色美学》浅边框语义，
+   表头轻浮起底色）；单元格里支持粗体/行内代码 */
+.pi-md-table {
+    width: 100%;
+    margin: 0.4em 0 0.8em;
+    border-collapse: collapse;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.pi-md-table th,
+.pi-md-table td {
+    padding: 5px 8px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+}
+.pi-md-table th {
+    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+    font-weight: 600;
+    white-space: nowrap;      /* 表头不折行，列宽由内容撑 */
+}
+.pi-md-table td {
+    color: rgba(255, 255, 255, 0.85);
+}
+
 /* 可折叠块头部（思考/工具共用的按钮行） */
 .pi-block-header {
     display: flex;
@@ -1092,14 +1229,17 @@
 }
 
 /* 思考块头部：去框裸排（保留图标/标题/箭头，左缘与最终回答正文对齐）；
-   悬停以轻量半透明白提示可点。工具块头部仍保留边框（用户指定） */
-.pi-block-thinking .pi-block-header {
+   悬停以轻量半透明白提示可点。工具块头部同款裸排（用户要求去掉工具
+   调用框——两类过程块观感统一，仅以图标/标题颜色区分类型） */
+.pi-block-thinking .pi-block-header,
+.pi-block-tool .pi-block-header {
     padding: 4px 0;
     border: none;
     border-radius: 0;
     background: none;
 }
-.pi-block-thinking .pi-block-header:hover {
+.pi-block-thinking .pi-block-header:hover,
+.pi-block-tool .pi-block-header:hover {
     background: rgba(255, 255, 255, 0.05);
 }
 
@@ -1215,16 +1355,18 @@
     font-size: 12px;
     color: #6b7280;
 }
-/* 分段环：repeating-conic 生成 8 段，steps(8) 逐帧循环播放出转圈动画 */
+/* 转圈 spinner：SVG 圆弧（70% 弧 + 圆头线帽）匀速旋转，浏览器加载同款观感 */
 .pi-running-spinner {
     width: 14px;
     height: 14px;
     flex: none;
-    border-radius: 50%;
-    background: repeating-conic-gradient(#60a5fa 0deg 30deg, transparent 30deg 45deg);
-    -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px);
-    mask: radial-gradient(circle, transparent 4px, #000 4.5px);
-    animation: pi-spin 0.72s steps(8) infinite;
+    color: #60a5fa;
+    animation: pi-spin 0.8s linear infinite;
+}
+.pi-running-spinner svg {
+    display: block;
+    width: 100%;
+    height: 100%;
 }
 @keyframes pi-spin {
     to { transform: rotate(360deg); }

@@ -8,8 +8,11 @@
  *   - GET  /preview  按 sidecar 惯例取封面图（<同名>.preview.png/.jpg，
  *                    兜底 <同名>.png/.jpg），无图返回 404 由前端显示占位块
  *   - GET /POST /pins 置顶状态读写（data/lora-meta.json，文件相对路径做 key）
- * 只读 Comfy 目录 + 写 data/ 元数据，不做重命名/删除（路径写死在工作流
- * JSON 里，改名会静默断链）。
+ *   - POST /delete  删除 lora（源文件 + sidecar 预览 + 置顶/触发词/备注记录）
+ *   - POST /move    移动 lora 到另一文件夹（文件 + sidecar + meta 记录换 key）
+ *   - POST /reveal  资源管理器打开所在文件夹并选中
+ * 只读 Comfy 目录 + 写 data/ 元数据；删除/移动走显式确认（工作流 JSON 里
+ * 路径写死，删/挪都会静默断链，风险由前端弹窗警示）。
  * ==========================================================================
  */
 
@@ -17,6 +20,7 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const { execFile, exec } = require('child_process');
+const civitai = require('../utils/civitai');
 
 /** 识别为 LoRA 的扩展名（与 ComfyUI 支持一致） */
 const LORA_EXTS = new Set(['.safetensors', '.sft', '.pt', '.ckpt', '.bin']);
@@ -37,10 +41,13 @@ const SETTINGS_FILE = path.join(__dirname, '..', 'data', 'settings.json');
  * @param {Function} [options.invalidateRootCache] - 写回 comfy.root 后调用，
  *        清掉 server.js 的 5 秒配置缓存，让随后的 /list 立即读到新值
  * @param {string} [options.comfyApiUrl] - ComfyUI API 地址（判断是否在运行）
+ * @param {string} [options.metaFile] - 元数据文件路径（测试注入用，缺省
+ *        data/lora-meta.json）
  * @returns {express.Router}
  */
-function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl }) {
+function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, metaFile } = {}) {
     const router = express.Router();
+    const metaPath = metaFile || META_FILE;
 
     function fail(res, error, status = 500) {
         console.error('[lora]', error.message || error);
@@ -57,24 +64,29 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl }) {
     /** 读元数据（置顶 + 触发词 + 备注；文件缺失/损坏按空处理） */
     async function readMeta() {
         try {
-            const j = JSON.parse(await fs.readFile(META_FILE, 'utf-8'));
+            const j = JSON.parse(await fs.readFile(metaPath, 'utf-8'));
             return {
                 pinned: Array.isArray(j.pinned) ? j.pinned : [],
                 triggers: (j.triggers && typeof j.triggers === 'object')
                     ? j.triggers : {},
                 notes: (j.notes && typeof j.notes === 'object')
-                    ? j.notes : {}
+                    ? j.notes : {},
+                // Civitai 拉取记录（key = lora 相对路径）：
+                // { modelName, versionName, baseModel, creator, pageUrl,
+                //   sha256, coverFetched, fetchedAt }
+                civitai: (j.civitai && typeof j.civitai === 'object')
+                    ? j.civitai : {}
             };
         } catch {
-            return { pinned: [], triggers: {}, notes: {} };
+            return { pinned: [], triggers: {}, notes: {}, civitai: {} };
         }
     }
 
     /** 原子写元数据（两个调用方各持整份结构，覆盖前先读避免互相清字段） */
     async function writeMeta(meta) {
-        const tmp = META_FILE + '.tmp';
+        const tmp = metaPath + '.tmp';
         await fs.writeFile(tmp, JSON.stringify(meta, null, 2), 'utf-8');
-        await fs.rename(tmp, META_FILE);
+        await fs.rename(tmp, metaPath);
     }
 
     // ==================== 自动检测 ComfyUI 目录 ====================
@@ -171,6 +183,47 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl }) {
     });
 
     // ==================== GET /list：扫描 loras 目录 ====================
+
+    /**
+     * 递归扫描 lorasDir，返回 { folders, loras }（/list 与 Civitai 批量
+     * 获取共用；loras 元素含 path/name/ext/folder/sizeBytes/mtime）
+     */
+    async function scanLoras(lorasDir) {
+        const folders = new Set();
+        const loras = [];
+        // 手动递归（兼容旧 Node，readdir recursive 参数版本差异大）
+        const walk = async (dir) => {
+            let entries;
+            try {
+                entries = await fs.readdir(dir, { withFileTypes: true });
+            } catch { return; }
+            for (const e of entries) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory()) {
+                    await walk(full);
+                } else if (e.isFile() && LORA_EXTS.has(path.extname(e.name).toLowerCase())) {
+                    const rel = path.relative(lorasDir, full).split(path.sep).join('/');
+                    const relDir = path.dirname(rel);
+                    const folder = relDir === '.' ? '' : relDir;
+                    if (folder) folders.add(folder);
+                    let s = null;
+                    try { s = await fs.stat(full); } catch { /* 文件竞态：跳过尺寸 */ }
+                    loras.push({
+                        path: rel,                       // 唯一 id，Comfy lora_name 同源
+                        name: path.basename(e.name, path.extname(e.name)),
+                        ext: path.extname(e.name).toLowerCase(),
+                        folder,                          // '' = 根目录
+                        sizeBytes: s ? s.size : 0,
+                        mtime: s ? s.mtimeMs : 0
+                    });
+                }
+            }
+        };
+        await walk(lorasDir);
+        loras.sort((a, b) => a.path.localeCompare(b.path));
+        return { folders: [...folders].sort(), loras };
+    }
+
     router.get('/list', async (req, res) => {
         try {
             const root = getComfyRoot();
@@ -188,42 +241,11 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl }) {
                 return res.status(400).json({ status: 'error', message: `不是目录：${lorasDir}` });
             }
 
-            const folders = new Set();
-            const loras = [];
-            // 手动递归（兼容旧 Node，readdir recursive 参数版本差异大）
-            const walk = async (dir) => {
-                let entries;
-                try {
-                    entries = await fs.readdir(dir, { withFileTypes: true });
-                } catch { return; }
-                for (const e of entries) {
-                    const full = path.join(dir, e.name);
-                    if (e.isDirectory()) {
-                        await walk(full);
-                    } else if (e.isFile() && LORA_EXTS.has(path.extname(e.name).toLowerCase())) {
-                        const rel = path.relative(lorasDir, full).split(path.sep).join('/');
-                        const relDir = path.dirname(rel);
-                        const folder = relDir === '.' ? '' : relDir;
-                        if (folder) folders.add(folder);
-                        let s = null;
-                        try { s = await fs.stat(full); } catch { /* 文件竞态：跳过尺寸 */ }
-                        loras.push({
-                            path: rel,                       // 唯一 id，Comfy lora_name 同源
-                            name: path.basename(e.name, path.extname(e.name)),
-                            ext: path.extname(e.name).toLowerCase(),
-                            folder,                          // '' = 根目录
-                            sizeBytes: s ? s.size : 0,
-                            mtime: s ? s.mtimeMs : 0
-                        });
-                    }
-                }
-            };
-            await walk(lorasDir);
-            loras.sort((a, b) => a.path.localeCompare(b.path));
+            const { folders, loras } = await scanLoras(lorasDir);
             res.json({
                 status: 'ok',
                 lorasDir,
-                folders: [...folders].sort(),
+                folders,
                 loras
             });
         } catch (err) {
@@ -351,6 +373,102 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl }) {
         }
     });
 
+    // ==================== POST /move：移动 lora 到另一文件夹 ====================
+    // { paths: [rel...], target: ''（根目录）| '子/目录' }。
+    // 移动 lora 文件 + 全部 sidecar 预览候选 + lora-meta 记录换 key
+    // （置顶/触发词/备注/Civitai 记录跟着文件走）。目标已有同名文件时
+    // 该只跳过不覆盖；移动后工作流 JSON 里写死的旧路径会断链，由前端
+    // 确认弹窗警示（与 /delete 同款风险口径）
+    router.post('/move', async (req, res) => {
+        try {
+            const root = getComfyRoot();
+            if (!root) return res.status(400).json({ status: 'error', message: '尚未配置 ComfyUI 根目录' });
+            const { paths, target } = req.body || {};
+            if (!Array.isArray(paths) || !paths.length) {
+                return res.status(400).json({ status: 'error', message: '缺少 paths' });
+            }
+            if (paths.length > 500) {
+                return res.status(400).json({ status: 'error', message: '单次最多移动 500 个文件' });
+            }
+            // 目标目录校验：空串 = 根目录；否则反斜杠统一成斜杠、去首尾，
+            // 逐段拒绝空段/点段/Windows 非法字符
+            const targetFolder = typeof target === 'string'
+                ? target.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+                : '';
+            if (targetFolder) {
+                const bad = targetFolder.split('/').some((seg) =>
+                    !seg || seg === '.' || seg === '..' || /[\\:*?"<>|]/.test(seg));
+                if (bad) return res.status(400).json({ status: 'error', message: '目标目录名不合法' });
+            }
+            const lorasDir = path.join(root, 'models', 'loras');
+            const destDir = safeResolve(lorasDir, targetFolder || '.');
+            if (!destDir) return res.status(403).json({ status: 'error', message: '目标目录越界' });
+
+            const moved = [];
+            const skipped = [];
+            const failed = [];
+            for (const rel of paths) {
+                if (typeof rel !== 'string' || !rel) continue;
+                const src = safeResolve(lorasDir, rel);
+                if (!src) { failed.push({ path: rel, reason: '路径越界' }); continue; }
+                if (!LORA_EXTS.has(path.extname(src).toLowerCase())) {
+                    failed.push({ path: rel, reason: '不是 lora 文件' });
+                    continue;
+                }
+                const dest = path.join(destDir, path.basename(src));
+                if (path.resolve(dest) === path.resolve(src)) {
+                    skipped.push({ path: rel, reason: '已在目标文件夹' });
+                    continue;
+                }
+                try {
+                    await fs.access(dest);
+                    skipped.push({ path: rel, reason: '目标已有同名文件' });
+                    continue;
+                } catch { /* 目标不存在，可移动 */ }
+                try {
+                    await fs.mkdir(destDir, { recursive: true });
+                    await fs.rename(src, dest);
+                    // sidecar 预览候选一并搬走（/preview 同名约定），不留孤儿图
+                    const srcBase = path.basename(src, path.extname(src));
+                    const destBase = path.basename(dest, path.extname(dest));
+                    let movedPreviews = 0;
+                    for (const suffix of PREVIEW_CANDIDATES) {
+                        try {
+                            await fs.rename(path.join(path.dirname(src), srcBase + suffix), path.join(destDir, destBase + suffix));
+                            movedPreviews++;
+                        } catch { /* 候选不存在属正常 */ }
+                    }
+                    // meta 记录换 key（置顶/触发词/备注/Civitai 记录跟着文件走）
+                    const newRel = targetFolder ? `${targetFolder}/${path.basename(src)}` : path.basename(src);
+                    if (newRel !== rel) {
+                        const meta = await readMeta();
+                        let dirty = false;
+                        if (meta.pinned.includes(rel)) {
+                            meta.pinned = meta.pinned.filter((p) => p !== rel);
+                            if (!meta.pinned.includes(newRel)) meta.pinned.push(newRel);
+                            dirty = true;
+                        }
+                        for (const key of ['triggers', 'notes', 'civitai']) {
+                            if (meta[key] && meta[key][rel] !== undefined) {
+                                meta[key][newRel] = meta[key][rel];
+                                delete meta[key][rel];
+                                dirty = true;
+                            }
+                        }
+                        if (dirty) await writeMeta(meta);
+                    }
+                    moved.push({ from: rel, to: newRel, movedPreviews });
+                    console.log('[lora] 已移动:', rel, '->', newRel);
+                } catch (err) {
+                    failed.push({ path: rel, reason: err.message });
+                }
+            }
+            res.json({ status: 'ok', moved: moved.length, skipped, failed });
+        } catch (err) {
+            fail(res, err);
+        }
+    });
+
     // ==================== POST /reveal：在资源管理器中打开所在文件夹 ====================
     // explorer /select,"路径"——打开 lora 所在文件夹并选中该文件
     router.post('/reveal', async (req, res) => {
@@ -389,7 +507,9 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl }) {
                 status: 'ok',
                 pinned: meta.pinned,
                 triggers: meta.triggers,
-                notes: meta.notes
+                notes: meta.notes,
+                // Civitai 拉取记录（含 pageUrl，供信息窗「打开 C 站页面」按钮）
+                civitai: meta.civitai
             });
         } catch (err) {
             fail(res, err);
@@ -437,6 +557,330 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl }) {
             }
         });
     }
+
+    // ==================== Civitai 一键获取（封面 + 触发词） ====================
+    // 参考 ComfyUI-Lora-Manager 插件：以文件 SHA256 为身份查
+    // civitai.red /model-versions/by-hash 拿版本数据。触发词写
+    // meta.triggers，封面写 sidecar <同名>.preview.<ext>（现有 /preview
+    // 读取链零改动），模型名/底模/作者/Civitai 链接等记 meta.civitai。
+
+    /** lora 是否已有 sidecar 封面（判断「自定义封面」用） */
+    async function sidecarCoverExists(loraPath) {
+        const dir = path.dirname(loraPath);
+        const base = path.basename(loraPath, path.extname(loraPath));
+        for (const suffix of PREVIEW_CANDIDATES) {
+            try {
+                await fs.access(path.join(dir, base + suffix));
+                return true;
+            } catch { /* 试下一个候选 */ }
+        }
+        return false;
+    }
+
+    /** 触发词合并：中英文逗号统一拆分 + 去重，保持已有词在前 */
+    function mergeTriggerText(cur, next) {
+        const split = (s) => String(s || '').split(/[,，]+/).map((x) => x.trim()).filter(Boolean);
+        return [...new Set([...split(cur), ...split(next)])].join(', ');
+    }
+
+    /**
+     * 对单个 lora 执行 Civitai 获取（算哈希→by-hash→写触发词/封面/记录）
+     * @param {string} relPath - lora 相对路径
+     * @param {Object} opts - { onConflict: 'overwrite'|'merge'|'skip',
+     *                          skipCustomCover: boolean, updateCover: boolean }
+     * @returns {Promise<Object>} { status: 'ok'|'not-found'|'error', ... }
+     */
+    async function fetchCivitaiForLora(relPath, opts = {}) {
+        const onConflict = opts.onConflict || 'merge';
+        const skipCustomCover = opts.skipCustomCover !== false;
+
+        const root = getComfyRoot();
+        if (!root) return { status: 'error', error: '尚未配置 ComfyUI 根目录' };
+        const lorasDir = path.join(root, 'models', 'loras');
+        const abs = safeResolve(lorasDir, relPath);
+        if (!abs) return { status: 'error', error: '路径越界' };
+        let stat;
+        try {
+            stat = await fs.stat(abs);
+        } catch {
+            return { status: 'error', error: '文件不存在' };
+        }
+
+        // 1) SHA256（带缓存，size/mtime 变了才重算）
+        let sha;
+        try {
+            sha = await civitai.getSha256(lorasDir, relPath, stat);
+        } catch (err) {
+            return { status: 'error', error: `计算哈希失败：${err.message}` };
+        }
+
+        // 2) by-hash 查询（代理 + 鉴权）
+        const { apiKey } = await civitai.getCivitaiSettings();
+        const proxyUrl = await civitai.resolveProxy();
+        const dispatcher = civitai.getDispatcher(proxyUrl);
+        let version;
+        try {
+            version = await civitai.fetchVersionByHash(sha, { apiKey, dispatcher });
+        } catch (err) {
+            if (err.code === 'NOT_FOUND') return { status: 'not-found', sha256: sha };
+            return { status: 'error', error: `Civitai 查询失败：${err.message}` };
+        }
+        if (!version || typeof version !== 'object') {
+            return { status: 'error', error: 'Civitai 返回数据格式异常' };
+        }
+
+        // 3) 触发词（trainedWords 数组 join；冲突按策略处理）
+        const meta = await readMeta();
+        const prev = (meta.civitai && meta.civitai[relPath]) || {};
+        const words = (Array.isArray(version.trainedWords) ? version.trainedWords : [])
+            .filter((w) => typeof w === 'string' && w.trim())
+            .map((w) => w.trim());
+        const fetchedTriggers = words.join(', ');
+        let triggersUpdated = false;
+        if (fetchedTriggers) {
+            const cur = (meta.triggers[relPath] || '').trim();
+            if (!cur) {
+                meta.triggers[relPath] = fetchedTriggers;
+                triggersUpdated = true;
+            } else if (onConflict === 'overwrite') {
+                meta.triggers[relPath] = fetchedTriggers;
+                triggersUpdated = true;
+            } else if (onConflict === 'merge') {
+                const merged = mergeTriggerText(cur, fetchedTriggers);
+                if (merged !== cur) {
+                    meta.triggers[relPath] = merged;
+                    triggersUpdated = true;
+                }
+            }
+            // 'skip'：已有手填触发词则不动
+        }
+
+        // 4) 封面（自定义封面跳过判据：sidecar 存在且非上次拉取所得）
+        const imgUrl = civitai.pickCoverImage(version);
+        let coverUpdated = false;
+        let coverSkipped = false;
+        let coverError = null;
+        if (imgUrl) {
+            if (skipCustomCover && !prev.coverFetched && await sidecarCoverExists(abs)) {
+                coverSkipped = true;
+            } else {
+                try {
+                    const ext = civitai.pickCoverExt(imgUrl);
+                    const sidecar = path.join(
+                        path.dirname(abs),
+                        path.basename(abs, path.extname(abs)) + '.preview.' + ext
+                    );
+                    await civitai.downloadPreview(imgUrl, sidecar, { dispatcher });
+                    coverUpdated = true;
+                } catch (err) {
+                    coverError = err.message;
+                }
+            }
+        }
+
+        // 4.5) 模型页正文（/models/{id} 的模型描述，HTML 格式——与版本描述
+        //      不同，这是 C 站模型页展示的正文。每个 LoRA 多一次 API 调用；
+        //      失败置空不阻塞，重新「从 Civitai 获取」可补齐）
+        let modelDesc = '';
+        if (version.modelId) {
+            modelDesc = await civitai.fetchModelDescription(version.modelId, { apiKey, dispatcher });
+        }
+
+        // 5) 记录拉取结果（元信息备查 + coverFetched 标记供下次判自定义封面）
+        meta.civitai[relPath] = {
+            modelName: (version.model && version.model.name) || '',
+            versionName: version.name || '',
+            baseModel: version.baseModel || '',
+            creator: (version.creator && version.creator.username) || '',
+            pageUrl: version.modelId
+                ? `https://civitai.red/models/${version.modelId}?modelVersionId=${version.id}`
+                : '',
+            description: modelDesc,
+            sha256: sha,
+            coverFetched: !!(prev.coverFetched || coverUpdated),
+            fetchedAt: new Date().toISOString()
+        };
+        await writeMeta(meta);
+
+        return {
+            status: 'ok',
+            sha256: sha,
+            triggersUpdated,
+            triggers: meta.triggers[relPath] || '',
+            coverUpdated,
+            coverSkipped,
+            coverError,
+            info: meta.civitai[relPath]
+        };
+    }
+
+    // 批量任务状态机（单实例后端，模块级即可；前端 1s 轮询 /civitai/progress）
+    let batchState = {
+        running: false, cancel: false, phase: '',   // phase: scan|work|done
+        total: 0, done: 0, found: 0, notFound: 0, failed: 0, skipped: 0,
+        current: '', lastError: ''
+    };
+
+    /** 批量获取主循环（不 await，由 fetch-all 路由即发即忘启动） */
+    async function runFetchAll(options) {
+        try {
+            batchState = {
+                running: true, cancel: false, phase: 'scan',
+                total: 0, done: 0, found: 0, notFound: 0, failed: 0, skipped: 0,
+                current: '', lastError: ''
+            };
+            const root = getComfyRoot();
+            const lorasDir = path.join(root, 'models', 'loras');
+            const { loras } = await scanLoras(lorasDir);
+            batchState.total = loras.length;
+            batchState.phase = 'work';
+
+            for (const lora of loras) {
+                if (batchState.cancel) break;
+                batchState.current = lora.name;
+                // 跳过已获取过的（meta.civitai 有 fetchedAt 记录）
+                if (options.skipFetched) {
+                    const meta = await readMeta();
+                    if (meta.civitai[lora.path] && meta.civitai[lora.path].fetchedAt) {
+                        batchState.skipped++;
+                        batchState.done++;
+                        continue;
+                    }
+                }
+                try {
+                    const r = await fetchCivitaiForLora(lora.path, options);
+                    if (r.status === 'ok') batchState.found++;
+                    else if (r.status === 'not-found') batchState.notFound++;
+                    else {
+                        batchState.failed++;
+                        batchState.lastError = `${lora.name}: ${r.error || '未知错误'}`;
+                    }
+                } catch (err) {
+                    batchState.failed++;
+                    batchState.lastError = `${lora.name}: ${err.message}`;
+                }
+                batchState.done++;
+                // 请求间隔防限速（ Civitai 无 key 时限额很严）
+                await civitai.sleep(1200);
+            }
+        } catch (err) {
+            batchState.lastError = err.message || String(err);
+        } finally {
+            try { await civitai.saveHashCache(); } catch { /* 落盘失败不影响结果 */ }
+            batchState.running = false;
+            batchState.phase = 'done';
+            batchState.current = '';
+        }
+    }
+
+    // GET /civitai/hash：取单个 lora 的本地 SHA256（带缓存，按需计算）
+    // + C 站记录哈希（meta.civitai 有拉取记录时），match 供前端做比对标记
+    router.get('/civitai/hash', async (req, res) => {
+        try {
+            const rel = String(req.query.path || '');
+            const root = getComfyRoot();
+            if (!root || !rel) {
+                return res.status(400).json({ status: 'error', message: '缺少 path 或未配置 ComfyUI 根目录' });
+            }
+            const lorasDir = path.join(root, 'models', 'loras');
+            const abs = safeResolve(lorasDir, rel);
+            if (!abs) return res.status(403).json({ status: 'error', message: '路径越界' });
+            let stat;
+            try {
+                stat = await fs.stat(abs);
+            } catch {
+                return res.status(404).json({ status: 'error', message: '文件不存在' });
+            }
+            const sha = await civitai.getSha256(lorasDir, rel, stat);
+            const meta = await readMeta();
+            const recorded = ((meta.civitai[rel] && meta.civitai[rel].sha256) || '').toLowerCase();
+            res.json({
+                status: 'ok',
+                sha256: sha,
+                civitaiSha256: recorded,
+                match: recorded ? recorded === sha.toLowerCase() : null
+            });
+        } catch (err) {
+            fail(res, err);
+        }
+    });
+
+    // POST /civitai/fetch：单只获取 { path, onConflict, skipCustomCover }
+    router.post('/civitai/fetch', async (req, res) => {
+        try {
+            if (batchState.running) {
+                return res.status(409).json({ status: 'error', message: '批量获取进行中，请稍后再试' });
+            }
+            const { path: rel, onConflict, skipCustomCover } = req.body || {};
+            if (typeof rel !== 'string' || !rel) {
+                return res.status(400).json({ status: 'error', message: '缺少 path' });
+            }
+            const result = await fetchCivitaiForLora(rel, { onConflict, skipCustomCover });
+            res.json({ status: result.status === 'error' ? 'error' : 'ok', ...result });
+        } catch (err) {
+            fail(res, err);
+        }
+    });
+
+    // POST /civitai/fetch-all：启动批量获取（即发即忘，进度走 /civitai/progress）
+    router.post('/civitai/fetch-all', async (req, res) => {
+        try {
+            if (batchState.running) {
+                return res.status(409).json({ status: 'error', message: '批量获取已在进行中' });
+            }
+            const body = req.body || {};
+            const options = {
+                onConflict: ['overwrite', 'merge', 'skip'].includes(body.onConflict) ? body.onConflict : 'merge',
+                skipCustomCover: body.skipCustomCover !== false,
+                skipFetched: body.skipFetched !== false
+            };
+            const root = getComfyRoot();
+            if (!root) {
+                return res.status(400).json({ status: 'error', message: '尚未配置 ComfyUI 根目录' });
+            }
+            runFetchAll(options);   // 不 await：立即返回，后台慢慢跑
+            res.json({ status: 'ok' });
+        } catch (err) {
+            fail(res, err);
+        }
+    });
+
+    // GET /civitai/progress：批量进度快照（前端轮询）
+    router.get('/civitai/progress', async (req, res) => {
+        res.json({ status: 'ok', ...batchState });
+    });
+
+    // POST /civitai/open-page：用系统默认浏览器打开 Civitai 模型页。
+    // 不用前端 window.open——应用若跑在 IDE 内置浏览器等独立 profile 里，
+    // 没有用户日常浏览器的登录 Cookie；走系统默认浏览器才能带上登录态。
+    // 统一在 civitai.red 域打开（用户登录/可访问的镜像站）；旧记录里存的
+    // civitai.com 链接在此重写，仅放行这两个域，防任意 URL 注入
+    router.post('/civitai/open-page', async (req, res) => {
+        try {
+            let { url } = req.body || {};
+            if (typeof url !== 'string' || !/^https:\/\/civitai\.(com|red)\//.test(url)) {
+                return res.status(400).json({ status: 'error', message: '仅支持 civitai 页面链接' });
+            }
+            url = url.replace(/^https:\/\/civitai\.com\//, 'https://civitai.red/');
+            if (process.platform === 'win32') {
+                // cmd start 的引号形式：空标题占位 + 带引号 URL（& 等字符安全）
+                exec(`start "" "${url}"`, () => {});
+            } else if (process.platform === 'darwin') {
+                execFile('open', [url], () => {});
+            } else {
+                execFile('xdg-open', [url], () => {});
+            }
+            res.json({ status: 'ok' });
+        } catch (err) {
+            fail(res, err);
+        }
+    });
+
+    // POST /civitai/cancel：请求停止批量任务（当前项完成后停）
+    router.post('/civitai/cancel', async (req, res) => {
+        if (batchState.running) batchState.cancel = true;
+        res.json({ status: 'ok', cancelRequested: batchState.running });
+    });
 
     return router;
 }

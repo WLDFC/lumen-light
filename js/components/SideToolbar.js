@@ -81,7 +81,7 @@ class SideToolbar {
         if (!this.fileInput) {
             this.fileInput = document.createElement('input');
             this.fileInput.type = 'file';
-            this.fileInput.accept = 'image/*,video/*'; // 图片与视频均可
+            this.fileInput.accept = 'image/*,video/*,audio/*,.mp3,.wav,.ogg,.m4a,.flac,.aac'; // 图片/视频/音频均可
             this.fileInput.multiple = true; // 支持一次选择多个文件
             this.fileInput.style.display = 'none';
 
@@ -107,7 +107,10 @@ class SideToolbar {
         const all = Array.from(files);
         const images = all.filter(f => f.type.startsWith('image/'));
         const videos = all.filter(f => CanvasVideoManager.isVideoFile(f));
-        if (images.length === 0 && videos.length === 0) return;
+        // 音频统一走 AudioIngest（与聊天上传按钮同一出口：上传 data/audio/
+        // 后落音频卡片，批量自动级联错开并统一提示）
+        const audios = all.filter(f => window.AudioIngest?.isAudioFile(f));
+        if (images.length === 0 && videos.length === 0 && audios.length === 0) return;
 
         // 计算画布中心（视口坐标）
         const canvasRect = c.canvas.getBoundingClientRect();
@@ -139,6 +142,8 @@ class SideToolbar {
                 console.error(`❌ 上传视频失败:`, err);
             }
         }
+        // 音频文件：统一出口（AudioIngest）上传落卡，自带级联与提示
+        await window.AudioIngest?.ingestFiles(audios);
 
         // 触发画布重绘，显示新内容
         c.draw();

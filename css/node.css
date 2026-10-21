@@ -16,10 +16,11 @@
     --input-font: 16px;            /* 输入框字号（设计基准）：textarea 与镜像层共用，
                                       两处必须同值，改这里即可，禁止分开写死 */
     position: fixed;               /* 绝对定位，位置由 updateTransform 按视口换算 */
-    /* z-index 997：与图片名称/尺寸标签同层，浮在画布之上；
-       低于顶栏(998)、右侧面板(999)与所有弹窗(>=1200)，
-       确保拖动节点经过顶部工具栏时被顶栏自然遮住，不遮挡界面框架 */
-    z-index: 997;
+    /* z-index 995：高于画布（auto=0），低于名称标签(996)、图片工具栏(997)、
+       顶栏(998)与右侧面板(999)——拖动节点经过图片工具栏/顶栏时被自然
+       遮住，不遮挡界面框架（曾与工具栏同为 997，节点 DOM 靠后把工具栏
+       盖住，故让出 996/997 两级给节点注记与工具栏） */
+    z-index: 995;
     display: flex;
     flex-direction: column;
     background: var(--icon-bg);    /* #1b1c21 面板色 */
@@ -54,6 +55,46 @@
     background: rgba(255, 255, 255, 0.03);   /* 卡片内层底色，比面板略亮 */
     border-bottom: 1px solid rgba(128, 128, 128, 0.2);
     flex-shrink: 0;                          /* 缩放节点时不被压缩 */
+}
+
+/* 标题栏下方的「触发词」按钮行（LoRA 节点专属）：条目区左上角独立
+   一行，lora 条目框随之整体下移让位 */
+.lora-triggers-row {
+    display: flex;
+    margin-bottom: calc(8px * var(--ns));
+}
+
+.lora-triggers-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(5px * var(--ns));
+    padding: calc(5px * var(--ns)) calc(12px * var(--ns));
+    border-radius: calc(6px * var(--ns));
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);        /* 次要文字档（配色美学文字层级） */
+    font-size: calc(14px * var(--ns));
+    font-family: inherit;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+/* 触发词图标：Feather 风格线稿（tag 标签语义），尺寸随 --ns 缩放 */
+.lora-triggers-btn svg {
+    width: calc(14px * var(--ns));
+    height: calc(14px * var(--ns));
+    flex-shrink: 0;
+}
+
+.lora-triggers-btn:hover {
+    border-color: rgba(128, 128, 128, 0.4);
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);    /* 悬停=半透明白叠加，不换底色（配色美学交互层） */
+}
+
+.lora-triggers-btn:active {
+    background: rgba(255, 255, 255, 0.18);
 }
 
 .text-node-title {
@@ -862,11 +903,22 @@
 /* 可堆叠 LoRA 组合节点：复用 text-node/image-gen-node 全套基础样式，
    仅补充条目列表专属样式。节点使用 world 布局（同提示词节点） */
 
-/* 条目列表区：纵向滚动（条目可能堆很多，节点高度不够时内部滚动） */
+/* 表单区收口（仅 LoRA 节点）：占满标题栏/状态栏之外的剩余高度并允许
+   收缩，条目列表才能成为内部滚动区——条目堆多时不再溢出节点边界。
+   Comfy 生图节点不套用：其动态参数行保持自然高度，select 弹层依赖
+   表单 overflow: visible 不被裁切 */
+.lora-node .image-gen-form {
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+/* 条目列表区：占满表单剩余高度、纵向滚动（条目可能堆很多，
+   节点高度不够时内部滚动；LoraFileSelect 菜单挂 body 不受裁切影响） */
 .lora-node .lora-entries {
     display: flex;
     flex-direction: column;
     gap: calc(8px * var(--ns));
+    flex: 1 1 auto;
     overflow-y: auto;
     min-height: 0;
 }
@@ -900,6 +952,13 @@
 .lora-entry-head .lora-file-select {
     flex: 1 1 0;
     min-width: 0;
+}
+
+/* 条目未启用（启用勾选框取消）：文件下拉与强度输入一并置灰
+   （与面板叠加区 is-off 同语义同款视觉；勾选框本身仍可点回） */
+.lora-entry.is-off .lfs-host,
+.lora-entry.is-off .comfy-num-input {
+    opacity: 0.4;
 }
 
 /* 删除按钮：小号危险色 */
@@ -1008,25 +1067,28 @@
     opacity: 0.5;
 }
 
-/* 启用勾选框：主题蓝勾选色，文字为辅助说明字号 */
-.comfy-lora-enable {
+/* 启用勾选框：自绘方格（与面板 LoRA 行/叠加区同款），尺寸随节点缩放体系 */
+.comfy-lora-enable-input {
     flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: calc(4px * var(--ns));
-    font-size: calc(12px * var(--ns));
-    color: rgba(255, 255, 255, 0.7);
+    appearance: none;
+    -webkit-appearance: none;
+    width: calc(32px * var(--ns));
+    height: calc(32px * var(--ns));
+    margin: 0;
+    border-radius: calc(6px * var(--ns));
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(0, 0, 0, 0.2);
     cursor: pointer;
-    user-select: none;
-    white-space: nowrap;
+    transition: all 0.15s ease;
 }
 
-.comfy-lora-enable input[type='checkbox'] {
-    width: calc(13px * var(--ns));
-    height: calc(13px * var(--ns));
-    margin: 0;
-    accent-color: #3b82f6;
-    cursor: pointer;
+.comfy-lora-enable-input:checked {
+    border-color: rgba(59, 130, 246, 0.6);
+    background-color: rgba(59, 130, 246, 0.15);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+    background-size: 60%;
+    background-position: center;
+    background-repeat: no-repeat;
 }
 
 /* ==================== 画布右键菜单 ==================== */

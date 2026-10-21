@@ -8,6 +8,9 @@
  *            （主模型/步数/CFG/采样器/降噪/尺寸/数量/内嵌 LoRA）。
  *         2. buildOverrides(detected, state)：把参数状态编译成
  *            /api/comfy-node/run 要求的覆盖表 { [节点id]: { [输入键]: 值 } }。
+ *         3. scanLoadImageInputs(workflow)：图片输入侧特征扫描（免节点
+ *            LoadImage 直注的落点清单与槽位链路判定），画布节点组
+ *            imageMapping、面板判定 LoadImage 槽位共用。
  *       纯函数、不碰 DOM、不依赖节点实例，可独立测试与复用。
  *
  * 判定规则（与拆出前 ComfyGenNode.detectParams 完全一致）：
@@ -67,12 +70,17 @@ function scan(workflow) {
                 field: loaderDef.field,
                 current: inputs[loaderDef.field]
             };
-            // LoRA 加载节点：模板内嵌 lora 的启用开关可注入性取决于
-            // 强度是否字面数值（开关注入强度 0 软关闭，勾选不碰强度走原值）
+            // LoRA 加载节点：记录字面强度值（叠加区内嵌条目的强度初值）与
+            // 可注入的字面强度字段（启用开关注入强度 0 软关闭，勾选不碰强度）
             if (loaderDef.kind === 'lora') {
+                loader.strengths = {};
                 loader.strengthFields =
                     ['strength_model', 'strength_clip']
-                        .filter((k) => typeof inputs[k] === 'number');
+                        .filter((k) => {
+                            if (typeof inputs[k] !== 'number') return false;
+                            loader.strengths[k] = inputs[k];
+                            return true;
+                        });
             }
             loaders.push(loader);
         }
@@ -111,6 +119,32 @@ function scan(workflow) {
 }
 
 /**
+ * 扫描工作流的图片输入侧特征（免节点 LoadImage 直注通道的仲裁依据，
+ * 与后端 utils/comfyNodelessFlow.scanCanvasFlow 同口径——前端扫模板、
+ * 后端扫 bypass 后的存活图，被编辑器 bypass 掉的 LoadImage 由后端
+ * 校验时跳过并如实上报）。
+ * 语义：工作流里画布取图节点（LumenReceiveImageFromCanvas）优先——
+ * 有它走槽位链路，LoadImage 不再升格为直注目标（一个工作流一条
+ * 输入通道）；没有时原生 LoadImage 按节点 id 升序成为注入落点
+ * @param {Object|null} workflow - ComfyUI API 格式工作流对象
+ * @returns {{hasReceiveNode: boolean, loadImageIds: string[]}}
+ *   loadImageIds 按数值 id 升序（「从左往右第 N 个」的排序口径，
+ *   与面板槽位顺序一致）
+ */
+function scanLoadImageInputs(workflow) {
+    const loadImageIds = [];
+    let hasReceiveNode = false;
+    if (!workflow || typeof workflow !== 'object') return { hasReceiveNode, loadImageIds };
+    for (const nodeId in workflow) {
+        const cls = workflow[nodeId].class_type || workflow[nodeId].type || '';
+        if (cls === 'LumenReceiveImageFromCanvas') hasReceiveNode = true;
+        if (cls === 'LoadImage') loadImageIds.push(nodeId);
+    }
+    loadImageIds.sort((a, b) => Number(a) - Number(b));
+    return { hasReceiveNode, loadImageIds };
+}
+
+/**
  * 由探测结果与参数状态构建参数覆盖表
  * 后端只覆盖节点 inputs 中已存在的键，这里无需再校验
  * @param {Object|null} detected - scan() 结果
@@ -128,14 +162,33 @@ function buildOverrides(detected, state) {
     };
 
     for (const loader of loaders) {
+        // 已删除的内嵌 lora：提交时走 bypass 剔除节点（bypassLoras 参数），
+        // 不再注入任何覆盖（节点已不在图里，注入只会刷警告）
+        if (loader.kind === 'lora' && state.loraDeleted && state.loraDeleted[loader.nodeId]) {
+            continue;
+        }
         const value = state.models[loader.nodeId];
         if (value) patch(loader.nodeId, loader.field, value);
-        // LoRA 开关：未启用时把强度注入 0（软关闭，保留连线与文件选择）；
-        // 启用时不碰 strength——工作流里的原强度值直接生效。
+        // 用户在叠加区改过的内嵌 lora 强度（仅字面字段可注入）
+        const userStrengths = loader.kind === 'lora' &&
+            state.loraStrengths && state.loraStrengths[loader.nodeId];
+        if (userStrengths) {
+            if (typeof userStrengths.strengthModel === 'number' &&
+                loader.strengthFields.includes('strength_model')) {
+                patch(loader.nodeId, 'strength_model', userStrengths.strengthModel);
+            }
+            if (typeof userStrengths.strengthClip === 'number' &&
+                loader.strengthFields.includes('strength_clip')) {
+                patch(loader.nodeId, 'strength_clip', userStrengths.strengthClip);
+            }
+        }
+        // LoRA 开关：仅显式取消勾选（loraEnabled 记为 false）时把强度注入 0
+        // （软关闭，保留连线与文件选择）；缺省/勾选时不碰 strength——
+        // 工作流里的原强度值直接生效。
         // 提交按次注入，不改磁盘上的工作流模板
         if (loader.kind === 'lora' && loader.strengthFields &&
             loader.strengthFields.length > 0 &&
-            state.loraEnabled[loader.nodeId] !== true) {
+            state.loraEnabled[loader.nodeId] === false) {
             for (const k of loader.strengthFields) {
                 patch(loader.nodeId, k, 0);
             }
@@ -166,4 +219,4 @@ function buildOverrides(detected, state) {
 }
 
 // 暴露到全局作用域（浏览器端经典脚本，画布与面板共用）
-window.ComfyParamScanner = { LOADER_TYPES, scan, buildOverrides };
+window.ComfyParamScanner = { LOADER_TYPES, scan, buildOverrides, scanLoadImageInputs };

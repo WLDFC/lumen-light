@@ -1,0 +1,273 @@
+/* ==========================================================================
+   LumenLight 生成参数弹窗样式（GenInfoPopup，「生成同款」按钮唤出）
+   --------------------------------------------------------------------------
+   锚定图片下方弹出的参数卡片：模式徽章/来源/时间 + 正/负面提示词
+   （可复制）+ 参数摘要行 + LoRA 清单 + 动作区（生成同款/仅回填）。
+   z-index 1000：高于图片工具栏(997)、低于下拉菜单(1200)与详情弹窗(1500)
+   ——见 image-toolbar.css 层级表与 ADR 010。
+   ========================================================================== */
+
+.gen-info-popup {
+    position: fixed;
+    z-index: 1000;
+    width: 520px;
+    max-width: calc(100vw - 16px);
+    max-height: min(60vh, 480px);
+    overflow-y: auto;
+    background: #17171c;
+    border: 1px solid #2e2e37;
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    color: #e8e8ee;
+    font-size: 12px;
+    padding: 10px 12px;
+    display: none;
+}
+
+/* ---- 头部：模式徽章 + 来源 + 时间 ---- */
+.gi-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.gi-badge {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.gi-badge-comfy { background: #1e3a5f; color: #7cb8ff; }
+.gi-badge-api { background: #1f3d2b; color: #6fe0a8; }
+.gi-badge-rh { background: #43301f; color: #ffc37c; }
+.gi-source {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #b9b9c6;
+}
+.gi-time {
+    flex: 0 0 auto;
+    color: #7c7c8a;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+/* ---- 分节（提示词/参数/LoRA）---- */
+.gi-sec { margin-top: 8px; }
+.gi-sec-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+.gi-sec-title {
+    color: #9a9aa8;
+    font-size: 11px;
+}
+.gi-copy {
+    background: none;
+    border: 1px solid #3a3a44;
+    color: #b9b9c6;
+    border-radius: 5px;
+    font-size: 11px;
+    padding: 1px 8px;
+    cursor: pointer;
+}
+.gi-copy:hover {
+    border-color: #5b5b68;
+    color: #fff;
+}
+/* 提示词编辑框（textarea）：可直接改稿，输入即时写回图片的生成参数
+   记录（imageObj.genInfo）——「生成同款 / 仅回填 / 复制」都按编辑后的
+   内容执行；高度 132px（初版 88px 的 1.5 倍），可拖右下角继续调 */
+.gi-prompt {
+    display: block;
+    width: 100%;
+    height: 132px;
+    box-sizing: border-box;
+    background: #101014;
+    border: 1px solid #26262e;
+    border-radius: 6px;
+    padding: 6px 8px;
+    resize: vertical;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+    color: #dcdce4;
+    font: inherit;
+}
+.gi-prompt:focus {
+    outline: none;
+    border-color: #2f6feb;
+}
+
+/* ---- 负面提示词折叠区：默认收起只留标题条，点标题条展开 ---- */
+.gi-neg-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+}
+.gi-neg-caret {
+    width: 12px;
+    height: 12px;
+    color: #9a9aa8;
+    transition: transform 0.15s;
+}
+.gi-neg-collapsed .gi-neg-caret {
+    transform: rotate(-90deg);
+}
+.gi-neg-collapsed .gi-prompt {
+    display: none;
+}
+.gi-neg-collapsed .gi-sec-head {
+    margin-bottom: 0;
+}
+
+/* ---- 参数摘要（历史样式位）：comfy/rh 摘要已收进动作行 .gi-param ---- */
+.gi-lora-row {
+    padding: 2px 0;
+    color: #dcdce4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---- 动作区 ---- */
+.gi-btn {
+    border: 1px solid #3a3a44;
+    background: #23232b;
+    color: #dcdce4;
+    cursor: pointer;
+    font-size: 12px;
+}
+.gi-btn:hover {
+    border-color: #5b5b68;
+}
+/* api / comfy / rh 同一行布局：左侧参数（api=行内下拉，comfy/rh=只读
+   参数块）+ 右侧仅回填/复制/圆形执行键 */
+.gi-actions-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+}
+/* 只读参数块（comfy/rh：工作流/主模型/步数）——外观对齐行内下拉触发器
+   但不可点；超长省略号收窄，title 悬停看全文 */
+.gi-param {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 160px;
+    height: 28px;
+    line-height: 26px;
+    padding: 0 10px;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    color: #e8e8ee;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.gi-actions-row .gi-btn {
+    flex: 0 0 auto;           /* 不再全宽：与参数块同排 */
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 6px;
+}
+.gi-actions-row .gi-copy {
+    flex: 0 0 auto;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 6px;
+}
+/* 行内下拉触发器（LumenDropdown 会给按钮补 lumen-dd-trigger 类与
+   图标/文案/箭头结构），面板皮肤与聊天工具栏按钮同款 */
+.gi-dd {
+    height: 28px;
+    flex: 0 0 auto;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    color: #e8e8ee;
+    font-size: 12px;
+    padding: 0 6px;
+}
+.gi-dd:hover {
+    border-color: rgba(128, 128, 128, 0.45);
+}
+.gi-dd-model {
+    flex: 0 1 auto;           /* 定宽不抢位，空间不足时才收缩让行 */
+    width: 150px;
+    min-width: 100px;
+}
+.gi-dd-ratio {
+    width: 78px;
+}
+.gi-dd-tier {
+    width: 72px;              /* "2K" 两字符 + 箭头完整可见 */
+}
+/* comfy 模式：工作流/主模型下拉（同可收缩省略）+ 步数数字输入 */
+.gi-dd-workflow {
+    flex: 0 1 auto;
+    width: 118px;
+    min-width: 88px;
+}
+.gi-dd-checkpoint {
+    flex: 0 1 auto;
+    width: 140px;
+    min-width: 88px;
+}
+.gi-num {
+    flex: 0 0 auto;
+    width: 60px;
+    height: 28px;
+    box-sizing: border-box;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    color: #e8e8ee;
+    font-size: 12px;
+    padding: 0 6px;
+}
+.gi-num:focus {
+    outline: none;
+    border-color: #2f6feb;
+}
+/* 圆形执行键（生成同款）：与提示词节点执行按钮同款——白圆底 + 深色↑
+   箭头，margin-left:auto 推到行尾（PromptSkillBar 同一手法） */
+.gi-run {
+    margin-left: auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #fff;
+    color: #0f0f12;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+.gi-run .run-icon {
+    width: 15px;
+    height: 15px;
+}
+.gi-run:hover {
+    transform: scale(1.06);
+}

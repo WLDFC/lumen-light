@@ -19,6 +19,12 @@
  *
  * 占位图 imageObj 仍标记 source='generation-placeholder'，复用现有全套
  * 规则：不参与连线、不入存档、不参与命中检测与缩放手柄。
+ *
+ * 聚集路由：画布存在聚集编组（GroupManager collect 字段，全局至多
+ * 一个）时，create 的落点统一交 CollectZone 决定——区内槽位排布 /
+ * 放不下按原始尺寸落编组位置级联（不缩放不裁切），「全部聚集」语义
+ * 优先于调用方传入的 x/y；replace 真实图按占位图中心原尺寸落图，
+ * 落定后回调 CollectZone.notifyLanded 做视口外轻提示。
  * ==========================================================================
  */
 
@@ -65,29 +71,68 @@ class PlaceholderManager {
     /**
      * 创建一个占位图
      * @param {Object|string} owner - 归属方（节点实例或 'panel'）
-     * @param {Object} [opts] - { x, y, width, height }（画布坐标）
-     *   缺省 x/y 时放在当前视口中心；同 owner 已有占位图时向右级联偏移避免重叠
-     * @returns {Object} 句柄 { id, owner, imageObj, intervalId }
+     * @param {Object} [opts] - { x, y, width, height, genInfo }（画布坐标）
+     *   缺省 x/y 时放在当前视口中心；同 owner 已有占位图时向右级联偏移避免重叠；
+     *   genInfo 为生成参数记录（溯源/生成同款，GenRecord）——随句柄绑定，
+     *   面板链路经此携带（每张占位图独立持有，取消/失败清理天然对齐）
+     * @returns {Object} 句柄 { id, owner, imageObj, intervalId, genInfo }
      */
     create(owner, opts = {}) {
         const width = opts.width || 1024;
         const height = opts.height || 1024;
         const gap = 40;   // 同 owner 多个占位图之间的级联间距
 
-        let x = opts.x;
-        let y = opts.y;
-        if (x === undefined || y === undefined) {
-            // 未指定位置：放当前视口中心（画布坐标）
-            const centerCanvas = this.canvas.viewport.screenToCanvas(
-                this.canvas.cssWidth / 2,
-                this.canvas.cssHeight / 2
-            );
-            x = centerCanvas.x - width / 2;
-            y = centerCanvas.y - height / 2;
+        // 聚集区接管：聚集编组启用时占位图统一落入区内槽位（CollectZone
+        // 路由、CollectSlotLayout 纯函数计算），放不下回落编组位置级联；
+        // 槽位本身已排好，跳过同 owner 级联
+        let x;
+        let y;
+        let zoneRouted = false;
+        const zone = this.canvas.collectZone;
+        if (zone) {
+            const pos = zone.resolveSpawnPosition(width, height);
+            if (pos) {
+                x = pos.x;
+                y = pos.y;
+                zoneRouted = true;
+            }
         }
-        // 同 owner 级联偏移（面板连续 show 的原有行为）
-        const cascade = this.handles.filter(h => h.owner === owner).length * (width + gap);
-        x += cascade;
+        if (!zoneRouted) {
+            x = opts.x;
+            y = opts.y;
+            if (x === undefined || y === undefined) {
+                // 未指定位置：放当前视口中心（画布坐标）
+                const centerCanvas = this.canvas.viewport.screenToCanvas(
+                    this.canvas.cssWidth / 2,
+                    this.canvas.cssHeight / 2
+                );
+                x = centerCanvas.x - width / 2;
+                y = centerCanvas.y - height / 2;
+            }
+            // 同 owner 级联偏移（面板连续 show 的原有行为）
+            const cascade = this.handles.filter(h => h.owner === owner).length * (width + gap);
+            x += cascade;
+        }
+
+        // 落点防遮挡（仅非聚集区路径——区内槽位由 CollectSlotLayout 自排）：
+        // 落点矩形与既有不透明对象（图片/视频/音频/占位图/面板节点，统一在
+        // images 清单里）任一方向覆盖率 ≥90%（新图盖住别人或被盖）即视为
+        // 冲突，自动让位到就近空位——防新生成图压住已有内容（用户实测
+        // 高频事故）。找不到空位保持原落点（宁重叠不丢图）。
+        if (!zoneRouted) {
+            const spawnRect = { x, y, width, height };
+            const occupied = this.canvas.images.images.filter(
+                o => o && o.width > 0 && o.height > 0
+            );
+            if (occupied.length > 0 &&
+                OcclusionLayout.isSpawnConflicting(spawnRect, occupied)) {
+                const spot = OcclusionLayout.findFreeSpot(spawnRect, occupied);
+                if (spot) {
+                    x = spot.x;
+                    y = spot.y;
+                }
+            }
+        }
 
         // 初始显示的动画帧（Image 对象立即赋值，未加载完成时 drawImage 自动跳过）
         const initialImg = this.frameIndex % 2 === 0 ? this.image1 : this.image2;
@@ -117,7 +162,7 @@ class PlaceholderManager {
 
         this.canvas.draw();
 
-        const handle = { id: imageObj.id, owner, imageObj, intervalId };
+        const handle = { id: imageObj.id, owner, imageObj, intervalId, genInfo: opts.genInfo || null };
         this.handles.push(handle);
         return handle;
     }
@@ -163,7 +208,8 @@ class PlaceholderManager {
      * 原始尺寸落图。加载失败时同样移除占位图并 reject。
      * @param {Object} handle - create 返回的句柄
      * @param {string} imageUrl - 图片地址（远程 URL 或 data URL）
-     * @param {Object} [meta] - 落图元数据 { name, source, prompt, negativePrompt }
+     * @param {Object} [meta] - 落图元数据 { name, source, prompt, negativePrompt, genInfo }
+     *   genInfo（生成参数记录）缺省时回落句柄上的（面板链路经 create 携带）
      * @returns {Promise<Object>} 落图后的真实图片对象
      */
     replace(handle, imageUrl, meta = {}) {
@@ -193,11 +239,18 @@ class PlaceholderManager {
                     source: meta.source || 'comfy',
                     prompt: meta.prompt || '',
                     negativePrompt: meta.negativePrompt || '',
+                    // 生成参数记录（溯源/生成同款）：节点链路经 meta 显式传入，
+                    // 面板链路回落句柄携带的（GenerationFeedback.show 绑定）
+                    genInfo: (meta.genInfo !== undefined && meta.genInfo !== null)
+                        ? meta.genInfo
+                        : (handle.genInfo || null),
                     created: Date.now()
                 };
                 this.canvas.images.images.push(imageObj);
                 // 撤销记账：生成落图可回退（undo=摘下真实图，再撤恢复占位图）
                 this.canvas.history?.recordCreate([imageObj], '生成落图');
+                // 聚集区提示：区内落图且聚集区不在视口内时弹可点击定位提示
+                if (this.canvas.collectZone) this.canvas.collectZone.notifyLanded(imageObj);
                 this.canvas.draw();
                 resolve(imageObj);
             };

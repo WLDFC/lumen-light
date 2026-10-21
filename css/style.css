@@ -123,6 +123,14 @@ canvas.panning { cursor: grabbing !important; }
     display: block;
 }
 
+/* 音频播放器覆盖层：复用视频播放器容器（.canvas-video-player）的定位、
+   底色与关闭按钮，内部 audio 原生控件撑满 */
+.canvas-audio-player audio {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
 /* 右上角关闭按钮 */
 .canvas-video-player-close {
     position: absolute;
@@ -169,4 +177,33 @@ canvas.panning { cursor: grabbing !important; }
 
 .canvas-history-toast.show {
     opacity: 1;
+}
+
+/* ==================== 聚集区落图轻提示（CollectZone） ====================
+   底部居中浮出：聚集编组不在视口内时来图落区的可点击提示，
+   点击 fitToBounds 聚焦；与撤销 toast 同壳，青色描边示意可点、
+   pointer-events 开启、位置上移一档避开撤销 toast */
+.collect-zone-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    background: rgba(20, 21, 26, 0.92);
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(108, 235, 255, 0.55);
+    border-radius: 16px;
+    font-size: 12px;
+    cursor: pointer;
+    z-index: 2600;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.collect-zone-toast.show {
+    opacity: 1;
+}
+
+.collect-zone-toast:hover {
+    background: rgba(30, 32, 38, 0.95);
 }
