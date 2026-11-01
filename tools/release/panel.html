@@ -195,11 +195,11 @@
         badge.className = 'badge ok';
         $('dirtyList').style.display = 'none';
       }
-      const zip = (s.files || []).find((f) => f.name === 'lumen-update.zip');
+      const zip = s.updateZip;
       const full = s.fullZip;
       const parts = [];
       if (zip && zip.exists) {
-        parts.push('更新包 ' + (zip.size / 1048576).toFixed(2) + ' MB，打包版本 v' + (s.packagedVersion || '?') +
+        parts.push('更新包 ' + zip.name + '（' + (zip.size / 1048576).toFixed(2) + ' MB），打包版本 v' + (s.packagedVersion || '?') +
           (s.packagedVersion && s.packagedVersion !== version ? '（与当前版本不一致，建议重新打包）' : ''));
         $('btnUpload').disabled = false;
       } else {

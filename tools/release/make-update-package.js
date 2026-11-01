@@ -4,10 +4,11 @@
 //   --version 不传时取 package.json 的 version 字段。
 //
 // 产物（dist/ 下，已 gitignore）：
-//   lumen-update.zip   更新包（解压后与项目根对齐，代码文件直接覆盖）
+//   lumen-update-<版本>.zip  更新包（文件名带版本号，与完整包同一惯例；
+//                            解压后与项目根对齐，代码文件直接覆盖）
 //   version.json       清单：版本号 / 下载直链 / SHA256——与 zip 一起作为
 //                      Release 附件上传；update.bat 从 Releases latest 直链
-//                      拉取本文件决定是否更新与校验完整性
+//                      拉取本文件决定是否更新、按 url 下载 zip 并校验完整性
 //
 // 范围约定（与 update.bat 的 PKG_DIR_LIST / 根文件清单同源，两处须同步改）：
 //   目录：css js routes utils pi-extensions workflows image tools lumen_nodes
@@ -26,10 +27,10 @@ const { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..', '..');
 const OUT_DIR = path.join(ROOT, 'dist');
 const STAGE_DIR = path.join(OUT_DIR, 'staging');
-const ZIP_PATH = path.join(OUT_DIR, 'lumen-update.zip');
 const VERSION_JSON_PATH = path.join(OUT_DIR, 'version.json');
 const RELEASE_BASE = 'https://github.com/WLDFC/lumen-light/releases/latest/download';
-const ZIP_NAME = 'lumen-update.zip';
+// 历史遗留：改名前的固定文件名，打包时清掉防面板误认旧产物
+const LEGACY_ZIP_PATH = path.join(OUT_DIR, 'lumen-update.zip');
 
 // Windows 系统自带 bsdtar（System32），支持 -a 按扩展名生成 zip；
 // 不用 PowerShell Compress-Archive：其 5.1 版对中文条目名按系统代码页编码，
@@ -67,9 +68,12 @@ function main() {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const version = versionOverride || pkg.version;
   if (!version) fail('无法确定版本号（package.json 无 version 且未传 --version）');
+  const ZIP_NAME = `lumen-update-${version}.zip`;
+  const ZIP_PATH = path.join(OUT_DIR, ZIP_NAME);
 
   // 1. 清空暂存区
   fs.rmSync(STAGE_DIR, { recursive: true, force: true });
+  fs.rmSync(LEGACY_ZIP_PATH, { force: true });
   fs.mkdirSync(STAGE_DIR, { recursive: true });
   fs.mkdirSync(OUT_DIR, { recursive: true });
 

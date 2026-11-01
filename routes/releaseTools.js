@@ -39,37 +39,35 @@ module.exports = function createReleaseToolsRouter() {
     }
   }
 
+  // dist 里按文件名模式取最新一份 zip（同名类产物可能有历史版本号的多个）
+  function latestZip(dir, re) {
+    if (!fs.existsSync(dir)) return null;
+    const found = fs.readdirSync(dir)
+      .filter((n) => re.test(n))
+      .map((n) => {
+        const p = path.join(dir, n);
+        return { name: n, exists: true, size: fs.statSync(p).size, mtime: fs.statSync(p).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    return found[0] || null;
+  }
+
   function distState() {
     const dir = path.join(ROOT, 'dist');
-    const names = ['lumen-update.zip', 'version.json'];
-    const files = [];
-    for (const name of names) {
-      const p = path.join(dir, name);
-      files.push({
-        name,
-        exists: fs.existsSync(p),
-        size: fs.existsSync(p) ? fs.statSync(p).size : 0,
-      });
-    }
-    // 完整安装包（可能有历史版本号的多个，取文件名修改时间最新的一个）
-    let fullZip = null;
-    if (fs.existsSync(dir)) {
-      const found = fs.readdirSync(dir)
-        .filter((n) => /^lumen-light-full-.+\.zip$/.test(n))
-        .map((n) => {
-          const p = path.join(dir, n);
-          return { name: n, exists: true, size: fs.statSync(p).size, mtime: fs.statSync(p).mtimeMs };
-        })
-        .sort((a, b) => b.mtime - a.mtime);
-      fullZip = found[0] || null;
-    }
-    // version.json 里的版本（存在时）
-    let packagedVersion = '';
+    return {
+      // 更新包/完整包：文件名带版本号（lumen-update-<版本>.zip /
+      // lumen-light-full-<版本>.zip），取修改时间最新的一份
+      updateZip: latestZip(dir, /^lumen-update-.+\.zip$/),
+      fullZip: latestZip(dir, /^lumen-light-full-.+\.zip$/),
+      // version.json 里的版本（存在时）
+      packagedVersion: readPackagedVersion(dir),
+    };
+  }
+
+  function readPackagedVersion(dir) {
     const vj = path.join(dir, 'version.json');
-    if (fs.existsSync(vj)) {
-      try { packagedVersion = String(JSON.parse(fs.readFileSync(vj, 'utf8')).version || ''); } catch { }
-    }
-    return { files, fullZip, packagedVersion };
+    if (!fs.existsSync(vj)) return '';
+    try { return String(JSON.parse(fs.readFileSync(vj, 'utf8')).version || ''); } catch { return ''; }
   }
 
   router.get('/status', (req, res) => {
@@ -128,9 +126,9 @@ module.exports = function createReleaseToolsRouter() {
       res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
     };
 
-    const zipOk = fs.existsSync(path.join(ROOT, 'dist', 'lumen-update.zip'));
-    if (!zipOk) {
-      send('error', 'dist/lumen-update.zip 不存在，请先打包。');
+    const zip = latestZip(path.join(ROOT, 'dist'), /^lumen-update-.+\.zip$/);
+    if (!zip) {
+      send('error', 'dist 里没有更新包（lumen-update-*.zip），请先打包。');
       busy = false;
       return res.end();
     }
@@ -138,19 +136,15 @@ module.exports = function createReleaseToolsRouter() {
     let code = -1;
     try {
       // 附件清单：更新包 + 清单必传；full=1 时追加完整安装包（dist 里最新的那份）
-      const files = ['dist/lumen-update.zip', 'dist/version.json'];
+      const files = [`dist/${zip.name}`, 'dist/version.json'];
       if (req.query.full === '1') {
-        const dir = path.join(ROOT, 'dist');
-        const found = fs.readdirSync(dir)
-          .filter((n) => /^lumen-light-full-.+\.zip$/.test(n))
-          .map((n) => ({ n, m: fs.statSync(path.join(dir, n)).mtimeMs }))
-          .sort((a, b) => b.m - a.m);
-        if (!found.length) {
+        const full = latestZip(path.join(ROOT, 'dist'), /^lumen-light-full-.+\.zip$/);
+        if (!full) {
           send('error', 'dist 里没有完整安装包（lumen-light-full-*.zip），请先勾选「打包完整安装包」。');
           busy = false;
           return res.end();
         }
-        files.push('dist/' + found[0].n);
+        files.push('dist/' + full.name);
       }
       code = await runTool('release-upload.js', [tag, ...files, '--replace'], (line) => {
         send('line', line);

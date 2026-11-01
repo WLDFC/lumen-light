@@ -14,7 +14,7 @@
 //
 // 示例（发版最后一步）：
 //   node tools/release/make-update-package.js
-//   node tools/release/release-upload.js v0.3.0.7 dist/lumen-update.zip dist/version.json --replace
+//   node tools/release/release-upload.js v0.3.0.7 dist/lumen-update-0.3.0.7.zip dist/version.json --replace
 
 'use strict';
 

@@ -8,7 +8,7 @@
 #   LUMEN_UPDATE_SKIP_PROC_CHECK=1 跳过 node 进程检查
 #   LUMEN_UPDATE_YES=1            跳过人工确认
 #
-# 包范围必须与 tools/make-update-package.js 保持一致。
+# 包范围必须与 tools/release/make-update-package.js 保持一致。
 
 # 不用 Stop：PS5.1 下原生命令（curl 等）的 stderr 输出会被升级成终止错误；
 # 各步骤靠 $LASTEXITCODE 与产物存在性检查显式兜底。
@@ -89,13 +89,22 @@ if ($env:LUMEN_UPDATE_SKIP_PROC_CHECK -ne '1') {
 }
 
 # ---- 5. 下载更新包并校验 ----
+# zip 文件名带版本号（lumen-update-<版本>.zip）：优先取 version.json 里 url 的
+# 文件名部分（不发版域名无关，LUMEN_UPDATE_BASE 本地假服务器测试照常生效），
+# url 缺失时按版本号拼
 $zipPath = Join-Path $env:TEMP "lumen-update-$remoteVer.zip"
+$zipName = 'lumen-update.zip'
+if ($remote.url) {
+  $zipName = [IO.Path]::GetFileName([string]$remote.url)
+} elseif ($remoteVer -ne '未知') {
+  $zipName = "lumen-update-$remoteVer.zip"
+}
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-Write-Host '正在下载更新包…'
-& curl.exe -fsL --connect-timeout 8 --retry 2 -o $zipPath "$ReleaseBase/lumen-update.zip" 2>$null
+Write-Host "正在下载更新包（$zipName）…"
+& curl.exe -fsL --connect-timeout 8 --retry 2 -o $zipPath "$ReleaseBase/$zipName" 2>$null
 if ($LASTEXITCODE -ne 0 -and $ReleaseBase -like 'https://github.com/*') {
   Write-Host '直连失败，改用镜像 gh-proxy.com 重试…'
-  & curl.exe -fsL --connect-timeout 8 --max-time 600 -o $zipPath "$MirrorPrefix$ReleaseBase/lumen-update.zip" 2>$null
+  & curl.exe -fsL --connect-timeout 8 --max-time 600 -o $zipPath "$MirrorPrefix$ReleaseBase/$zipName" 2>$null
 }
 if (-not (Test-Path $zipPath)) { Fail '更新包下载失败，请检查网络后重试。' }
 
