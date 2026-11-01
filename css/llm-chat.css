@@ -984,6 +984,8 @@
     justify-content: center;
     align-items: center;      /* 图片在遮罩层中居中 */
     z-index: 2000;            /* 高于提示词管理窗口，确保原图始终显示在最前面 */
+    user-select: none;        /* 双击大图不产生系统蓝色选区（img 会被当作内容选中） */
+    -webkit-user-select: none;
 }
 
 /* 灯箱显示状态（由 JS 添加 active 类触发） */

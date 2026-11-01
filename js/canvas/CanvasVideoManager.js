@@ -146,15 +146,8 @@ class CanvasVideoManager {
         video.autoplay = true;
         wrap.appendChild(video);
 
-        // 关闭按钮（右上角 ×）
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'canvas-video-player-close';
-        closeBtn.textContent = '×';
-        closeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.hidePlayer();
-        });
-        wrap.appendChild(closeBtn);
+        // 不设右上角关闭钮（选中态下它与缩放控制点视觉打架）：关闭靠
+        // 外部点击收起（暂停态外部点击即收，见交互层的播放器协同约定）
 
         // 挂载到 body（position: fixed，直接以视口坐标定位）
         document.body.appendChild(wrap);

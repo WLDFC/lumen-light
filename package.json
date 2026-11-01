@@ -1,7 +1,7 @@
 {
   "_comment_项目说明": "本文件是 Node.js 项目的配置中心：项目信息、依赖清单（npm install 依据）、命令快捷方式。注意 JSON 不支持 // 注释，以下 _comment_ 开头的字段仅作说明用途，npm 会自动忽略。",
   "name": "lumen-light",
-  "version": "0.3.0.7",
+  "version": "0.3.0.9",
   "description": "流光 LumenLight：AI 绘画工作台（画布 + ComfyUI 工作流 + LLM 对话绘图）",
   "main": "index.js",
   "_comment_main": "入口文件声明。本项目直接用 node server.js 启动后端，此项实际未使用",

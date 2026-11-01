@@ -251,6 +251,11 @@ class PlaceholderManager {
                 this.canvas.history?.recordCreate([imageObj], '生成落图');
                 // 聚集区提示：区内落图且聚集区不在视口内时弹可点击定位提示
                 if (this.canvas.collectZone) this.canvas.collectZone.notifyLanded(imageObj);
+                // 生成图事件：坐标编辑器「生成图透显」等消费方监听（四类
+                // 生成节点与面板链路的占位图替换都经此收口，一处派发全覆盖）
+                window.dispatchEvent(new CustomEvent('lumenGeneratedImage', {
+                    detail: { src: imageUrl, imageObj }
+                }));
                 this.canvas.draw();
                 resolve(imageObj);
             };

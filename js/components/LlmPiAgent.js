@@ -2,32 +2,30 @@
  * ==========================================================================
  * LumenLight pi 智能体控制器（LlmPiAgent）
  * ==========================================================================
- * 作用：LLM 窗口选中「pi 编码智能体」时的对话控制器：
+ * 作用：LLM 窗口选中「pi 编码智能体」时的对话控制器——事件状态机与会话
+ *   控制（渲染层与纯函数已拆出，见下方「文件分工」）：
  *   - send()：消息经后端 /api/pi/prompt 喂给 pi RPC 子进程
  *     （后端自动完成模型切换与"存档 → 会话"绑定）；
  *   - pi 的流式事件由后端经 WebSocket 广播（piEvent 页面事件），
  *     本类消费后把一轮回复渲染成「分阶段、可折叠」的块序列：
  *       · 思考块（thinking）：流式累积，结束/进入下一阶段自动折叠，头部计时长；
- *       · 工具块（tool）：默认折叠，头部显示中文标题/参数预览/运行状态与耗时
- *         （常见工具映射中文名——bash→终端、read→查阅、edit/write→写入，
- *         canvas_·/web_·/comfy_mcp_· 等扩展工具族各有专名，未知工具保留原名）；
+ *       · 工具块（tool）：默认折叠，头部显示中文标题/参数预览/运行状态与耗时；
  *       · 文本块（text）：最终回答，始终展开。
  *     工具结果（role=tool）只填入对应工具块的折叠区，绝不铺进主气泡
  *     （否则 bash 打印的 base64 等大段二进制会糊满界面）；
- *   - 流式中点击发送 = 中止推理。
+ *   - 流式中点击发送 = 中止推理；流空闲看门狗兜底收尾（长静默轮询
+ *     /api/pi/state 区分"在忙/流丢失/后端不可达"）。
+ *
+ * 文件分工（本类只保留事件消费与块序列状态机）：
+ *   - js/components/LlmPiAgentRender.js  块的 DOM 装配/指示器/说明块/Markdown
+ *                                        渲染（原型混入，须后于本文件加载）；
+ *   - js/utils/PiAgentBlocks.js          纯函数层（工具名映射/输出摘要/时长/
+ *                                        转义与行内渲染/去重决策，Jest 可单测）。
  *
  * pi 的底层模型在 设置 → 通用 → 「pi 使用的模型」中选择
  * （localStorage: piModelKey），权限分级同处设置（同步到后端生效）。
  * ==========================================================================
  */
-
-/** 工具结果展示上限（字符）：超出截断，避免超长输出撑爆气泡 */
-const PI_TOOL_OUTPUT_LIMIT = 2000;
-/** 判定"base64/二进制"输出的连续 base64 字符阈值 */
-const PI_BASE64_RUN = 300;
-
-/** 思考块图标（cpu 线稿，与工具图标同风格） */
-const PI_THINK_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>';
 
 /** pi 完成提示音：Web Audio 合成上行双音（E6→A6，正弦 + 指数衰减包络），
  *  与常见 IDE 的任务完成音同风格——零音频文件依赖。AudioContext 惰性
@@ -90,164 +88,24 @@ class LlmPiAgent {
         }
     }
 
-    // ==================== 分块渲染 ====================
+    // ==================== 纯函数委托（实现在 PiAgentBlocks） ====================
 
-    /**
-     * 新建一个可折叠块（思考/工具共用结构：头部按钮 + 折叠正文）
-     * @param {'thinking'|'tool'} type - 块类型
-     * @param {string} title - 头部标题
-     * @returns {Object} 块对象 {type, el, body, content, meta}
-     */
-    _addCollapsibleBlock(type, title, opts = {}) {
-        const el = document.createElement('div');
-        el.className = `pi-block pi-block-${type}`;
-
-        const header = document.createElement('button');
-        header.type = 'button';
-        header.className = 'pi-block-header';
-        const icon = document.createElement('span');
-        icon.className = 'pi-block-icon';
-        icon.innerHTML = opts.icon || '';
-        const caret = document.createElement('span');
-        caret.className = 'pi-caret';
-        caret.textContent = '▸';
-        const titleEl = document.createElement('span');
-        titleEl.className = 'pi-block-title';
-        titleEl.textContent = title;
-        const argsEl = document.createElement('span');
-        argsEl.className = 'pi-block-args';
-        if (opts.args) argsEl.textContent = opts.args;
-        const meta = document.createElement('span');
-        meta.className = 'pi-block-meta';
-        header.append(icon, caret, titleEl, argsEl, meta);
-
-        const body = document.createElement('div');
-        body.className = 'pi-block-body';
-
-        el.append(header, body);
-        // 所有块都可点击头部折叠/展开；思考块与工具块均默认折叠
-        header.addEventListener('click', () => el.classList.toggle('open'));
-
-        this._wrap.appendChild(el);
-        const block = { type, el, body, meta, titleEl, argsEl, startedAt: Date.now() };
-        // 思考块正文直接一个 pre；工具块正文按"调用参数/执行结果"分段懒加载
-        if (type === 'thinking') block.content = this._addSectionContent(body);
-        this._blocks.push(block);
-        this.chat.followBottom();
-        return block;
-    }
-
-    /** 在 body 内建一个无标签正文 pre（思考块用） */
-    _addSectionContent(parent) {
-        const pre = document.createElement('div');
-        pre.className = 'pi-block-content';
-        parent.appendChild(pre);
-        return pre;
-    }
-
-    /** 在工具块 body 内建一个带标签的分段（调用参数/执行结果），返回其 pre */
-    _addSection(block, label) {
-        const wrap = document.createElement('div');
-        wrap.className = 'pi-section';
-        const lab = document.createElement('div');
-        lab.className = 'pi-section-label';
-        lab.textContent = label;
-        const pre = this._addSectionContent(wrap);
-        wrap.append(lab, pre);
-        block.body.appendChild(wrap);
-        return pre;
-    }
-
-    /**
-     * 按工具名给出展示元数据（中文标题 + 图标），对齐 zcode 的块观感：
-     * 常见内置工具与三个扩展工具族显示中文标题，未知工具与用户自挂
-     * MCP 工具（mcp__ 前缀）保留原名，避免看不出是哪个服务器
-     * @param {string} name - 工具名
-     * @returns {{title: string, icon: string}} 头部标题与 svg 标记
-     */
+    /** 工具名 → 中文标题/图标（映射表在 PiAgentBlocks.toolMeta） */
     _toolMeta(name) {
-        const svg = (paths) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-        const ICON = {
-            terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
-            read: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
-            canvas: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
-            search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
-            edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
-            star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
-            globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
-            film: '<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/>',
-            gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-            save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
-            check: '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
-            wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'
-        };
-        const pick = (title, key) => ({ title, icon: svg(ICON[key]) });
-        const n = String(name || '').toLowerCase();
-        // ---- 画布工具族（lumen-canvas 扩展 14 个，按实际名单给专名）----
-        if (/^canvas_get_state$/.test(n)) return pick('获取画布状态', 'canvas');
-        if (/^canvas_get_image/.test(n)) return pick('取画布图片', 'canvas');
-        if (/^canvas_get_prompts/.test(n)) return pick('获取提示词链', 'canvas');
-        if (/^canvas_drop_image$/.test(n)) return pick('落图到画布', 'canvas');
-        if (/^canvas_drop_video$/.test(n)) return pick('落视频到画布', 'film');
-        if (/^canvas_run_comfy/.test(n)) return pick('执行 Comfy 工作流', 'gear');
-        if (/^canvas_run_llm_image/.test(n)) return pick('AI 生图', 'star');
-        if (/^canvas_run_video/.test(n)) return pick('AI 生视频', 'film');
-        if (/^canvas_poll_task/.test(n)) return pick('查询生成任务', 'check');
-        if (/^canvas_build/.test(n)) return pick('搭建节点工作流', 'gear');
-        if (/^canvas_list_workflows/.test(n)) return pick('列出工作流', 'gear');
-        if (/^canvas_search_assets/.test(n)) return pick('检索资产', 'search');
-        if (/^canvas_clear_media/.test(n)) return pick('清空画布', 'canvas');
-        if (/^canvas_delete_media/.test(n)) return pick('删除画布媒体', 'canvas');
-        if (/^canvas_/.test(n)) return pick('画布工具', 'canvas');
-        // ---- 联网工具族（lumen-web 扩展）----
-        if (/^web_search/.test(n)) return pick('联网搜索', 'globe');
-        if (/^web_image_search/.test(n)) return pick('网络搜图', 'globe');
-        if (/^web_fetch/.test(n)) return pick('读取网页', 'globe');
-        if (/^web_/.test(n)) return pick('联网工具', 'globe');
-        // ---- Comfy 原生工具族（lumen-comfy 扩展 18 个 comfy_mcp_*，
-        //      按实际名单给中文，未收录的显示 "Comfy · 后缀" 保住区分度）----
-        if (/^comfy_mcp_/.test(n)) {
-            const t = {
-                comfy_mcp_system_stats: 'Comfy 状态',
-                comfy_mcp_job: '查询 Comfy 任务',
-                comfy_mcp_fetch_outputs: '取 Comfy 输出',
-                comfy_mcp_run_workflow: '执行 Comfy 工作流',
-                comfy_mcp_run_template: '运行 Comfy 模板',
-                comfy_mcp_list_workflow_slots: '查看工作流槽位',
-                comfy_mcp_set_workflow_slot: '写入工作流槽位',
-                comfy_mcp_search_models: '检索模型',
-                comfy_mcp_search_templates: '检索模板',
-                comfy_mcp_fetch_template: '拉取模板',
-                comfy_mcp_download_model: '下载模型',
-                comfy_mcp_install_node: '安装节点',
-                comfy_mcp_nodes: '查看节点清单',
-                comfy_mcp_workflow_deps: '依赖分析',
-                comfy_mcp_get_logs: 'Comfy 日志',
-                comfy_mcp_free_memory: '释放显存',
-                comfy_mcp_upload_file: '上传文件',
-                comfy_mcp_download: '下载'
-            }[n];
-            return t ? pick(t, 'gear') : pick('Comfy · ' + n.replace(/^comfy_mcp_/, ''), 'gear');
-        }
-        // ---- 技能库（lumen-skills 扩展）----
-        if (/^skill_list/.test(n)) return pick('查看技能列表', 'read');
-        if (/^skill_load/.test(n)) return pick('加载技能', 'read');
-        // ---- pi 内置工具 ----
-        if (/^bash$|shell|terminal/.test(n)) return pick('终端', 'terminal');
-        if (/^read$|^open/.test(n)) return pick('查阅', 'read');
-        if (/^edit$|^write$|^apply_patch|^create/.test(n)) return pick('写入', 'edit');
-        if (/grep|glob|find|search|query|list|^ls$/.test(n)) return pick('搜索', 'search');
-        // ---- 用户自挂 MCP 工具：保留全名（含服务器名）不翻译 ----
-        if (/^mcp__/.test(n)) return { title: name || 'MCP 工具', icon: svg(ICON.wrench) };
-        return { title: name || '工具', icon: svg(ICON.wrench) };
+        return PiAgentBlocks.toolMeta(name);
     }
 
-    /** 工具参数的头部单行内联展示（紧凑 JSON；空参数返回空串不显示） */
+    /** 工具参数的头部单行内联展示 */
     _argsInline(args) {
-        if (args === undefined || args === null || args === '') return '';
-        if (typeof args === 'object' && Object.keys(args).length === 0) return '';
-        return typeof args === 'string' ? args : JSON.stringify(args);
+        return PiAgentBlocks.argsInline(args);
     }
+
+    /** 去掉文本块尾部的流式光标占位符 */
+    _stripCursor(s) {
+        return PiAgentBlocks.stripCursor(s);
+    }
+
+    // ==================== 块序列状态机 ====================
 
     /** 新建工具块（带图标 + 内联参数），默认折叠，并预填调用参数分段 */
     _addToolBlock(name, args) {
@@ -262,78 +120,6 @@ class LlmPiAgent {
         // 默认折叠：头部已带中文标题/参数预览/运行状态，需要细节再点开
         this._setToolArgs(b, args);
         return b;
-    }
-
-    /** 填充工具块的"调用参数"分段（懒建；空参数不渲染，避免无意义的 {}） */
-    _setToolArgs(b, args) {
-        const isEmpty = args === undefined || args === null || args === '' ||
-            (typeof args === 'object' && Object.keys(args).length === 0);
-        if (isEmpty) return;
-        if (!b.argsPre) b.argsPre = this._addSection(b, '调用参数');
-        b.argsPre.textContent = typeof args === 'string' ? args : JSON.stringify(args, null, 2);
-        if (!b.argsEl.textContent) b.argsEl.textContent = this._argsInline(args);
-    }
-
-    /** 填充工具块的"执行结果"分段（懒建，自动摘要/折叠 base64） */
-    _setToolResult(b, text) {
-        if (!b.resultPre) b.resultPre = this._addSection(b, '执行结果');
-        b.resultPre.textContent = this._summarizeToolOutput(text);
-    }
-
-    /** 标记工具块收尾状态（已完成/失败，附耗时） */
-    _markToolDone(b, failed) {
-        b.done = true;
-        b.el.classList.remove('running');
-        b.el.classList.add(failed ? 'failed' : 'done');
-        const dur = this._fmtDuration(Date.now() - (b.startedAt || Date.now()));
-        b.meta.textContent = (failed ? '失败 · ' : '已完成 · ') + dur;
-    }
-
-    /** 结束思考计时：冻结头部时长并折叠（重复调用无害） */
-    _endThinking(b) {
-        if (!b || b.thinkingActive === false) return;
-        b.thinkingActive = false;
-        b.meta.textContent = '持续了 ' + this._fmtDuration(Date.now() - (b.startedAt || Date.now()));
-        b.el.classList.remove('open');
-    }
-
-    /** 毫秒 → 人话时长（60 秒内 "N 秒"，以上 "M 分 S 秒"） */
-    _fmtDuration(ms) {
-        const s = Math.max(0, Math.round(ms / 1000));
-        if (s < 60) return s + ' 秒';
-        return Math.floor(s / 60) + ' 分 ' + (s % 60) + ' 秒';
-    }
-
-    /** 秒级 tick：刷新进行中块的头部计时（思考块与运行中工具块） */
-    _tickBlocks() {
-        if (!this._streaming || !this._wrap) return;
-        const now = Date.now();
-        for (const b of this._blocks) {
-            if (b.type === 'thinking' && b.thinkingActive) {
-                b.meta.textContent = '持续了 ' + this._fmtDuration(now - b.startedAt);
-            } else if (b.type === 'tool' && b.started && !b.done) {
-                b.meta.textContent = '运行中 · ' + this._fmtDuration(now - b.startedAt);
-            }
-        }
-    }
-
-    /** 新建一个始终展开的文本块（最终回答） */
-    _addTextBlock() {
-        const el = document.createElement('div');
-        el.className = 'pi-block pi-block-text';
-        const content = document.createElement('div');
-        content.className = 'pi-block-content';
-        el.appendChild(content);
-        this._wrap.appendChild(el);
-        const block = { type: 'text', el, content };
-        this._blocks.push(block);
-        this.chat.followBottom();
-        return block;
-    }
-
-    /** 去掉文本块尾部的流式光标占位符 */
-    _stripCursor(s) {
-        return String(s || '').replace(/\s*▍$/, '');
     }
 
     /** 收尾当前文本块：清掉流式光标，保证内容干净（阶段切换/消息收尾时调用） */
@@ -352,7 +138,7 @@ class LlmPiAgent {
         this._finalizeText();   // 进入思考阶段：上一个文本块清光标定稿
         // 思考块只要存在就会渲染出来（看得见这一行），但内容默认折叠；
         // 头部由秒级 tick 实时刷新"持续了 X 秒"
-        const b = this._addCollapsibleBlock('thinking', '思考', { icon: PI_THINK_ICON });
+        const b = this._addCollapsibleBlock('thinking', '思考', { icon: PiAgentBlocks.THINK_ICON });
         b.thinkingActive = true;
         b.meta.textContent = '思考中…';
         return b;
@@ -363,17 +149,10 @@ class LlmPiAgent {
      *  思考"布局）。以先出现的为准，移除其后内容完全相同的重复块。
      *  在 message_end / agent_end 收尾时调用（消息边界，内容已定稿） */
     _dedupeThinking() {
-        const seen = new Set();
-        const keep = [];
-        for (const b of this._blocks) {
-            if (b.type === 'thinking') {
-                const c = b.content.textContent;
-                if (c && seen.has(c)) { b.el.remove(); continue; }
-                if (c) seen.add(c);
-            }
-            keep.push(b);
-        }
-        this._blocks = keep;
+        const { kept, removed } = PiAgentBlocks.dedupeBlocks(
+            this._blocks, 'thinking', (b) => b.content.textContent);
+        removed.forEach((b) => b.el.remove());
+        this._blocks = kept;
     }
 
     /** 文本块去重：pi 流式层偶发把同一段文本分两段输出（与思考块复读
@@ -382,19 +161,12 @@ class LlmPiAgent {
      *  文本）。以先出现的为准，按定稿源文本归一化比较，移除其后
      *  重复块。在 message_end / agent_end 收尾时调用 */
     _dedupeText() {
-        const norm = (s) => this._stripCursor(String(s == null ? '' : s)).trim();
-        const seen = new Set();
-        const keep = [];
-        for (const b of this._blocks) {
-            if (b.type === 'text') {
-                const key = norm(typeof b.srcText === 'string'
-                    ? b.srcText : b.content.textContent);
-                if (key && seen.has(key)) { b.el.remove(); continue; }
-                if (key) seen.add(key);
-            }
-            keep.push(b);
-        }
-        this._blocks = keep;
+        const { kept, removed } = PiAgentBlocks.dedupeBlocks(
+            this._blocks, 'text',
+            (b) => this._stripCursor(typeof b.srcText === 'string'
+                ? b.srcText : b.content.textContent).trim());
+        removed.forEach((b) => b.el.remove());
+        this._blocks = kept;
     }
 
     /** 移除"仅有光标、尚无实质内容"的占位文本块（真实块开始时调用） */
@@ -436,250 +208,6 @@ class LlmPiAgent {
             if (this._blocks[i].type === 'tool' && !this._blocks[i].done) return this._blocks[i];
         }
         return null;
-    }
-
-    /**
-     * 工具结果摘要化：base64/二进制折叠、超长截断，避免大段乱码进界面
-     * @param {*} text - 工具原始输出（字符串或对象，对象序列化为 JSON）
-     * @returns {string} 适合折叠展示的摘要
-     */
-    _summarizeToolOutput(text) {
-        let s;
-        if (typeof text === 'string') s = text;
-        else if (text == null) s = '';
-        else {
-            // 工具返回对象时直接 String() 会得到 "[object Object]"，必须序列化
-            try { s = JSON.stringify(text, null, 2); } catch { s = String(text); }
-        }
-        if (!s.trim()) return '（无输出）';
-        if (new RegExp(`[A-Za-z0-9+/]{${PI_BASE64_RUN},}`).test(s)) {
-            return `（含 base64/二进制输出，共 ${s.length} 字符，已折叠不展示）`;
-        }
-        if (s.length > PI_TOOL_OUTPUT_LIMIT) {
-            return s.slice(0, PI_TOOL_OUTPUT_LIMIT) + `\n…（已截断，共 ${s.length} 字符）`;
-        }
-        return s;
-    }
-
-    /** 追加一条说明文本块（错误/进程退出/看门狗收尾共用） */
-    _noteBlock(text, isError) {
-        const block = this._addTextBlock();
-        block.content.textContent = text;
-        if (isError && this._wrap) this._wrap.classList.add('error');
-        return block;
-    }
-
-    // ==================== 迷你 Markdown 渲染 ====================
-    // pi 底层模型按 Markdown 语法写回答（**粗体** / `代码` / 列表 / 标题），
-    // 纯文本裸排会让符号漏出来。这里做零依赖的轻量渲染（对齐 Trae 等
-    // 客户端的段落观感）：只覆盖模型回答里实际出现的语法，未覆盖语法
-    // 按普通文本降级。安全性：先整体 HTML 转义再按标记切分，标记以外
-    // 的内容永不产生 HTML——模型输出不可信，注入面收在转义这一道闸。
-
-    /** HTML 转义（渲染的第一道闸：所有原文先过这里） */
-    _mdEscape(s) {
-        return String(s ?? '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
-
-    /** 行内渲染：粗体 / 行内代码（先保护代码段再处理粗体，代码内的
-     *  星号不参与粗体解析——`**这样**` 应显示为字面量） */
-    _mdInline(s) {
-        const codes = [];
-        // 行内代码先摘出来（内容原样保留，不再吃粗体解析）
-        let out = s.replace(/`([^`]+)`/g, (_, code) => {
-            codes.push(`<code class="pi-md-code">${code}</code>`);
-            return `\u0000${codes.length - 1}\u0000`;
-        });
-        out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        // 占位符还原（顺序倒放不需要——占位符本身不含 ** ）
-        return out.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
-    }
-
-    /**
-     * 把 pi 的 Markdown 回答渲染成 DOM（覆盖：代码块 / 标题 / 有序·无序
-     * 列表含两档嵌套 / 分隔线 / 粗体 / 行内代码；表格等未支持语法整行
-     * 按普通文本降级）。返回 DocumentFragment，调用方替换文本块内容。
-     * @param {string} src - pi 的原始回答文本
-     * @returns {DocumentFragment}
-     */
-    _renderMarkdown(src) {
-        const frag = document.createDocumentFragment();
-        const esc = (t) => this._mdEscape(t);
-        const inline = (t) => this._mdInline(esc(t));
-        const lines = String(src ?? '').replace(/\r\n/g, '\n').split('\n');
-        let i = 0;
-        const mk = (tag, cls, html) => {
-            const el = document.createElement(tag);
-            if (cls) el.className = cls;
-            el.innerHTML = html;
-            frag.appendChild(el);
-            return el;
-        };
-        const isUl = (t) => /^\s*[-*]\s+/.test(t);
-        const isOl = (t) => /^\s*\d+[.、)]\s+/.test(t);
-        const isListItem = (t) => isUl(t) || isOl(t);
-        // 表格行：以 | 开头或包含 | 的行（由下一行的 |---| 分隔行确认）
-        const isPipeRow = (t) => /^\s*\|.*\|\s*$/.test(t);
-        const isTableSep = (t) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(t);
-        const splitPipeRow = (t) => t.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
-        // 表格单元格里也可能有粗体/行内代码——逐格走 inline
-        const buildTable = (rows) => {
-            const table = document.createElement('table');
-            table.className = 'pi-md-table';
-            // 首行为表头，第二行是 |---| 分隔（调用方已校验）
-            const thead = document.createElement('thead');
-            const trh = document.createElement('tr');
-            for (const cell of rows[0]) {
-                const th = document.createElement('th');
-                th.innerHTML = inline(cell);
-                trh.appendChild(th);
-            }
-            thead.appendChild(trh);
-            table.appendChild(thead);
-            const tbody = document.createElement('tbody');
-            for (let r = 2; r < rows.length; r++) {
-                const tr = document.createElement('tr');
-                // 列数不齐时按表头列数补空格/截断（模型输出常见轻度错位）
-                for (let c = 0; c < rows[0].length; c++) {
-                    const td = document.createElement('td');
-                    td.innerHTML = inline(rows[r][c] ?? '');
-                    tr.appendChild(td);
-                }
-                tbody.appendChild(tr);
-            }
-            table.appendChild(tbody);
-            return table;
-        };
-
-        while (i < lines.length) {
-            const line = lines[i];
-            // ---- 代码块（``` 围栏）：内容原样转义，不出 inline 解析 ----
-            if (/^\s*```/.test(line)) {
-                const buf = [];
-                i++;
-                while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
-                i++;   // 跳过收尾围栏（缺失也安全：循环条件兜底）
-                mk('pre', 'pi-md-pre', `<code>${esc(buf.join('\n'))}</code>`);
-                continue;
-            }
-            // ---- 表格：首行 |…| + 次行 |---|---| 分隔（GFM 管道表）----
-            // 连续管道行聚合成一张表；列数不齐按表头补齐/截断
-            if (isPipeRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
-                const rows = [splitPipeRow(line)];
-                i += 2;   // 跳过表头与分隔行
-                while (i < lines.length && isPipeRow(lines[i])) {
-                    rows.push(splitPipeRow(lines[i++]));
-                }
-                frag.appendChild(buildTable(rows));
-                continue;
-            }
-            // ---- 分隔线 ----
-            if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { mk('hr', 'pi-md-hr'); i++; continue; }
-            // ---- 标题（#### 最多吃到四级，粗体更大）----
-            const h = line.match(/^(#{1,4})\s+(.*)$/);
-            if (h) { mk('div', `pi-md-h pi-md-h${h[1].length}`, inline(h[2])); i++; continue; }
-            // ---- 列表（连续列表行聚合成一个 ul/ol，支持两档嵌套）----
-            if (isListItem(line)) {
-                const ordered = isOl(line);
-                const list = document.createElement(ordered ? 'ol' : 'ul');
-                list.className = 'pi-md-list';
-                while (i < lines.length && isListItem(lines[i])) {
-                    const cur = lines[i];
-                    const indent = cur.match(/^\s*/)[0].length;
-                    const item = cur.replace(/^\s*(?:[-*]|\d+[.、)])\s+/, '');
-                    if (indent >= 2 && list.lastElementChild) {
-                        // 嵌套档：挂到上一条目的子列表（没有则现建）
-                        let sub = list.lastElementChild.querySelector('ul,ol');
-                        if (!sub) {
-                            sub = document.createElement(isUl(cur) ? 'ul' : 'ol');
-                            sub.className = 'pi-md-list';
-                            list.lastElementChild.appendChild(sub);
-                        }
-                        const li = document.createElement('li');
-                        li.innerHTML = inline(item);
-                        sub.appendChild(li);
-                    } else {
-                        const li = document.createElement('li');
-                        li.innerHTML = inline(item);
-                        list.appendChild(li);
-                    }
-                    i++;
-                }
-                frag.appendChild(list);
-                continue;
-            }
-            // ---- 空行：段落分隔 ----
-            if (!line.trim()) { i++; continue; }
-            // ---- 普通段落：连续非空非结构行聚合为一段 ----
-            const buf = [];
-            while (i < lines.length && lines[i].trim() && !isListItem(lines[i]) &&
-                   !/^\s*```/.test(lines[i]) && !/^#{1,4}\s/.test(lines[i]) &&
-                   !/^\s*(-{3,}|\*{3,})\s*$/.test(lines[i])) {
-                buf.push(lines[i++]);
-            }
-            mk('p', 'pi-md-p', buf.map(inline).join('<br>'));
-        }
-        return frag;
-    }
-
-    /** 把文本块内容替换为 Markdown 渲染结果（定稿时调用；流式中不动）。
-     *  同时在块上记录源文本 srcText——收尾去重按它精确比较：渲染后的
-     *  textContent 已丢失 markdown 符号（**、- 等），拿它比对原始文本
-     *  永远不等，是文本复读漏去重的根因 */
-    _renderMarkdownInto(block, text) {
-        block.srcText = text;
-        block.content.innerHTML = '';
-        block.content.appendChild(this._renderMarkdown(text));
-    }
-
-    /** 执行中指示器：挂在最新消息框下方，圆弧 spinner 匀速旋转。
-     *  长沉默（长工具/长模型调用/磁盘扫描）期间给用户"还活着"的判断依据，
-     *  避免误判为死掉而人工干预（停止/重启/重发）——那才是回合的真正杀手 */
-    _showRunning(text) {
-        this._runningEl?.remove();
-        const el = document.createElement('div');
-        el.className = 'pi-running';
-        const spin = document.createElement('span');
-        spin.className = 'pi-running-spinner';
-        // 圆弧 + 圆头线帽的转圈图标（stroke 颜色经 currentColor 交给 CSS）
-        spin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-            '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" ' +
-            'stroke-width="2.5" stroke-linecap="round" stroke-dasharray="40 16.55"/></svg>';
-        const t = document.createElement('span');
-        t.textContent = text;
-        el.append(spin, t);
-        this.chat.messagesEl.appendChild(el);
-        this._runningEl = el;
-        this._runningTextEl = t;
-        this.chat.followBottom();
-    }
-
-    /** 改写执行中指示器文本（排队/轮询异常等场景） */
-    _setRunningText(text) {
-        if (this._runningTextEl) this._runningTextEl.textContent = text;
-    }
-
-    /** 失败收尾：先把说明与"重新继续"按钮写进当前回合，再收尾。
-     *  顺序不能反：_finish 会把 _wrap 置空，之后 _noteBlock 找不到父节点
-     *  抛异常、说明丢失（历史上失败说明全因此丢成"静默收泡"） */
-    _failNote(note) {
-        if (!this._wrap) { this._finish(); return; }
-        const b = this._noteBlock(note, true);
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'pi-retry-btn';
-        btn.textContent = '↻ 重新继续';
-        btn.title = '重发上一条消息，让 pi 从当前会话进度继续';
-        btn.addEventListener('click', () => {
-            btn.disabled = true;
-            const p = this._lastPrompt;
-            if (p) this.send(p.text, p.images);
-        });
-        b.el.appendChild(btn);
-        this._finish();
-        this.chat.followBottom();
     }
 
     // ==================== 发送与事件 ====================
@@ -985,51 +513,6 @@ class LlmPiAgent {
             // 不收尾回合——pi 可能只是慢
             this._unresponsiveNote(event);
         }
-    }
-
-    /** 疑似卡死说明块：[重启 pi 进程]/[继续等待] 双按钮，人工决定是否干预。
-     *  选重启后后续的 pi_process_exit 会自然收尾本轮并附"重新继续" */
-    _unresponsiveNote(event) {
-        const label = event.source === 'probe' ? '健康探测' : 'RPC 命令';
-        const text = `⚠️ pi 连续 ${event.count || '多'} 次${label}无应答，疑似卡死（程序不会自动重启 pi）`;
-        const block = this._wrap ? this._noteBlock(text, true) : this._standaloneNote(text);
-        const bar = document.createElement('div');
-        bar.className = 'pi-retry-bar';
-        const btnRestart = document.createElement('button');
-        btnRestart.type = 'button';
-        btnRestart.className = 'pi-retry-btn';
-        btnRestart.textContent = '↻ 重启 pi 进程';
-        const btnWait = document.createElement('button');
-        btnWait.type = 'button';
-        btnWait.className = 'pi-retry-btn';
-        btnWait.textContent = '… 继续等待';
-        btnRestart.addEventListener('click', async () => {
-            btnRestart.disabled = true;
-            btnWait.disabled = true;
-            btnRestart.textContent = '重启中…';
-            try {
-                await fetch('/api/pi/restart', { method: 'POST' });
-            } catch { /* 后端不可达：保留按钮状态，用户可自行重试 */ }
-        });
-        btnWait.addEventListener('click', () => {
-            bar.remove();
-            block.content.textContent = text + '（已选择继续等待，持续无应答将再次提醒）';
-        });
-        bar.append(btnRestart, btnWait);
-        block.el.appendChild(bar);
-        this.chat.followBottom();
-    }
-
-    /** 回合外说明块（流式外收到上报时没有 _wrap，直接挂消息区） */
-    _standaloneNote(text) {
-        const el = document.createElement('div');
-        el.className = 'pi-block pi-block-text';
-        const content = document.createElement('div');
-        content.className = 'pi-block-content';
-        content.textContent = text;
-        el.appendChild(content);
-        this.chat.messagesEl.appendChild(el);
-        return { el, content };
     }
 
     /**

@@ -404,6 +404,21 @@ describe('CoordinateLayout 加载容错归一（normalizeDraft，ADR 018）', ()
         expect('palette' in item).toBe(false);
     });
 
+    test('background 背景引用：/api/assets/ 引用保留，其余形态丢弃', () => {
+        const ok = CL.normalizeDraft({
+            width: 1024, height: 1024, items: [],
+            background: '/api/assets/file/ab12.png'
+        });
+        expect(ok.background).toBe('/api/assets/file/ab12.png');
+        // base64 / 临时地址 / 非字符串一律丢弃——只存稳定引用的契约
+        for (const bad of ['data:image/png;base64,AAAA', '/api/comfy/view?filename=x', '', 42, null]) {
+            const out = CL.normalizeDraft({
+                width: 1024, height: 1024, items: [], background: bad
+            });
+            expect('background' in out).toBe(false);
+        }
+    });
+
     test('归一结果可直接喂编译（剥离 shot 后）——恢复链路闭环', () => {
         const draft = CL.normalizeDraft(editorDraft());
         const forCompile = {

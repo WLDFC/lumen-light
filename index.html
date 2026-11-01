@@ -457,11 +457,15 @@
     <script defer src="js/canvas/NodeTextMirror.js"></script>
     <!-- 节点本体统一放在 js/canvas/nodes/ 下，共享运行时（NodeTextMirror）在外层 -->
     <script defer src="js/canvas/nodes/BaseCanvasNode.js"></script>
+    <!-- 出图节点占位图生命周期混入（API/Comfy/RunningHub 三节点 Object.assign，ADR 053） -->
+    <script defer src="js/canvas/nodes/GenNodePlaceholder.js"></script>
     <script defer src="js/canvas/nodes/PromptSkillBar.js"></script>
     <script defer src="js/canvas/nodes/PromptNode.js"></script>
     <script defer src="js/canvas/nodes/TextNode.js"></script>
     <!-- 生图节点的提示词/参考图链路收集模块（ImageGenNode 依赖，需先加载） -->
     <script defer src="js/utils/ImagePipeline.js"></script>
+    <!-- 画布对象交付出口纯决策层（下载/资产入库的「交什么」分流，依赖 NodeTypes） -->
+    <script defer src="js/utils/CanvasDelivery.js"></script>
     <!-- Comfy 工作流参数扫描与覆盖表编译（ComfyGenNode/面板参数区共用） -->
     <script defer src="js/utils/ComfyParamScanner.js"></script>
     <!-- RunningHub 工作流 JSON 导入解析：节点输入工作流 ID 拉取后解析参数用 -->
@@ -527,8 +531,12 @@
     <script defer src="js/components/LlmImageDrag.js"></script>
     <!-- 音频上传入口：聊天上传按钮等画布外入口的音频送画布单一出口 -->
     <script defer src="js/utils/AudioIngest.js"></script>
+    <!-- pi 回复块纯函数层（工具名映射/输出摘要/Markdown 转义与行内渲染/去重决策） -->
+    <script defer src="js/utils/PiAgentBlocks.js"></script>
     <script defer src="js/components/LlmVideoGen.js"></script>
     <script defer src="js/components/LlmPiAgent.js"></script>
+    <!-- pi 块渲染混入（DOM 装配/指示器/Markdown 渲染，须后于 LlmPiAgent 加载） -->
+    <script defer src="js/components/LlmPiAgentRender.js"></script>
     <script defer src="js/components/LlmWebBridge.js"></script>
     <script defer src="js/components/PiStatusLight.js"></script>
     <script defer src="js/components/LumenDropdown.js"></script>
@@ -600,6 +608,7 @@
     <script defer src="js/components/coordinate-editor/CoordHistory.js"></script>
     <script defer src="js/components/coordinate-editor/CoordDraftStore.js"></script>
     <script defer src="js/components/coordinate-editor/CoordAi.js"></script>
+    <script defer src="js/components/coordinate-editor/CoordBackground.js"></script>
     <!-- 设置分类面板需先于 SettingsManager 加载：SettingsManager 构造时会实例化它们 -->
     <script defer src="js/components/settings/SettingsGeneralPanel.js"></script>
     <script defer src="js/components/settings/SettingsApiPanel.js"></script>

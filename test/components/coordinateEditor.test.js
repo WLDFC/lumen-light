@@ -23,7 +23,7 @@
  * 被测文件是浏览器端经典脚本（依赖全局 window），用 vm 模块加载；
  * 构造函数依赖 DOM，测试用 Object.create + 桩方法绕开（只测纯逻辑方法）。
  * 拆分后（ADR 026）组件按职责域拆为 coordinate-editor/ 混入模块——
- * vm 同载主类与六个混入文件（混入 Object.assign 回原型，加载顺序同页面），
+ * vm 同载主类与七个混入文件（混入 Object.assign 回原型，加载顺序同页面），
  * 原型方法与实例字段契约不变，测试工厂零改动。
  * ==========================================================================
  */
@@ -52,7 +52,7 @@ vm.runInContext(
     context, { filename: 'CoordinateEditor.js' });
 // 子模块混入文件同载（须后于主类——Object.assign 进 CoordinateEditor.prototype）
 for (const f of ['CoordDom.js', 'CoordPanel.js', 'CoordStage.js',
-    'CoordHistory.js', 'CoordDraftStore.js', 'CoordAi.js']) {
+    'CoordHistory.js', 'CoordDraftStore.js', 'CoordAi.js', 'CoordBackground.js']) {
     vm.runInContext(
         fs.readFileSync(path.join(__dirname, '../../js/components/coordinate-editor/', f), 'utf-8'),
         context, { filename: f });
@@ -563,6 +563,33 @@ describe('CoordinateEditor._compile/_invalidateCompiled 输出框（右栏共用
         inst._invalidateCompiled();
         expect(inst.aiOutTa.value).toBe('SUMMARY: AI 输出留档');
     });
+
+    test('右栏为 AI 输出态时按右栏编译（文案取 AI、几何取草稿、不回写左侧）', () => {
+        const inst = makeOutInst();
+        inst.aiOutTa.value = 'SUMMARY: AI 整体描述。\nITEM 1: AI 元素文案。';
+        inst._outMode = 'ai';
+        inst._compile();
+        expect(inst.compiled.ok).toBe(true);
+        expect(inst.aiOutTa.value).toContain('AI 整体描述');
+        expect(inst.aiOutTa.value).toContain('AI 元素文案');
+        // 左侧草稿未被回写
+        expect(inst.draft.summary.caption).toBe('A poster.');
+        expect(inst.draft.items[0].caption).toBe('A cup.');
+        expect(inst._outMode).toBe('compile');
+    });
+
+    test('手动编辑草稿消费 AI 输出标记：之后编译按草稿（右栏内容保留供参考）', () => {
+        const inst = makeOutInst();
+        inst.aiOutTa.value = 'SUMMARY: AI 整体描述。\nITEM 1: AI 元素文案。';
+        inst._outMode = 'ai';
+        inst._invalidateCompiled();
+        expect(inst._outMode).toBe('');                       // 标记被消费
+        expect(inst.aiOutTa.value).toContain('AI 整体描述');  // 内容不清，仅供参考
+        inst._compile();
+        expect(inst.compiled.ok).toBe(true);
+        expect(inst.aiOutTa.value).toContain('A cup.');       // 按草稿编译
+        expect(inst.aiOutTa.value).not.toContain('AI 元素文案');
+    });
 });
 
 describe('CoordinateEditor 并排窗口（右缘留白与 ESC 守卫）', () => {
@@ -900,5 +927,115 @@ describe('CoordinateEditor 撤销/重做（快照式，ADR 017 决策十一）',
         expect(inst._undoStack).toHaveLength(0);
         expect(inst._redoStack).toHaveLength(0);
         expect(inst._textHistPending).toBeNull();
+    });
+});
+
+describe('CoordinateEditor 背景参考图与生成图透显（CoordBackground）', () => {
+    function makeBgInst() {
+        const inst = makeInstance([]);
+        inst._scheduleSave = () => {};
+        inst._loadBackgroundImg = () => {};
+        inst._syncBackgroundUi = () => {};
+        return inst;
+    }
+
+    test('_draftForCompile 剥离 background 编辑器侧字段（原稿不动）', () => {
+        const inst = makeBgInst();
+        inst.draft.background = '/api/assets/file/abc.png';
+        const out = inst._draftForCompile();
+        expect(out.background).toBeUndefined();
+        expect(inst.draft.background).toBe('/api/assets/file/abc.png');
+    });
+
+    test('_setBackground：URL 写草稿并触发保存；空串清除字段与内存图', () => {
+        const inst = makeBgInst();
+        const saves = [];
+        inst._scheduleSave = () => saves.push(1);
+        inst._setBackground('/api/assets/file/x.png');
+        expect(inst.draft.background).toBe('/api/assets/file/x.png');
+        expect(saves).toHaveLength(1);
+        inst._setBackground('');
+        expect(inst.draft.background).toBeUndefined();
+        expect(inst._bgImg).toBeNull();
+    });
+
+    test('_onGeneratedImage：开关关=忽略；开关开=稳定引用直接采纳为背景', async () => {
+        const inst = makeBgInst();
+        inst._genToggleEl = { checked: false };
+        inst._onGeneratedImage({ detail: { src: '/api/assets/file/a.png' } });
+        expect(inst.draft.background).toBeUndefined();
+
+        inst._genToggleEl.checked = true;
+        await inst._onGeneratedImage({ detail: { src: '/api/assets/file/a.png' } });
+        expect(inst.draft.background).toBe('/api/assets/file/a.png');
+        // 同图重复事件不去重写草稿（引用相同无动作也不报错）
+        await inst._onGeneratedImage({ detail: { src: '/api/assets/file/a.png' } });
+        expect(inst.draft.background).toBe('/api/assets/file/a.png');
+    });
+
+    test('_adoptReferenceSrc：非稳定引用（data URL）无 ImageExport 时如实报错不写草稿', async () => {
+        const inst = makeBgInst();
+        inst.visible = true;   // 报错写状态栏的路径只在编辑器可见时生效
+        inst._genToggleEl = { checked: true };
+        await inst._adoptReferenceSrc('data:image/png;base64,AAAA');
+        expect(inst.draft.background).toBeUndefined();
+        expect(inst.statusCalls.at(-1).isError).toBe(true);
+        expect(inst.statusCalls.at(-1).text).toContain('生成图入参考失败');
+    });
+
+    test('_bgOpacity：localStorage 缺省回落 0.5，越界值不采纳', () => {
+        const inst = makeBgInst();
+        expect(inst._bgOpacity()).toBe(0.5);
+        context.localStorage.setItem('lumenLight.coordBgOpacity', '0.3');
+        expect(inst._bgOpacity()).toBe(0.3);
+        context.localStorage.setItem('lumenLight.coordBgOpacity', '2');
+        expect(inst._bgOpacity()).toBe(0.5);
+    });
+});
+
+describe('CoordinateEditor 生成图监听时序（构造器即挂）', () => {
+    test('_genToggleOn：无工具条 DOM 时回落 localStorage', () => {
+        const inst = makeInstance([]);
+        expect(inst._genToggleEl).toBeUndefined();
+        expect(inst._genToggleOn()).toBe(false);
+        context.localStorage.setItem('lumenLight.coordGenRef', '1');
+        expect(inst._genToggleOn()).toBe(true);
+        context.localStorage.removeItem('lumenLight.coordGenRef');
+    });
+
+    test('_attachGeneratedImageListener：幂等只挂一次', () => {
+        const added = [];
+        const orig = context.window.addEventListener;
+        context.window.addEventListener = (t) => added.push(t);
+        try {
+            const inst = makeInstance([]);
+            inst._attachGeneratedImageListener();
+            inst._attachGeneratedImageListener();
+            expect(added.filter((t) => t === 'lumenGeneratedImage')).toHaveLength(1);
+        } finally {
+            context.window.addEventListener = orig;
+        }
+    });
+});
+
+describe('CoordinateEditor 生成图 src 归一（_normalizeGenSrc）', () => {
+    const inst = makeInstance([]);
+
+    test('裸 base64（WS new-image 契约）补 data: 前缀', () => {
+        const out = inst._normalizeGenSrc('iVBORw0KGgoAAAABJRU5ErkJggg==');
+        expect(out).toBe('data:image/png;base64,iVBORw0KGgoAAAABJRU5ErkJggg==');
+    });
+
+    test('data URL / 资产引用 / 同源路径 / http(s) 地址原样放行', () => {
+        expect(inst._normalizeGenSrc('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+        expect(inst._normalizeGenSrc('/api/assets/file/x.png')).toBe('/api/assets/file/x.png');
+        expect(inst._normalizeGenSrc('/api/comfy/view?filename=a')).toBe('/api/comfy/view?filename=a');
+        expect(inst._normalizeGenSrc('http://127.0.0.1:8188/view?filename=a')).toBe('http://127.0.0.1:8188/view?filename=a');
+    });
+
+    test('空值/非字符串返回空串（上游忽略）', () => {
+        expect(inst._normalizeGenSrc('')).toBe('');
+        expect(inst._normalizeGenSrc(null)).toBe('');
+        expect(inst._normalizeGenSrc(42)).toBe('');
     });
 });

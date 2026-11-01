@@ -1,13 +1,14 @@
 /**
  * ==========================================================================
  * CoordinateEditor 子模块：AI 写提示词（自 CoordinateEditor.js 拆出）
- * 作用：把当前布局草稿交给 LLM 补全 summary.caption 与各元素 caption/text
- *       （几何保持用户手画不动）——模型/技能双下拉（LumenDropdown）、模型
- *       优先级链（显式选择 → LLM 面板 Agent 档 piModelKey → 技能栏模型 →
+ * 作用：把当前布局草稿交给 LLM 写文案——模型/技能双下拉（LumenDropdown）、
+ *       模型优先级链（显式选择 → LLM 面板 Agent 档 piModelKey → 技能栏模型 →
  *       第一序聊天模型，ADR 017 决策八）、system 提示（行协议指令 + 选定
- *       技能正文经框架语隔离注入作写作指引）、回复解析（行协议 SUMMARY:/
- *       ITEM n:/ITEM n TEXT: 优先，JSON 兜底两轮缺陷修复）、回填合并
- *       （只取文案不动几何、数量不足如实计数）与运行态锁。
+ *       技能正文经框架语隔离注入作写作指引）与运行态锁。
+ *       AI 回复只进右栏留档框（不自动回填左侧草稿，用户偏好 2026-11-02）；
+ *       回复解析（行协议 SUMMARY:/ITEM n:/ITEM n TEXT: 优先，JSON 兜底两轮
+ *       缺陷修复）与回填合并（只取文案不动几何、数量不足如实计数）能力
+ *       保留并测试覆盖，恢复一键回填只需在 _aiFill 里调用 _mergeAiReply。
  * 契约：原型混入（partial-class，ADR 026）——方法 Object.assign 进
  *       CoordinateEditor.prototype，this 即编辑器实例；须后于主类加载。
  *       fetch/localStorage 用裸全局引用（测试经 vm context 注入桩）。
@@ -220,11 +221,15 @@ Object.assign(window.CoordinateEditor.prototype, {
             if (!(response.ok && result.status === 'ok' && result.reply)) {
                 throw new Error(result.message || '模型未返回内容');
             }
-            this.aiOutTa.value = result.reply;          // 右栏留档最近一次输出
+            // 右栏留档：AI 输出只进右栏，不自动回填左侧元素卡与整体描述
+            // （用户偏好 2026-11-02：AI 文案由用户自行挑选复制进草稿）。
+            // 解析/合并能力保留在 _parseAiResult/_mergeAiReply（测试覆盖），
+            // 恢复一键回填 = 在此调用 this._mergeAiReply(result.reply)
+            this.aiOutTa.value = result.reply;
             this.jsonNote.textContent = '';
             this._outMode = 'ai';
-            this._mergeAiReply(result.reply);   // 状态文案由合并函数如实汇报
-            window.socket?.showNotification?.('坐标编辑：AI 文案已填入');
+            this._status('AI 文案已生成到右栏（左侧草稿未改动）', false);
+            window.socket?.showNotification?.('坐标编辑：AI 文案已生成到右栏');
         } catch (err) {
             this._status('AI 写提示词失败: ' + err.message, true);
         } finally {
@@ -312,30 +317,17 @@ Object.assign(window.CoordinateEditor.prototype, {
         }
     },
 
-    /** 合并 AI 文案：只取 summary.caption 与逐元素 caption/text，几何一律保持用户手画。
-     *  行协议与 JSON 两种解析共用（_parseAiResult）；元素按序号对应，模型少给了
-     *  几个就少填几个、如实计数，不整体作废。JSON 路径下 items 嵌进 summary 的
-     *  变形（实测 mimo 出过）先归一到根级。 */
+    /**
+     * 合并 AI 文案：只取 summary.caption 与逐元素 caption/text，几何一律保持用户手画。
+     * 行协议与 JSON 两种解析共用（_parseAiResult）；元素按序号对应，模型少给了
+     * 几个就少填几个、如实计数，不整体作废。JSON 路径下 items 嵌进 summary 的
+     * 变形（实测 mimo 出过）先归一到根级。
+     * 【当前未接线】AI 输出只进右栏留档（用户偏好 2026-11-02）；但编译 JSON
+     * 会在右栏为 AI 输出态时经 _applyAiParsed 参与编译（不回写左侧）。 */
     _mergeAiReply(reply) {
         const before = this._histSnapshot();
-        let parsed = this._parseAiResult(reply);
-        if (!Array.isArray(parsed.items) && parsed.summary && Array.isArray(parsed.summary.items)) {
-            parsed = { summary: { caption: parsed.summary.caption }, items: parsed.summary.items };
-        }
-        const summaryOk = typeof parsed?.summary?.caption === 'string' && parsed.summary.caption.trim() !== '';
-        if (summaryOk) this.draft.summary.caption = parsed.summary.caption;
-
-        const itemTotal = this.draft.items.length;
-        let itemFilled = 0;
-        if (Array.isArray(parsed.items)) {
-            this.draft.items.forEach((item, i) => {
-                const ai = parsed.items[i] || {};
-                if (typeof ai.caption === 'string' && ai.caption.trim()) { item.caption = ai.caption; itemFilled++; }
-                if (item.label === 'text' && typeof ai.text === 'string' && ai.text.trim()) {
-                    item.text = ai.text;
-                }
-            });
-        }
+        const parsed = this._parseAiResult(reply);
+        const { summaryOk, itemFilled, itemTotal } = this._applyAiParsed(this.draft, parsed);
         // 状态如实汇报：部分缺失时点明缺了什么，不谎报全部完成
         let msg = 'AI 已填写文案';
         if (!summaryOk) msg = 'AI 未返回整体描述';
@@ -344,6 +336,35 @@ Object.assign(window.CoordinateEditor.prototype, {
         this._status(msg, !summaryOk && itemFilled === 0);
         this._invalidateCompiled();
         this._renderAll();
+    },
+
+    /**
+     * 把解析好的 AI 文案应用到任意草稿对象（不碰 UI/历史）：
+     * summary.caption + 逐元素 caption/text，几何与字段守卫同 _mergeAiReply。
+     * @param {Object} draftObj - 目标草稿（this.draft 或编译用克隆）
+     * @param {{summary?:{caption?:string}, items?:Array<{caption?:string,text?:string}>}} parsed
+     * @returns {{summaryOk: boolean, itemFilled: number, itemTotal: number}} 计数供状态栏
+     */
+    _applyAiParsed(draftObj, parsed) {
+        // items 嵌进 summary 的变形（实测 mimo 出过）先归一到根级
+        if (!Array.isArray(parsed?.items) && parsed?.summary && Array.isArray(parsed.summary.items)) {
+            parsed = { summary: { caption: parsed.summary.caption }, items: parsed.summary.items };
+        }
+        const summaryOk = typeof parsed?.summary?.caption === 'string' && parsed.summary.caption.trim() !== '';
+        if (summaryOk) draftObj.summary.caption = parsed.summary.caption;
+
+        const itemTotal = draftObj.items.length;
+        let itemFilled = 0;
+        if (Array.isArray(parsed.items)) {
+            draftObj.items.forEach((item, i) => {
+                const ai = parsed.items[i] || {};
+                if (typeof ai.caption === 'string' && ai.caption.trim()) { item.caption = ai.caption; itemFilled++; }
+                if (item.label === 'text' && typeof ai.text === 'string' && ai.text.trim()) {
+                    item.text = ai.text;
+                }
+            });
+        }
+        return { summaryOk, itemFilled, itemTotal };
     },
 
     _setAiRunning(running) {

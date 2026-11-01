@@ -43,9 +43,9 @@ Object.assign(window.CoordinateEditor.prototype, {
         this.itemCountEl.textContent = this.draft.items.length ? `（${this.draft.items.length}）` : '';
         this.draft.items.forEach((item, i) => {
             const color = this._colorFor(item.cid);
-            // 卡片默认折叠（仅头部行 + 标题框），按 cid 记忆展开态；
+            // 卡片默认展开（完整表单），手动收起后按 cid 记忆；
             // is-hidden = 眼睛钮隐藏的框（舞台不画、不可命中、不参与磁吸）
-            const collapsed = !this._expandedCids.has(item.cid);
+            const collapsed = this._collapsedCids.has(item.cid);
             const hidden = this._hiddenCids.has(item.cid);
             const card = document.createElement('div');
             card.className = 'coord-item' + (i === this.selected ? ' selected' : '') +
@@ -160,8 +160,8 @@ Object.assign(window.CoordinateEditor.prototype, {
 
             // 折叠开关：只翻卡片类名，不重建列表（不打断其他卡片的输入焦点）
             card.querySelector('.coord-item-fold').addEventListener('click', () => {
-                if (this._expandedCids.has(item.cid)) this._expandedCids.delete(item.cid);
-                else this._expandedCids.add(item.cid);
+                if (this._collapsedCids.has(item.cid)) this._collapsedCids.delete(item.cid);
+                else this._collapsedCids.add(item.cid);
                 card.classList.toggle('collapsed');
             });
 

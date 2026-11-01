@@ -172,6 +172,13 @@ class LumenSocket {
             if (window.generationFeedback) {
                 window.generationFeedback.hide();
             }
+            // 生成图事件（默认落图分支专属——有节点消费的分支已经
+            // PlaceholderManager.replace 派发过，不在此重复）。src 补
+            // data: 前缀成可用 URL——msg.image 是裸 base64（与下方
+            // addImageToCanvas 的入参契约同源，那边同样自己补前缀）
+            window.dispatchEvent(new CustomEvent('lumenGeneratedImage', {
+                detail: { src: 'data:image/png;base64,' + msg.image }
+            }));
             this.addImageToCanvas(msg.image, placeholderPosition, msg.prompt, genInfo);
         }
 

@@ -789,7 +789,9 @@ class RunningHubGenNode extends BaseCanvasNode {
         const handle = window.placeholderManager.getByOwner(this)[0];
 
         if (handle) {
-            this.replacePlaceholder(handle, base64, prompt, negativePrompt);
+            // 不 await：回图到达即触发落图，失败只记日志（防未处理 rejection）
+            this.replacePlaceholder(handle, base64, prompt, negativePrompt)
+                .catch((err) => console.error('RunningHub 节点落图失败:', err));
         } else {
             this._appendImageRightOfNode(base64, prompt, negativePrompt);
         }
@@ -881,92 +883,11 @@ class RunningHubGenNode extends BaseCanvasNode {
         this._finishGeneration();
     }
 
-    /**
-     * 创建生成占位图（创建/动画统一交给全局占位图管理器）
-     * 占位图归属标记为本节点，回流的图片/视频按归属队列先进先出消费
-     * @param {{width: number, height: number}|null} res - 产出尺寸（未知为 null，回退 1024）
-     * @param {number} [index] - 多任务时的序号（沿对角线级联偏移，避免相互遮挡）
-     * @returns {Object} 占位图句柄
-     */
-    createPlaceholder(res, index = 0) {
-        const width = res ? res.width : 1024;
-        const height = res ? res.height : 1024;
-
-        // 位置：节点右侧留出间距，垂直居中；多任务沿对角线级联
-        const cascade = index * RunningHubGenNode.PLACEHOLDER_CASCADE;
-        const x = this.x + this.width + RunningHubGenNode.PLACEHOLDER_GAP + cascade;
-        const y = this.y + this.height / 2 - height / 2 + cascade;
-
-        return window.placeholderManager.create(this, { x, y, width, height });
-    }
-
-    /**
-     * 移除占位图（生成失败 / 节点销毁时调用），委托全局占位图管理器
-     * @param {Object} [target] - 要移除的占位图句柄；缺省时移除本节点全部占位图
-     */
-    removePlaceholder(target) {
-        if (target) {
-            window.placeholderManager.remove(target);
-        } else {
-            window.placeholderManager.removeAll(this);
-        }
-    }
-
-    /**
-     * 用真实生成图片替换占位图：委托全局管理器按占位图中心、原始尺寸落图
-     * @param {Object} placeholder - 占位图句柄
-     * @param {string} base64 - 裸 base64 图片数据
-     * @param {string} prompt - 生成时使用的提示词
-     * @param {string} negativePrompt - 生成时使用的负面提示词
-     * @returns {Promise<Object>} 落图后的真实图片对象
-     */
-    replacePlaceholder(placeholder, base64, prompt, negativePrompt) {
-        return window.placeholderManager.replace(
-            placeholder,
-            'data:image/png;base64,' + base64,
-            {
-                name: `rh_gen_${Date.now()}.png`,
-                source: 'runninghub',
-                prompt: prompt,
-                negativePrompt: negativePrompt,
-                genInfo: this._activeGenInfo || null
-            }
-        ).catch((err) => {
-            console.error('RunningHub 节点落图失败:', err);
-        });
-    }
-
-    /**
-     * 无占位图可替换时的兜底落图：放在节点右侧空白处（垂直居中）
-     * @param {string} base64 - 裸 base64 图片数据
-     * @param {string} prompt - 生成时使用的提示词
-     * @param {string} negativePrompt - 生成时使用的负面提示词
-     */
-    _appendImageRightOfNode(base64, prompt, negativePrompt) {
-        const img = new Image();
-        img.onload = () => {
-            img.onload = null;
-            this.canvas.images.images.push({
-                id: LumenLight.generateId(),
-                name: `rh_gen_${Date.now()}.png`,
-                img: img,
-                x: this.x + this.width + RunningHubGenNode.PLACEHOLDER_GAP,
-                y: this.y + this.height / 2 - img.height / 2,
-                width: img.width,
-                height: img.height,
-                selected: false,
-                source: 'runninghub',
-                prompt: prompt,
-                negativePrompt: negativePrompt,
-                ...(this._activeGenInfo ? { genInfo: this._activeGenInfo } : {}),
-                created: Date.now()
-            });
-            this.canvas.draw();
-        };
-        img.src = 'data:image/png;base64,' + base64;
-    }
-
     // ==================== 生命周期 ====================
+    // 占位图生命周期（createPlaceholder/removePlaceholder/replacePlaceholder/
+    // _appendImageRightOfNode 兜底落图）由 GenNodePlaceholder 混入提供
+    // （文件末尾 Object.assign，ADR 053）；几何与选中同步由基类
+    // BaseCanvasNode 提供（LAYOUT_MODE='design' 布局模式）
 
     /**
      * 从 DOM 移除节点（删除时调用）。
@@ -1016,6 +937,13 @@ RunningHubGenNode.DEFAULT_HEIGHT = 2800;   // 默认高度：比 Comfy 生图节
 RunningHubGenNode.DEFAULT_TITLE = 'RunningHub'; // 默认标题（双击标题可自定义）
 RunningHubGenNode.PLACEHOLDER_GAP = 300;   // 占位图与节点右缘的间距（px）
 RunningHubGenNode.PLACEHOLDER_CASCADE = 160; // 多任务占位图的对角线级联间距（px）
+// 占位图混入配置（GenNodePlaceholder，ADR 053）：RH 回流传裸 base64
+RunningHubGenNode.PLACEHOLDER_SOURCE = 'runninghub';
+RunningHubGenNode.PLACEHOLDER_NAME_PREFIX = 'rh_gen';
+RunningHubGenNode.PLACEHOLDER_INPUT = 'base64';
+
+// 占位图生命周期混入（ADR 053）
+Object.assign(RunningHubGenNode.prototype, GenNodePlaceholder);
 // 无进展看门狗超时（毫秒）：与后端轮询上限（30 分钟）对齐并留出结果
 // 下载转存余量——前端比后端先放弃会导致长任务结果回流时被丢弃
 RunningHubGenNode.WATCHDOG_TIMEOUT = 35 * 60 * 1000;

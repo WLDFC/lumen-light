@@ -688,7 +688,9 @@ class ComfyGenNode extends BaseCanvasNode {
         const handle = window.placeholderManager.getByOwner(this)[0];
 
         if (handle) {
-            this.replacePlaceholder(handle, base64, prompt, negativePrompt);
+            // 不 await：回图到达即触发落图，失败只记日志（防未处理 rejection）
+            this.replacePlaceholder(handle, base64, prompt, negativePrompt)
+                .catch((err) => console.error('Comfy 生图节点落图失败:', err));
         } else {
             // 占位图已被清空（如存档恢复打断生成）：图片仍要落到画布，
             // 放在节点右侧避免与现有内容重叠
@@ -762,91 +764,11 @@ class ComfyGenNode extends BaseCanvasNode {
         }
     }
 
-    /**
-     * 在节点右侧创建生成占位图（创建/动画统一交给全局占位图管理器）
-     * 占位图归属标记为本节点，WebSocket 回流的图片按归属队列先进先出替换
-     * @param {{width: number, height: number}|null} res - 生成尺寸
-     *   （无法预知时为 null，回退 1024）
-     * @param {number} [index] - 多张生成时的序号（沿对角线级联偏移，避免相互遮挡）
-     * @returns {Object} 占位图句柄
-     */
-    createPlaceholder(res, index = 0) {
-        const width = res ? res.width : 1024;
-        const height = res ? res.height : 1024;
-
-        // 位置：节点右侧留出间距，垂直居中；多张生成时沿对角线级联
-        const cascade = index * ComfyGenNode.PLACEHOLDER_CASCADE;
-        const x = this.x + this.width + ComfyGenNode.PLACEHOLDER_GAP + cascade;
-        const y = this.y + this.height / 2 - height / 2 + cascade;
-
-        return window.placeholderManager.create(this, { x, y, width, height });
-    }
-
-    /**
-     * 移除占位图（生成失败 / 节点销毁时调用），委托全局占位图管理器
-     * @param {Object} [target] - 要移除的占位图句柄；缺省时移除本节点全部占位图
-     */
-    removePlaceholder(target) {
-        if (target) {
-            window.placeholderManager.remove(target);
-        } else {
-            window.placeholderManager.removeAll(this);
-        }
-    }
-
-    /**
-     * 用真实生成图片替换占位图：委托全局管理器按占位图中心、原始尺寸落图
-     * @param {Object} placeholder - 占位图句柄
-     * @param {string} base64 - PNG 裸 base64 数据（不含 data URL 前缀）
-     * @param {string} prompt - 生成时使用的提示词
-     * @param {string} negativePrompt - 生成时使用的负面提示词
-     * @returns {Promise<Object>} 落图后的真实图片对象
-     */
-    replacePlaceholder(placeholder, base64, prompt, negativePrompt) {
-        return window.placeholderManager.replace(
-            placeholder,
-            'data:image/png;base64,' + base64,
-            {
-                name: `comfy_gen_${Date.now()}.png`,
-                source: 'comfy',
-                prompt: prompt,
-                negativePrompt: negativePrompt,
-                genInfo: this._activeGenInfo || null
-            }
-        ).catch((err) => {
-            console.error('Comfy 生图节点落图失败:', err);
-        });
-    }
-
-    /**
-     * 无占位图可替换时的兜底落图：放在节点右侧空白处（垂直居中）
-     * @param {string} base64 - PNG 裸 base64 数据
-     * @param {string} prompt - 生成时使用的提示词
-     * @param {string} negativePrompt - 生成时使用的负面提示词
-     */
-    _appendImageRightOfNode(base64, prompt, negativePrompt) {
-        const img = new Image();
-        img.onload = () => {
-            img.onload = null;
-            this.canvas.images.images.push({
-                id: LumenLight.generateId(),
-                name: `comfy_gen_${Date.now()}.png`,
-                img: img,
-                x: this.x + this.width + ComfyGenNode.PLACEHOLDER_GAP,
-                y: this.y + this.height / 2 - img.height / 2,
-                width: img.width,
-                height: img.height,
-                selected: false,
-                source: 'comfy',
-                prompt: prompt,
-                negativePrompt: negativePrompt,
-                ...(this._activeGenInfo ? { genInfo: this._activeGenInfo } : {}),
-                created: Date.now()
-            });
-            this.canvas.draw();
-        };
-        img.src = 'data:image/png;base64,' + base64;
-    }
+    // ==================== 生命周期 ====================
+    // 占位图生命周期（createPlaceholder/removePlaceholder/replacePlaceholder/
+    // _appendImageRightOfNode 兜底落图）由 GenNodePlaceholder 混入提供
+    // （文件末尾 Object.assign，ADR 053）；几何与选中同步由基类
+    // BaseCanvasNode 提供（LAYOUT_MODE='design' 布局模式）
 
     // ==================== 生命周期 ====================
     // 几何（ns/updateTransform/getPortPoint/setGeometry/contains 等）与
@@ -893,6 +815,13 @@ ComfyGenNode.DEFAULT_HEIGHT = 2600;   // 默认高度（行数比 LLM 生图节�
 ComfyGenNode.DEFAULT_TITLE = 'Comfy Generate'; // 默认标题（双击标题可自定义）
 ComfyGenNode.PLACEHOLDER_GAP = 300;   // 占位图与节点右缘的间距（px）
 ComfyGenNode.PLACEHOLDER_CASCADE = 160; // 多张占位图的对角线级联间距（px）
+// 占位图混入配置（GenNodePlaceholder，ADR 053）：Comfy 回流传 PNG 裸 base64
+ComfyGenNode.PLACEHOLDER_SOURCE = 'comfy';
+ComfyGenNode.PLACEHOLDER_NAME_PREFIX = 'comfy_gen';
+ComfyGenNode.PLACEHOLDER_INPUT = 'base64';
+
+// 占位图生命周期混入（ADR 053）
+Object.assign(ComfyGenNode.prototype, GenNodePlaceholder);
 // LOADER_TYPES 与参数扫描/覆盖表编译已迁至 js/utils/ComfyParamScanner.js，
 // 数量上限常量在 ComfyParamRows（maxCount，默认 8）
 

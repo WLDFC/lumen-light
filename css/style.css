@@ -131,29 +131,7 @@ canvas.panning { cursor: grabbing !important; }
     display: block;
 }
 
-/* 右上角关闭按钮 */
-.canvas-video-player-close {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 22px;
-    height: 22px;
-    border: none;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 101;
-}
-
-.canvas-video-player-close:hover {
-    background: rgba(255, 80, 80, 0.8);
-}
+/* 右上角关闭按钮已随按钮移除（关闭靠外部点击收起播放器） */
 
 /* ==================== 画布撤销/重做轻提示（CanvasHistory） ====================
    左下角浮出：撤销/重做了什么（"已撤销：移动图片"），单元素复用、

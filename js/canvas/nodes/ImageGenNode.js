@@ -513,56 +513,9 @@ class ImageGenNode extends BaseCanvasNode {
         }
     }
 
-    /**
-     * 在节点右侧创建生成占位图（创建/动画统一交给全局占位图管理器）
-     * 占位图归属标记为本节点，句柄由 generate() 的请求闭包持有，
-     * 响应回来按句柄精确替换
-     * @param {{width: number, height: number}|null} res - 生成尺寸（auto 时为 null）
-     * @param {number} [index] - 多张生成时的序号（沿对角线级联偏移，避免相互遮挡）
-     * @returns {Object} 占位图句柄
-     */
-    createPlaceholder(res, index = 0) {
-        const width = res ? res.width : 1024;
-        const height = res ? res.height : 1024;
-
-        // 位置：节点右侧留出间距，垂直居中；多张生成时沿对角线级联
-        const cascade = index * ImageGenNode.PLACEHOLDER_CASCADE;
-        const x = this.x + this.width + ImageGenNode.PLACEHOLDER_GAP + cascade;
-        const y = this.y + this.height / 2 - height / 2 + cascade;
-
-        return window.placeholderManager.create(this, { x, y, width, height });
-    }
-
-    /**
-     * 移除占位图（生成失败 / 节点销毁时调用），委托全局占位图管理器
-     * @param {Object} [target] - 要移除的占位图句柄；缺省时移除本节点全部占位图
-     */
-    removePlaceholder(target) {
-        if (target) {
-            window.placeholderManager.remove(target);
-        } else {
-            window.placeholderManager.removeAll(this);
-        }
-    }
-
-    /**
-     * 用真实生成图片替换占位图：委托全局管理器按占位图中心、原始尺寸落图
-     * @param {Object} placeholder - 占位图句柄
-     * @param {string} imageUrl - 生成图片地址（远程 URL 或 data URL）
-     * @param {string} prompt - 生成时使用的提示词
-     * @returns {Promise<Object>} 落图后的真实图片对象
-     */
-    replacePlaceholder(placeholder, imageUrl, prompt) {
-        return window.placeholderManager.replace(placeholder, imageUrl, {
-            name: `image_gen_${Date.now()}.png`,
-            source: 'image-gen',
-            prompt: prompt,
-            negativePrompt: '',
-            genInfo: this._activeGenInfo || null
-        });
-    }
-
     // ==================== 生命周期 ====================
+    // 占位图生命周期（createPlaceholder/removePlaceholder/replacePlaceholder）
+    // 由 GenNodePlaceholder 混入提供（文件末尾 Object.assign，ADR 053）；
     // 几何（ns/updateTransform/getPortPoint/setGeometry/contains 等）与
     // 选中同步由基类 BaseCanvasNode 提供（LAYOUT_MODE='design' 布局模式）
 
@@ -607,7 +560,14 @@ ImageGenNode.DEFAULT_HEIGHT = 2048;   // 默认高度（px）
 ImageGenNode.DEFAULT_TITLE = 'Generate'; // 默认标题（双击标题可自定义）
 ImageGenNode.PLACEHOLDER_GAP = 300;   // 占位图与节点右缘的间距（px）
 ImageGenNode.PLACEHOLDER_CASCADE = 160; // 多张占位图的对角线级联间距（px）
+// 占位图混入配置（GenNodePlaceholder，ADR 053）：API 生图传现成地址
+ImageGenNode.PLACEHOLDER_SOURCE = 'image-gen';
+ImageGenNode.PLACEHOLDER_NAME_PREFIX = 'image_gen';
+ImageGenNode.PLACEHOLDER_INPUT = 'url';
 ImageGenNode.MAX_COUNT = 8;           // 同时生成数量的上限（并发请求数）
+
+// 占位图生命周期混入（ADR 053）
+Object.assign(ImageGenNode.prototype, GenNodePlaceholder);
 
 // 将 ImageGenNode 类暴露到全局作用域
 window.ImageGenNode = ImageGenNode;

@@ -60,6 +60,9 @@ class LlmLightbox {
             this.lightboxImgEl.src = src;
         }
         this.lightboxEl.classList.add('active');
+        // 清掉打开前遗留的页面选区：双击打开灯箱的那一下可能已把底下
+        // 的面板文字/图片选中（蓝色高亮），不清理会一直糊在画面上
+        window.getSelection?.()?.removeAllRanges?.();
     }
 
     /**

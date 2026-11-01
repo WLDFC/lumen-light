@@ -45,6 +45,9 @@ Object.assign(window.CoordinateEditor.prototype, {
         this._view = { scale, ox, oy };
         const X = (v) => ox + v * scale, Y = (v) => oy + v * scale;
 
+        // 背景参考图（CoordBackground 混入）：铺满画幅半透明，画在元素框下方
+        this._drawBackground(ctx, X, Y, scale);
+
         // 画幅底与边框
         ctx.fillStyle = 'rgba(255,255,255,0.03)';
         ctx.fillRect(X(0), Y(0), d.width * scale, d.height * scale);
@@ -380,7 +383,6 @@ Object.assign(window.CoordinateEditor.prototype, {
             } else {
                 const box = CoordinateLayout.normalizeBox(drag.box, this.draft.width, this.draft.height);
                 const cid = this._nextCid++;
-                this._expandedCids.add(cid);   // 新画的框自动展开，方便立即填写描述
                 this.draft.items.push({ cid, label: 'object', caption: '', bbox: box });
                 this.selected = this.draft.items.length - 1;
                 this._commitHistory(drag.histSnap, '画框');

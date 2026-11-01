@@ -45,8 +45,10 @@ Object.assign(window.CoordinateEditor.prototype, {
                         </section>
                     </aside>
                     <div class="coord-stage-wrap">
-                        <canvas class="coord-stage"></canvas>
-                        <div class="coord-stage-hint">空白处拖拽画框 · 拖动移动 · 锚点缩放 · 同位连点穿透选层 · Shift 画正方 · Delete 删除选中</div>
+                        <div class="coord-stage-area">
+                            <canvas class="coord-stage"></canvas>
+                            <div class="coord-stage-hint">空白处拖拽画框 · 拖动移动 · 锚点缩放 · 同位连点穿透选层 · Shift 画正方 · Delete 删除选中</div>
+                        </div>
                     </div>
                     <aside class="coord-side coord-out-side">
                         <section class="coord-sec">
@@ -64,7 +66,7 @@ Object.assign(window.CoordinateEditor.prototype, {
                         </section>
                         <section class="coord-sec coord-sec-ai-out">
                             <div class="coord-sec-title">输出 <span class="coord-out-note">AI 文案 · 编译 JSON</span></div>
-                            <textarea class="coord-ai-out" readonly spellcheck="false" placeholder="点「AI 写提示词」或「编译 JSON」后，最近一次输出显示在这里（可手动选择复制）"></textarea>
+                            <textarea class="coord-ai-out" spellcheck="false" placeholder="AI 写提示词 / 编译 JSON 的输出显示在这里，可直接编辑——AI 输出态下改完再编译，按你改后的文案编译"></textarea>
                             <div class="coord-json-note"></div>
                         </section>
                     </aside>
@@ -182,7 +184,6 @@ Object.assign(window.CoordinateEditor.prototype, {
             const before = this._histSnapshot();
             const { width: w, height: h } = this.draft;
             const cid = this._nextCid++;
-            this._expandedCids.add(cid);   // 新元素自动展开，方便立即填写描述
             this.draft.items.push({
                 cid,
                 label: 'object', caption: '',
@@ -238,8 +239,9 @@ Object.assign(window.CoordinateEditor.prototype, {
             if (!confirm('新建将清空当前草稿（含已自动保存的内容），确定？')) return;
             this.draft = CoordinateLayout.createDraft();
             this.selected = -1;
-            this._expandedCids.clear();   // 折叠态一并归零（默认折叠）
+            this._collapsedCids.clear();  // 收起态一并归零（默认展开）
             this._hiddenCids.clear();     // 眼睛隐藏态一并归零
+            this._setBackground('');      // 背景参考图一并清除（草稿字段+舞台+悬浮条）
             this._resetHistory();         // 新基线：旧历史作废
             this._invalidateCompiled();   // 触发自动保存新草稿
             this.aiOutTa.value = '';
@@ -283,6 +285,9 @@ Object.assign(window.CoordinateEditor.prototype, {
         window.addEventListener('resize', () => {
             if (this.visible) this._renderStage();
         });
+
+        // 舞台悬浮工具条：背景参考图与生成图透显（CoordBackground 混入）
+        this._buildBackgroundTools();
 
         // 右缘拖拽手柄：调整留给 Comfy/LLM 面板的宽度（窄屏由媒体查询隐藏）
         const rz = document.createElement('div');

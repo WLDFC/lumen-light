@@ -680,13 +680,16 @@ class ImageToolbar {
         const errors = [];
         for (const imgObj of this.selectedImages) {
             try {
-                // 所见即所得：有编辑笔迹时保存合成图（与下载同策略）
-                const src = this.canvas.images.getCompositeSrc(imgObj);
-                if (!src) throw new Error('图片没有可用的图像源');
+                // 入库决策走 CanvasDelivery 纯函数：视频对象交付封面、
+                // 文件名强制 .png（封面 PNG 不挂 .mp4 名入库）
+                const plan = CanvasDelivery.getAssetPlan(
+                    imgObj,
+                    NodeTypes.isVideo(imgObj.source) ? null : this.canvas.images.getCompositeSrc(imgObj)
+                );
+                if (!plan.src) throw new Error('图片没有可用的图像源');
                 // 图片源统一转 data URL（fetch/代理/嗅探/兜底见 ImageExport）
-                const dataUrl = await ImageExport.toDataUrl(imgObj.img, src);
-                const filename = imgObj.name ||
-                    `lumen-image-${(imgObj.id || '').substring(0, 6) || Date.now()}.png`;
+                const dataUrl = await ImageExport.toDataUrl(imgObj.img, plan.src);
+                const filename = plan.filename;
                 const response = await fetch('/api/assets', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -729,12 +732,34 @@ class ImageToolbar {
         }
 
         for (const imgObj of this.selectedImages) {
-            // 所见即所得：有编辑笔迹时下载合成图（含图层透明度）
-            const src = this.canvas.images.getCompositeSrc(imgObj);
-            const img = imgObj.img;
-            const filename = imgObj.name || `lumen-image-${imgObj.id.substring(0, 6)}-${Date.now()}.png`;
+            // 交付决策走 CanvasDelivery 纯函数：视频下视频文件本身，
+            // 图片下封面/合成图（封面 PNG 按视频名存出去的事故见该模块注释）
+            const plan = CanvasDelivery.getDownloadPlan(
+                imgObj,
+                NodeTypes.isVideo(imgObj.source) ? null : this.canvas.images.getCompositeSrc(imgObj)
+            );
 
             try {
+                // 视频对象：fetch videoUrl 落 blob 下载视频文件本身
+                if (plan.kind === 'video') {
+                    const resp = await fetch(plan.url);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = plan.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    continue;
+                }
+
+                const src = plan.src;
+                const img = imgObj.img;
+                const filename = plan.filename;
+
                 // 远程 URL：通过后端代理下载，避免 CORS 导致文件名/格式异常
                 if (src && (src.startsWith('http://') || src.startsWith('https://'))) {
                     const encodedUrl = encodeURIComponent(src);

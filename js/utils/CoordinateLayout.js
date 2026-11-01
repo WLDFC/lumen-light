@@ -292,12 +292,20 @@ const CoordinateLayout = (() => {
                 items.push(item);
             }
         }
-        return {
+        const out = {
             width, height,
             bbox_coord_space: 'abs',
             bbox_format: 'xyxy',
             summary, items
         };
+        // 背景参考图（编辑器侧元数据，编译前由 _draftForCompile 剥离）：
+        // 契约是「只存 /api/assets/ 稳定引用不存图片数据」——其余形态
+        // （base64/临时地址）一律丢弃，防手改草稿塞大图撑爆自动保存
+        if (typeof raw.background === 'string' &&
+            raw.background.startsWith('/api/assets/')) {
+            out.background = raw.background;
+        }
+        return out;
     }
 
     /** 单值磁吸：阈值内（含边界）吸附到最近目标点，同距取先加入者 */

@@ -37,7 +37,7 @@
  *       草稿自动持久化到后端 data/coordinate-draft.json（/api/coordinate-draft，
  *       全局单份，防抖 800ms + pagehide keepalive 兜底；打开弹窗时恢复，
  *       恢复走 CoordinateLayout.normalizeDraft 宽松归一——见 ADR 018）。
- * 拆分：本类按职责域拆为 coordinate-editor/ 下六个混入模块（partial-class，
+ * 拆分：本类按职责域拆为 coordinate-editor/ 下七个混入模块（partial-class，
  *       ADR 026）——方法 Object.assign 回本类 prototype，this 即实例，
  *       调用点与测试契约（Object.create(prototype) + 实例打桩）零改动：
  *       CoordDom.js        DOM 装配与事件绑定（懒建于首次 show）
@@ -46,9 +46,10 @@
  *       CoordHistory.js    撤销重做快照栈（ADR 017 决策十一）
  *       CoordDraftStore.js 草稿自动持久化（ADR 018）
  *       CoordAi.js         AI 写提示词（模型/技能/解析/回填）
+ *       CoordBackground.js 舞台背景参考图与生成图透显（悬浮工具条）
  *       本文件保留：构造与状态声明、开合、并排窗口宽度、共享小工具
  *       （配色/稳定 id）、草稿失效枢纽、编译导出与写入目标。
- *       加载顺序：本文件先于六个混入模块（混入依赖类已定义）。
+ *       加载顺序：本文件先于七个混入模块（混入依赖类已定义）。
  * 纯函数层：js/utils/CoordinateLayout.js（校验/编译/几何辅助，Jest 可单测）。
  * 样式：css/coordinate-editor.css（窗口壳复用 recipe-manager.css 的
  *       recipe-dialog 类，本档只补内部排布）。
@@ -116,7 +117,7 @@ class CoordinateEditor {
             '#64d9c8', '#ff8f6b', '#9ad0ff', '#f4a4c0', '#b8e986'
         ];
         this._nextCid = 0;         // 元素稳定 id 计数器（见 _ensureItemIds）
-        this._expandedCids = new Set();   // 展开的卡片 cid 集合——卡片默认折叠（按 cid 记忆，重排/改名不丢）
+        this._collapsedCids = new Set();  // 手动收起的卡片 cid 集合——卡片默认展开（按 cid 记忆，重排/改名不丢）
         this._hiddenCids = new Set();     // 隐藏的元素框 cid 集合——纯编辑器视图态（不进编译、不进存档）
         this._labelText = { object: '物体', character: '角色', text: '文字' };
         // 景别层次（编辑器侧辅助元数据 item.shot，编译前剥离——MOSS 产物不含它；
@@ -129,6 +130,10 @@ class CoordinateEditor {
             multi_panel: '多格漫画/分镜：建议格子铺满画幅互不重叠',
             collage: '拼贴：元素像贴纸一样可重叠堆放'
         };
+
+        // 生成图事件监听（CoordBackground 混入）：构造器即挂，不等首次
+        // show——刷新后先出图、后开编辑器的窗口期也能接住回流
+        this._attachGeneratedImageListener();
     }
 
     // ==================== 开合 ====================
@@ -262,6 +267,9 @@ class CoordinateEditor {
         this.compiled = null;
         this.copyBtn.disabled = true;
         this._clearOutIfCompile();
+        // 手动编辑草稿后，右栏 AI 输出不再参与编译（内容保留供参考，只
+        // 消费标记）——否则改了左边，编译还按旧 AI 文案走，静默覆盖手改
+        if (this._outMode === 'ai') this._outMode = '';
         this._draftTouched = true;
         this._scheduleSave();
     }
@@ -281,15 +289,27 @@ class CoordinateEditor {
     _draftForCompile() {
         // 剥离编辑器侧元数据（编译层白名单会拒绝未认可字段）：
         // shot = 景别（织进 caption 后完成使命）、cid = 稳定 id（编号/颜色显示）、
-        // title = 框标题（舞台标签显示）——三者都不属于 MOSS 草稿契约
+        // title = 框标题（舞台标签显示）——三者都不属于 MOSS 草稿契约；
+        // background = 背景参考图 URL（CoordBackground 混入，纯参照不参与编译）
+        const { background, ...draftCore } = this.draft;
         return {
-            ...this.draft,
-            items: this.draft.items.map(({ shot, cid, title, ...rest }) => rest)
+            ...draftCore,
+            items: draftCore.items.map(({ shot, cid, title, ...rest }) => rest)
         };
     }
 
     _compile() {
-        const r = CoordinateLayout.compileDraft(this._draftForCompile());
+        // 右栏是 AI 输出态时按右栏编译：AI 文案套在草稿几何上参与编译
+        // （不回写左侧元素卡）；解析失败回落按草稿编译
+        let input = this._draftForCompile();
+        if (this._outMode === 'ai' && this.aiOutTa.value.trim()) {
+            try {
+                const merged = JSON.parse(JSON.stringify(input));
+                this._applyAiParsed(merged, this._parseAiResult(this.aiOutTa.value));
+                input = merged;
+            } catch { /* AI 文案解析失败：按草稿原稿编译 */ }
+        }
+        const r = CoordinateLayout.compileDraft(input);
         this.compiled = r;
         if (!r.ok) {
             this._clearOutIfCompile();   // 旧产物已过期，不再显示

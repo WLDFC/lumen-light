@@ -141,7 +141,7 @@
     font-size: 11px;
 }
 
-/* AI 文案留档：只读、随区滚动（与 coord-summary 同款观感，不可拉伸） */
+/* 右栏输出框：可编辑（AI 输出态下改文案后直接编译，按改后的走）、随区滚动 */
 .coord-ai-out {
     flex: 1;
     min-height: 120px;
@@ -155,7 +155,7 @@
     font-size: 12.5px;
     line-height: 1.5;
     font-family: inherit;
-    resize: none;
+    resize: vertical;
     outline: none;
 }
 .coord-ai-out:focus {
@@ -260,18 +260,22 @@
    画幅/模式迁去右栏后，本节是左栏第一节：与元素区按 2:1 分摊剩余高度
    （描述约占扩张部分的三分之二），元素多时回落 min-height */
 
+/* ---- 整体描述 ----
+   画幅/模式迁去右栏后，本节是左栏第一节：高度固定（rows 3，不随元素区
+   内容多少膨胀或被挤压），长文框内滚动、可手动竖向拉伸；剩余高度全部
+   归元素列表 */
+
 .coord-sec-summary {
-    flex: 2 1 auto;
-    min-height: 0;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
 }
 
 .coord-summary {
-    flex: 1;
+    flex: 0 0 auto;
     width: 100%;
     box-sizing: border-box;
-    min-height: 96px;
+    min-height: 192px;
     padding: 8px 10px;
     border: 1px solid rgba(128, 128, 128, 0.3);
     border-radius: 8px;
@@ -280,7 +284,7 @@
     font-size: 13px;
     line-height: 1.5;
     font-family: inherit;
-    resize: none;   /* 尺寸由 flex 接管，手动拉伸与它打架 */
+    resize: vertical;   /* 高度不参与 flex 分摊，允许手动拉伸；长文框内滚动 */
     outline: none;
 }
 .coord-summary:focus {
@@ -295,7 +299,7 @@
 }
 
 /* ---- 元素卡片列表 ----
-   与整体描述按 1:2 分摊剩余高度：列表内部滚动，「添加元素」钉在本节底 */
+   吃掉整体描述之外的剩余高度：列表内部滚动，「添加元素」钉在本节底 */
 
 .coord-sec-items {
     flex: 1 1 auto;
@@ -596,9 +600,17 @@
 .coord-stage-wrap {
     flex: 1;
     min-width: 0;
-    position: relative;
+    display: flex;
+    flex-direction: column;
     background: #141519;
     overflow: hidden;
+}
+
+/* 画布区：工具条之下的剩余高度（canvas 与 hint 的定位基准） */
+.coord-stage-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
 }
 
 .coord-stage {
@@ -620,6 +632,148 @@
     color: rgba(255, 255, 255, 0.42);
     white-space: nowrap;
     pointer-events: none;
+}
+
+/* ---- 标题栏工具组：背景参考图与生成图透显（CoordBackground 混入） ----
+   挂窗口标题栏中部（标题组与右侧状态/关闭之间，30px 大行内放得下）
+   ——不占舞台空间，画幅再大也不被遮挡 */
+
+.coord-bg-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+/* 背景下拉触发器（LumenDropdown 动作型）：裸文字观感（无边框），
+   悬浮只提亮文字 */
+.coord-bg-btn.lumen-dd-trigger {
+    height: 26px;
+    min-width: 0;
+    padding: 0 9px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.75);
+}
+.coord-bg-btn.lumen-dd-trigger:hover {
+    color: #fff;
+}
+.coord-bg-menu {
+    min-width: 150px;
+}
+
+/* 生成图开关：自绘勾选方格（comfy-params 叠加区同款） */
+.coord-gen-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    user-select: none;
+}
+.coord-gen-toggle input {
+    display: none;
+}
+.coord-gen-toggle-box {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    border-radius: 3px;
+    border: 1px solid rgba(128, 128, 128, 0.55);
+    background: rgba(255, 255, 255, 0.06);
+    position: relative;
+}
+.coord-gen-toggle:hover .coord-gen-toggle-box {
+    border-color: rgba(255, 255, 255, 0.5);
+}
+.coord-gen-toggle input:checked + .coord-gen-toggle-box {
+    background: rgba(120, 170, 255, 0.9);
+    border-color: rgba(120, 170, 255, 0.9);
+}
+.coord-gen-toggle input:checked + .coord-gen-toggle-box::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid #101216;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+/* 背景不透明度滑块（有背景才显示，即「已设背景」的可见指示） */
+.coord-bg-opacity {
+    width: 90px;
+    accent-color: #78aaff;
+    cursor: pointer;
+}
+
+/* 画布选图面板：覆盖舞台的轻量浮层，单选即关 */
+.coord-bg-picker {
+    position: absolute;
+    inset: 8px;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    background: rgba(18, 19, 24, 0.96);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.coord-bg-picker[hidden] {
+    display: none;
+}
+.coord-bg-picker-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.8);
+    flex-shrink: 0;
+}
+.coord-bg-picker-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 2px;
+}
+.coord-bg-picker-close:hover {
+    color: #fff;
+}
+.coord-bg-picker-grid {
+    flex: 1;
+    overflow: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+    padding: 10px 12px;
+    align-content: start;
+}
+/* 缩略图定高不认 aspect-ratio：懒加载图 aspect-ratio 会塌（ADR 013 教训） */
+.coord-bg-picker-grid img {
+    width: 100%;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    cursor: pointer;
+}
+.coord-bg-picker-grid img:hover {
+    border-color: rgba(120, 170, 255, 0.8);
+}
+.coord-bg-picker-empty {
+    padding: 16px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
 }
 
 /* ==================== 编译尺寸提醒（输出框下方小字） ==================== */

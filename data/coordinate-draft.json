@@ -6,55 +6,77 @@
     "bbox_format": "xyxy",
     "summary": {
       "caption": "",
-      "canvas": "multi_panel"
+      "canvas": "single"
     },
     "items": [
       {
-        "label": "character",
-        "caption": "",
-        "bbox": [
-          80,
-          0,
-          753,
-          1216
-        ],
-        "cid": 0
-      },
-      {
+        "cid": 0,
         "label": "object",
         "caption": "",
         "bbox": [
           0,
-          449,
+          1,
+          325,
+          88
+        ]
+      },
+      {
+        "cid": 1,
+        "label": "object",
+        "caption": "",
+        "bbox": [
+          655,
+          0,
+          832,
+          277
+        ]
+      },
+      {
+        "cid": 2,
+        "label": "object",
+        "caption": "",
+        "bbox": [
+          0,
+          0,
+          330,
+          494
+        ]
+      },
+      {
+        "cid": 3,
+        "label": "object",
+        "caption": "",
+        "bbox": [
+          330,
+          0,
+          831,
+          684
+        ]
+      },
+      {
+        "cid": 4,
+        "label": "object",
+        "caption": "",
+        "bbox": [
+          0,
+          494,
+          330,
+          1216
+        ]
+      },
+      {
+        "cid": 5,
+        "label": "object",
+        "caption": "",
+        "bbox": [
+          329,
+          684,
           832,
           1216
-        ],
-        "shot": "中景",
-        "cid": 1
-      },
-      {
-        "label": "object",
-        "caption": "",
-        "bbox": [
-          0,
-          109,
-          454,
-          675
-        ],
-        "cid": 2
-      },
-      {
-        "label": "object",
-        "caption": "The mid-right background zone, a defocused passage of darker grey-blue air punctuated by a few small warm bokeh glows and a subtle spray of luminous particles, everything heavily blurred so it reads as pure atmosphere behind the girl's shoulder, with the warm accent balancing the otherwise cool palette.",
-        "bbox": [
-          447,
-          297,
-          832,
-          849
-        ],
-        "cid": 3
+        ]
       }
-    ]
+    ],
+    "background": "/api/assets/file/cc381c19252180374ed7e8c740ce36da9d164f92519af9154c61a448bd8b2ef2.png"
   },
-  "savedAt": 1793545478316
+  "savedAt": 1793568711911
 }

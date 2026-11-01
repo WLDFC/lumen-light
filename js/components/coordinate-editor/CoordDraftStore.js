@@ -83,6 +83,8 @@ Object.assign(window.CoordinateEditor.prototype, {
         this.selected = -1;
         this._resetHistory();   // 恢复态为新基线：撤销不越过本次恢复
         this._renderAll();
+        if (draft.background) this._loadBackgroundImg(draft.background);   // 背景引用随草稿恢复（CoordBackground 混入）
+        this._syncBackgroundUi();
         this._status('已恢复上次草稿');
     },
 });
