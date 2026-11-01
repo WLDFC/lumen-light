@@ -11,7 +11,7 @@
     "items": [
       {
         "label": "character",
-        "caption": "The poster's main subject, a young girl in a school uniform shown from mid-thigh up and filling the vertical spine of the frame, her torso squared slightly off-axis while her face turns toward the camera; fine strands of hair catch a thin rim light along the edges, the uniform's fabric folds and collar seams rendered with soft specular sheen, gentle shadow modelling across her features from the single side light, set against a defocused grey-blue backdrop.",
+        "caption": "",
         "bbox": [
           80,
           0,
@@ -22,7 +22,7 @@
       },
       {
         "label": "object",
-        "caption": "A midground layer centered on the girl's upper body and waist-up area, where her torso, arms and uniform details read most sharply; the background extends from this same layer as a defocused environment with soft bokeh glows and a hint of airborne particle texture, a cool grey-blue base threaded with one warm highlight, light raking in from one side of the frame to leave gentle rim light along her shoulder line and hair tips, creating the shallow depth of field and atmospheric negative space typical of a movie poster.",
+        "caption": "",
         "bbox": [
           0,
           449,
@@ -34,7 +34,7 @@
       },
       {
         "label": "object",
-        "caption": "The upper-left background zone, a defocused field of cool grey-blue tone where large soft bokeh discs and drifting dust motes float out of focus, edges melted into smooth gradients with no hard detail, brightest where the raking light spills in from that side and falling into deeper shadow toward the frame's outer corner.",
+        "caption": "",
         "bbox": [
           0,
           109,
@@ -56,5 +56,5 @@
       }
     ]
   },
-  "savedAt": 1793523348209
+  "savedAt": 1793545478316
 }
