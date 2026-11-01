@@ -78,3 +78,6 @@ data/rh-snapshots.json
 
 # 在线更新前的旧版本代码备份（update.bat 写入）
 data/update-backup/
+
+# Trae IDE 项目配置（个人 IDE 数据，不入公开仓库）
+.trae/
