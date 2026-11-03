@@ -1,0 +1,849 @@
+/**
+ * ==========================================================================
+ * 漫画编辑器样式——左右面板（三件套之二）
+ * ==========================================================================
+ * 左栏（manga-side）：整体描述（manga-sec-summary，固定高 rows 3 可手动
+ * 拉伸、长文框内滚动）与元素卡片列表（manga-item，弹性吃掉剩余高度内部
+ * 滚动，「添加元素」钉在本节底）——卡片头部为 类型/景别/图层顺序/折叠/
+ * 眼睛/删除 行，其下为描述/文字/标题/四坐标输入；右栏（manga-out-side，
+ * 与左栏同宽同款滚动、border 换到左侧）：画幅/模式三选置顶（设一次不常
+ * 动，迁来给左栏描述腾地方）+ AI 文案与编译 JSON 共用输出框
+ * （manga-sec-ai-out flex:1）+ 编译尺寸提醒与编译/复制操作行。
+ * 拆分契约：与 manga-editor.css（壳）/manga-stage.css（舞台）选择器互不
+ * 相交，按序加载（index.html），test/css/mangaEditorCss.test.js 防回归；
+ * 窄屏（<1100px）左栏收窄的媒体查询在本档末尾（须后于本档基础规则）。
+ * 配色按 .trae/skills/配色美学（ADR 059）。
+ * ==========================================================================
+ */
+
+/* ==================== 左右面板框架 ==================== */
+
+.manga-side {
+    width: 308px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    /* 底边距 6px（2026-11-07 用户拍板）：让钉底的「添加元素」贴向底缘，
+       其余三边 14px 不变 */
+    padding: 14px 14px 6px;
+    overflow-y: auto;
+    border-right: 1px solid rgba(128, 128, 128, 0.25);
+    /* 纵排 flex：左栏「整体描述」固定高，元素列表弹性吃掉剩余高度
+       （manga-sec-items flex:1）；右栏本就纵排，同规则共用 */
+    display: flex;
+    flex-direction: column;
+}
+
+/* 右侧输出面板：与左栏同宽（border 换到左侧——它在舞台右边）。
+   横排两段：分区主体（画幅/模式/输出）+ 右缘收纳图标栏（MangaDom._buildOutRail）
+   ——全收起时主体隐藏，右栏缩到只剩 40px 图标栏，舞台变宽 */
+.manga-out-side {
+    border-right: none;
+    border-left: 1px solid rgba(128, 128, 128, 0.25);
+    display: flex;
+    flex-direction: row;
+    /* .manga-side 基础的内边距/滚动移交分区主体（图标栏须贴窗缘） */
+    padding: 0;
+    overflow: hidden;
+}
+
+/* 分区主体：原 .manga-side 的内边距与滚动承接者 */
+.manga-out-body {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+.manga-out-body[hidden] {
+    display: none;   /* 全收起：让位给图标栏（覆盖本条 display:flex） */
+}
+
+/* 全收起：放开 .manga-side 钉死的 308px 宽，右栏缩到内容（图标栏）宽度 */
+.manga-out-side.is-collapsed {
+    width: auto;
+}
+
+/* 右缘收纳图标栏：与舞台左缘工具条同观感（按钮复用 .manga-tool-btn 规则，
+   manga-stage.css 同套三件加载）；激活蓝=该分区展开，暗=已收起 */
+.manga-out-rail {
+    flex-shrink: 0;
+    width: 40px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 0;
+    border-left: 1px solid rgba(128, 128, 128, 0.22);
+    background: #1b1c21;
+}
+/* 分区 hidden 显隐：.manga-sec-ai-out 的 display:flex 会盖过 UA 的
+   [hidden] 规则，须显式声明（作者样式高于 UA 样式） */
+.manga-out-side [data-out-sec][hidden] {
+    display: none;
+}
+
+.manga-sec-ai-out {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 14px;
+}
+
+.manga-out-note {
+    color: rgba(255, 255, 255, 0.28);
+    font-size: 11px;
+}
+
+/* 右栏输出框：可编辑（AI 输出态下改文案后直接编译，按改后的走）、随区滚动 */
+.manga-ai-out {
+    flex: 1;
+    min-height: 120px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: #1b1c21;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12.5px;
+    line-height: 1.5;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+}
+.manga-ai-out:focus {
+    border-color: rgba(59, 130, 246, 0.6);
+}
+
+.manga-sec {
+    margin-bottom: 18px;
+    flex-shrink: 0;   /* 纵排 flex 面板里各节不被压缩（只有元素列表弹性伸缩） */
+}
+/* 钉底的元素区是左栏最后一个分区：下间距让位给栏底边距（6px，
+   2026-11-07 用户拍板「添加元素」贴向底缘），不再叠加 18px */
+.manga-sec:last-child {
+    margin-bottom: 0;
+}
+
+.manga-sec-title {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+}
+.manga-dim-note {
+    color: rgba(255, 255, 255, 0.28);
+    font-size: 11px;
+}
+
+/* ---- 画幅：宽/高输入 + 预设下拉 ---- */
+
+.manga-dims {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.manga-dim-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.manga-dim-field input,
+.manga-preset {
+    height: 30px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+}
+.manga-dim-field input {
+    width: 72px;
+    font-family: Consolas, 'Courier New', monospace;
+}
+.manga-dim-field input:focus,
+.manga-preset:focus {
+    border-color: rgba(59, 130, 246, 0.6);
+}
+.manga-preset {
+    flex: 1;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+}
+
+/* ---- 模式三选（分段按钮）+ 模式说明 ---- */
+
+.manga-modes {
+    display: flex;
+    gap: 6px;
+}
+
+.manga-mode-btn {
+    flex: 1;
+    height: 30px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.manga-mode-btn:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.35);
+}
+.manga-mode-btn.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #fff;
+}
+
+.manga-mode-desc {
+    margin-top: 7px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+/* ---- 整体描述 ----
+   画幅/模式迁去右栏后，本节是左栏第一节：高度固定（rows 3，不随元素区
+   内容多少膨胀或被挤压），长文框内滚动、可手动竖向拉伸；剩余高度全部
+   归元素列表 */
+
+.manga-sec-summary {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.manga-summary {
+    flex: 0 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 192px;
+    padding: 8px 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.5;
+    font-family: inherit;
+    resize: vertical;   /* 高度不参与 flex 分摊，允许手动拉伸；长文框内滚动 */
+    outline: none;
+}
+.manga-summary:focus {
+    border-color: rgba(59, 130, 246, 0.6);
+}
+.manga-summary::placeholder,
+.manga-item-caption::placeholder,
+.manga-item-text::placeholder,
+.manga-item-title::placeholder,
+.manga-ai-out::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+}
+
+/* ---- 元素卡片列表 ----
+   吃掉整体描述之外的剩余高度：列表内部滚动，「添加元素」钉在本节底 */
+
+.manga-sec-items {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.manga-sec-items .manga-items {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.manga-sec-items .manga-add-item {
+    flex-shrink: 0;
+}
+
+.manga-item-count {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* 分区级眼睛（标题行，2026-11-07 用户拍板）：全部元素框一键隐藏/显示——
+   与单卡眼睛共用 _hiddenCids 视图态（页换失效），图标随聚合态切换 */
+.manga-items-eye {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin-left: 6px;
+    vertical-align: middle;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+}
+.manga-items-eye:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+.manga-items-eye svg {
+    width: 13px;
+    height: 13px;
+}
+.manga-items-eye.is-off {
+    color: rgba(255, 255, 255, 0.9);   /* off 态提亮 + 划线眼图标 */
+}
+
+.manga-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.manga-item {
+    border: 1px solid rgba(128, 128, 128, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 8px 10px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.manga-item:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+.manga-item.selected {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.manga-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 7px;
+}
+
+.manga-item-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.manga-item-num {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    min-width: 10px;
+}
+
+.manga-item-label {
+    height: 26px;
+    padding: 0 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+}
+
+/* 景别下拉（编辑器侧辅助：选了把词织进描述，编译前剥离） */
+.manga-item-shot {
+    height: 26px;
+    max-width: 78px;
+    padding: 0 4px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 6px;
+    background: rgba(27, 28, 33, 0.7);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+}
+
+.manga-item-del {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+}
+.manga-item-del:hover {
+    color: #ef4444;
+    background: rgba(255, 128, 128, 0.1);
+}
+
+/* 图层顺序按钮（LumenDropdown 图标按钮模式接管内部结构，外壳同删除钮；
+   无 margin-left——紧挨删除钮，删除钮的 auto margin 把两个都推到行尾）。
+   组件的 .lumen-dd-icon-btn 默认 34×32（LoRA 管理器工具行尺寸），此处
+   压回与折叠/删除钮同规格：24×24 透明底无边框，图标 13px 对齐邻钮 */
+.manga-item-layer {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+.manga-item-layer.lumen-dd-icon-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+}
+.manga-item-layer.lumen-dd-icon-btn .lumen-dd-icon {
+    width: 13px;
+    height: 13px;
+}
+/* 菜单展开中：保持透明壳（组件的三类选择器会盖回面板底色+蓝框） */
+.manga-item-layer.lumen-dd-icon-btn.lumen-dd-open {
+    background: rgba(59, 130, 246, 0.12);
+    border: none;
+    color: #60a5fa;
+}
+
+/* 折叠开关（外壳同图层钮，收起态箭头转向右）：
+   卡片默认折叠只露头部行+标题框，描述/文字/坐标行隐藏 */
+.manga-item-fold {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+.manga-item-fold:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* 眼睛钮（隐藏/显示舞台框）：auto margin 从删除钮移到此处，
+   眼睛+删除成对贴行尾；隐藏框的卡片圆点/编号变暗示意 */
+.manga-item-eye {
+    margin-left: auto;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+.manga-item-eye:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+.manga-item.is-hidden .manga-item-dot,
+.manga-item.is-hidden .manga-item-num,
+.manga-item.is-hidden .manga-item-title {
+    opacity: 0.35;
+}
+.manga-item-fold svg {
+    transition: transform 0.15s ease;
+}
+.manga-item.collapsed .manga-item-fold svg {
+    transform: rotate(-90deg);
+}
+.manga-item.collapsed .manga-item-caption,
+.manga-item.collapsed .manga-item-text,
+.manga-item.collapsed .manga-item-bbox {
+    display: none;
+}
+.manga-item-layer:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+.manga-item-layer.lumen-dd-open {
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.12);
+}
+
+/* 图层动作菜单（挂 body）：窄选项不换行 */
+.manga-layer-menu {
+    min-width: 170px;
+}
+
+.manga-item-caption {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 12.5px;
+    line-height: 1.45;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+    margin-bottom: 6px;
+}
+.manga-item-caption:focus,
+.manga-item-title:focus,
+.manga-item-text:focus,
+.manga-bbox-n:focus {
+    border-color: rgba(59, 130, 246, 0.6);
+}
+
+/* 框标题输入（编辑器侧元数据：舞台标签显示，编译前剥离） */
+.manga-item-title {
+    width: 100%;
+    box-sizing: border-box;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 12.5px;
+    outline: none;
+    margin-bottom: 6px;
+}
+
+.manga-item-text {
+    width: 100%;
+    box-sizing: border-box;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    background: #1b1c21;
+    color: #fff;
+    font-size: 12.5px;
+    outline: none;
+    margin-bottom: 6px;
+}
+
+.manga-item-bbox {
+    display: flex;
+    gap: 4px;
+}
+.manga-bbox-n {
+    width: 0;
+    flex: 1;
+    height: 26px;
+    padding: 0 5px;
+    box-sizing: border-box;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 5px;
+    background: rgba(27, 28, 33, 0.7);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11.5px;
+    font-family: Consolas, 'Courier New', monospace;
+    outline: none;
+}
+
+.manga-add-item {
+    width: 100%;
+    height: 32px;
+    margin-top: 2px;
+    border: 1px dashed rgba(128, 128, 128, 0.4);
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.manga-add-item:hover {
+    border-color: rgba(128, 128, 128, 0.6);
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ---- 编译尺寸提醒（输出框下方小字） ---- */
+
+.manga-json-note {
+    margin-top: 6px;
+    flex-shrink: 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* ---- 编译 / 复制（右栏输出区底部操作行）：次级按钮（紧凑档） ---- */
+
+.manga-compile-btn,
+.manga-copy-btn {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.manga-compile-btn:hover:not(:disabled),
+.manga-copy-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(128, 128, 128, 0.4);
+    color: #fff;
+}
+.manga-compile-btn:disabled,
+.manga-copy-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.manga-out-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-shrink: 0;
+}
+
+/* ---- 色板分区（右栏顶部，2026-11-06 自灯箱迁移完整取色器，ADR 068）：
+   取色器本体在共享预制件 css/lumen-color-picker.css（.lumen-cp-*），
+   本文件只留分区容器与色块网格（最近使用行首 + 预设 8 色，4 列） ---- */
+
+.manga-palette-host {
+    margin-bottom: 8px;
+}
+
+.manga-palette-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+
+.manga-swatch {
+    height: 22px;
+    padding: 0;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.manga-swatch:hover {
+    border-color: rgba(255, 255, 255, 0.6);
+}
+.manga-swatch.is-active {
+    border: 2px solid #fff;
+}
+
+/* ---- 图层面板（右栏分区，MangaLayers 混入）：页面层栈顶→底，
+   行 = 眼睛+类型图标+名称+上移/下移/删除；活动笔迹层实心蓝，
+   选中图片层蓝边；内容多时占至 45% 高内部滚动 ---- */
+
+.manga-sec-layers {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 45%;
+    display: flex;
+    flex-direction: column;
+}
+
+.manga-layers-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+.manga-layers-head .manga-sec-title {
+    margin-bottom: 0;
+}
+.manga-layers-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.manga-layers-add,
+.manga-layers-add-img {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 5px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.manga-layers-add:hover,
+.manga-layers-add-img:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(128, 128, 128, 0.5);
+}
+
+.manga-layers {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+}
+.manga-layers-note {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 11px;
+}
+
+/* 层行视觉与灯箱 ImageStudio 对齐（2026-11-04 用户拍板"跟图片编辑器
+   一样"）：默认无边框、悬停浅底、激活/选中=蓝描边+淡蓝底（非实心），
+   行上不摆操作按钮（复制/删除/新建走右键菜单） */
+.manga-layer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    margin: 2px 0;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.manga-layer-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+.manga-layer-row.is-active {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.12);
+}
+/* 选中图片层与活动笔迹层统一蓝框（2026-11-05 用户拍板）：面板高亮只
+   有一行=当前层（_currentEditableLayer，落笔/滑块同目标），两种状态
+   类共存但互斥（选中图片层时笔迹行不再挂蓝） */
+.manga-layer-row.selected {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.12);
+}
+/* 行内容缩略图：28px 显示（56px 背衬 2x 高清），PS 式棋盘格垫透明——
+   图片层透明区/空笔迹层都露出棋盘格（灯箱同款语义）。position:static
+   必须显式声明——全局规则对裸 canvas 有 position:fixed（主画布专用），
+   不压住缩略图会被拽出图层行钉死在视口左上角 */
+.manga-layer-thumb {
+    position: static;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background:
+        conic-gradient(#3d3d3d 25%, #2c2c2c 0 50%, #3d3d3d 0 75%, #2c2c2c 0) 0 0 / 10px 10px;
+}
+/* 眼睛可见性开关（行尾，灯箱同款：常显眼睛图标、隐藏态只暗图标） */
+.manga-layer-eye {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+}
+.manga-layer-eye svg {
+    width: 14px;
+    height: 14px;
+}
+.manga-layer-eye:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+.manga-layer-eye.hidden-layer {
+    color: rgba(255, 255, 255, 0.25);
+}
+/* 不透明度滑块行（面板头下方，常驻显示——无可调层时置灰禁用） */
+.manga-layer-opacity {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
+.manga-layer-opacity[hidden] {
+    display: none;
+}
+.manga-layer-opacity-range:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+.manga-layer-opacity-label {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.manga-layer-opacity-range {
+    flex: 1;
+    min-width: 0;
+    accent-color: #3b82f6;
+}
+.manga-layer-opacity-val {
+    flex-shrink: 0;
+    min-width: 34px;
+    text-align: right;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.75);
+    font-variant-numeric: tabular-nums;
+}
+/* PS 式拖拽排序（2026-11-04 自灯箱迁移）：拖拽行半透明，落点行上/下
+   缘显示蓝色插入条——拖拽中其他行纹丝不动，松手 FLIP 落位 */
+.manga-layer-row.dragging {
+    opacity: 0.45;
+}
+.manga-layer-row.drop-above {
+    box-shadow: 0 -2px 0 0 #3b82f6;
+}
+.manga-layer-row.drop-below {
+    box-shadow: 0 2px 0 0 #3b82f6;
+}
+.manga-layer-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* ---- 窄屏适配（本档选择器的收窄须后于上方基础规则） ---- */
+
+@media (max-width: 1100px) {
+    .manga-side {
+        width: 260px;
+    }
+}

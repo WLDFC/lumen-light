@@ -243,6 +243,18 @@ class CanvasHistory {
         this.canvas.groups.clearSelection();
         this.canvas.draw();
         this.push(cmd);
+        // 画布图片删除联动事件：按画布图 id 挂引用的消费方（漫画编辑器
+        // 背景参考等）监听后自行清理。剪切跳过（图还要粘回来）；只初次
+        // 删派发——引用初次删除时已清，redo 重派只是噪声
+        if (opts.fileCleanup !== 'skip') {
+            const deletedImgs = objs.filter(
+                (o) => !(typeof o.toJSON === 'function' && NodeTypes.isPanelNode(o.source)));
+            if (deletedImgs.length) {
+                window.dispatchEvent(new CustomEvent('lumenCanvasImageDeleted', {
+                    detail: { objs: deletedImgs }
+                }));
+            }
+        }
         return true;
     }
 

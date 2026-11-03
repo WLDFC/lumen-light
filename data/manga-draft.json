@@ -1,0 +1,48 @@
+{
+  "draft": {
+    "pages": [
+      {
+        "width": 832,
+        "height": 1216,
+        "bbox_coord_space": "abs",
+        "bbox_format": "xyxy",
+        "summary": {
+          "caption": "亚丝娜穿着校服在教室",
+          "canvas": "single"
+        },
+        "items": [
+          {
+            "label": "object",
+            "caption": "亚丝娜",
+            "bbox": [
+              0,
+              0,
+              832,
+              1216
+            ],
+            "cid": 0
+          }
+        ],
+        "drawLayers": [
+          {
+            "id": 1,
+            "name": "图片 1",
+            "visible": true,
+            "image": {
+              "src": "/api/assets/file/96e16a6de3b1386759f520f03f5b95f5e5f5da4ab4dd9ca3484e813d44eb88b5.png",
+              "fromSrc": "/api/assets/file/96e16a6de3b1386759f520f03f5b95f5e5f5da4ab4dd9ca3484e813d44eb88b5.png",
+              "bbox": [
+                0,
+                0,
+                832,
+                1216
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "active": 0
+  },
+  "savedAt": 1793998198873
+}

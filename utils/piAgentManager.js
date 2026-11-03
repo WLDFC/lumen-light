@@ -165,6 +165,10 @@ class PiAgentManager {
                 apiKeyEnv: envKey,
                 models: (cfg.models || [])
                     .filter((m) => {
+                        // 空行 null 占位守卫：设置面板模型收集与行严格对位，
+                        // 空行存 null（前端过滤容忍 null，此处必须同口径——
+                        // 否则一个空行就让 provider 注册整体失败、pi 全哑）
+                        if (!m) return false;
                         // 面板模型行开关关闭（enabled === false）的全局隐藏：
                         // 同样不注册给 pi（与前端下拉过滤口径一致）
                         if (m.enabled === false) return false;

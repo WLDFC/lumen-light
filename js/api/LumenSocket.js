@@ -175,11 +175,18 @@ class LumenSocket {
             // 生成图事件（默认落图分支专属——有节点消费的分支已经
             // PlaceholderManager.replace 派发过，不在此重复）。src 补
             // data: 前缀成可用 URL——msg.image 是裸 base64（与下方
-            // addImageToCanvas 的入参契约同源，那边同样自己补前缀）
+            // addImageToCanvas 的入参契约同源，那边同样自己补前缀）。
+            // 漫画编辑器委托提交会武装 __mangaGenSuppress（ADR 071 交付
+            // 独立）：事件照常派发（编辑器一次性捕获转存项目夹），跳过
+            // 落画布；标记一次性消费即清
+            const suppressMangaLanding = !!window.__mangaGenSuppress;
+            if (suppressMangaLanding) window.__mangaGenSuppress = false;
             window.dispatchEvent(new CustomEvent('lumenGeneratedImage', {
                 detail: { src: 'data:image/png;base64,' + msg.image }
             }));
-            this.addImageToCanvas(msg.image, placeholderPosition, msg.prompt, genInfo);
+            if (!suppressMangaLanding) {
+                this.addImageToCanvas(msg.image, placeholderPosition, msg.prompt, genInfo);
+            }
         }
 
         // 处理新视频消息（ComfyUI 视频工作流经 LumenSendVideoToCanvas 上传）

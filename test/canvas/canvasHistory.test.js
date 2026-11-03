@@ -37,7 +37,8 @@ function loadHistory() {
         NodeTypes: {
             SOURCE: { PROMPT_NODE: 'prompt-node' },
             isPanelNode: () => false,
-            isVideo: () => false
+            isVideo: () => false,
+            isAudio: () => false
         }
     };
     vm.createContext(sandbox);
@@ -200,5 +201,58 @@ describe('CanvasHistory 栈纪律', () => {
         expect(connList()).toEqual([oldEdge]);              // 旧边还原
         h.redo();
         expect(connList()).toEqual([newConn]);              // 新边回到位
+    });
+});
+
+describe('CanvasHistory.deleteObjects 画布图片删除联动事件（2026-11-04）', () => {
+    /** 造带三张图的画布桩：images/connections/groups 最小契约 */
+    function makeDeleteCanvas() {
+        const imgs = [
+            { id: 'img-a', source: 'http://x/a' },
+            { id: 'img-b', source: 'http://x/b' }
+        ];
+        const canvas = {
+            images: { images: imgs, selectedIds: new Set(), select() {} },
+            connections: { connections: [] },
+            groups: { groups: [], delete() {}, clearSelection() {} },
+            draw() {}
+        };
+        return { canvas, imgs };
+    }
+
+    test('删除图片派发 lumenCanvasImageDeleted（detail.objs=被删的非节点对象）', () => {
+        const sandbox = loadHistory();
+        const { canvas, imgs } = makeDeleteCanvas();
+        const target = imgs[0];   // 先留引用：deleteObjects 会把 imgs 数组 splice 掉
+        const h = new sandbox.window.CanvasHistory(canvas);
+        const ok = h.deleteObjects([target], [], { label: '删除' });
+        expect(ok).toBe(true);
+        expect(canvas.images.images).toEqual([imgs[0]]);   // 剩 img-b（原引用已前移）
+        const types = sandbox.window.dispatchEvent.mock.calls.map((c) => c[0].type);
+        expect(types).toContain('lumenCanvasImageDeleted');
+        const ev = sandbox.window.dispatchEvent.mock.calls
+            .map((c) => c[0]).find((e) => e.type === 'lumenCanvasImageDeleted');
+        expect(ev.detail.objs).toEqual([target]);
+    });
+
+    test('剪切（fileCleanup:skip）跳过联动派发——图还要粘回来', () => {
+        const sandbox = loadHistory();
+        const { canvas, imgs } = makeDeleteCanvas();
+        const h = new sandbox.window.CanvasHistory(canvas);
+        const ok = h.deleteObjects([imgs[1]], [], { label: '剪切', fileCleanup: 'skip' });
+        expect(ok).toBe(true);
+        expect(canvas.images.images).toEqual([imgs[0]]);
+        const types = sandbox.window.dispatchEvent.mock.calls.map((c) => c[0].type);
+        expect(types).not.toContain('lumenCanvasImageDeleted');   // push 的 canvasHistoryChanged 无妨
+    });
+
+    test('面板节点删除不派发（联动只针对真实图片对象）', () => {
+        const sandbox = loadHistory();
+        const { canvas } = makeDeleteCanvas();
+        const node = { id: 'node-1', source: 'panel-node', toJSON: () => ({ id: 'node-1' }), destroy() {} };
+        const h = new sandbox.window.CanvasHistory(canvas);
+        h.deleteObjects([node], [], { label: '删除' });
+        const types = sandbox.window.dispatchEvent.mock.calls.map((c) => c[0].type);
+        expect(types).not.toContain('lumenCanvasImageDeleted');
     });
 });

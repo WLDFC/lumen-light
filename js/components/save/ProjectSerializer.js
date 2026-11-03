@@ -470,23 +470,37 @@ class ProjectSerializer {
                 // 加载失败（文件被外部删除等）：跳过这张图片，不阻塞整体恢复。
                 // 音频对象特例：卡片位图缺失（旧版本曾把 canvas 元素直接存进
                 // img 导致资产存不出，恢复必 404）但音频文件仍在工作区时，
-                // 用元数据重建卡片恢复对象，不整条跳过
+                // 用元数据重建卡片恢复对象，不整条跳过。
+                // 只能用 imgData 判定——imageObj 在 onload 闭包里才存在，此处
+                // 引用必抛 ReferenceError 且本 Promise 永不结算，把整条恢复链
+                // 挂死、realtimeSave.start() 永不执行（2026-11-03 修复：音频
+                // 卡片封面资产 404 触发实测）
                 img.onerror = () => {
-                    if (NodeTypes.isAudio(imageObj.source) &&
-                        (imgData.audioUrl || imgData.name)) {
-                        const audioUrl = imgData.audioUrl ||
-                            '/data/audio/' + imgData.name;
-                        this.canvas.audioManager.addAudio(audioUrl, {
-                            name: imgData.name,
-                            prompt: imgData.prompt || '',
-                            x: imgData.x,
-                            y: imgData.y
-                        }).then(
-                            () => resolve(true),
-                            () => resolve(false)
-                        );
-                        return;
-                    }
+                    try {
+                        if (NodeTypes.isAudio(imgData.source) &&
+                            (imgData.audioUrl || imgData.name)) {
+                            const audioUrl = imgData.audioUrl ||
+                                '/data/audio/' + imgData.name;
+                            // 音频文件也已不在（封面与音频双缺失）：不复活死
+                            // 卡片——恢复出来无法播放，还会与新上传的音频卡片
+                            // 同位重叠，被误读成「上传一份出现两份」。
+                            // HEAD 探测通过才重建（音频文件仍在的原特例语义）
+                            fetch(audioUrl, { method: 'HEAD' }).then((r) => {
+                                if (!r.ok) {
+                                    console.warn('存档音频卡片复活跳过：音频文件已不存在:', imgData.name);
+                                    resolve(false);
+                                    return;
+                                }
+                                return this.canvas.audioManager.addAudio(audioUrl, {
+                                    name: imgData.name,
+                                    prompt: imgData.prompt || '',
+                                    x: imgData.x,
+                                    y: imgData.y
+                                }).then(() => resolve(true), () => resolve(false));
+                            }, () => resolve(false)).catch(() => resolve(false));
+                            return;
+                        }
+                    } catch { /* 音频特例判定失败：按普通图片跳过 */ }
                     console.warn('存档图片加载失败，已跳过:', imgData.filename || imgData.src);
                     resolve(false);
                 };

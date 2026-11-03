@@ -1,0 +1,451 @@
+/**
+ * ==========================================================================
+ * 漫画编辑器样式——中央舞台（三件套之三，末加载）
+ * ==========================================================================
+ * 舞台壳与 canvas 定位（touch-action:none 自管指针手势）。注意 style.css
+ * 全局 canvas{position:fixed} 是主画布专用，弹窗内自绘 canvas 须逐项覆盖
+ * ——页面栏缩略图的同款覆盖在 manga-editor.css 的 .manga-page-thumb canvas。
+ * 标题栏工具组（manga-bg-tools，MangaBackground 混入）：背景参考图文字
+ * 按钮（2026-11-07 与「文件」同款，自绘菜单复用 manga-file-menu 样式）/
+ * 生成图透显开关（自绘勾选方格，
+ * comfy-params 叠加区同款）/ 不透明度滑块（有背景才显示，即「已设背景」
+ * 的可见指示）；画布选图面板（manga-bg-picker）：覆盖舞台的轻量单选浮层
+ * ——缩略图定高不认 aspect-ratio（懒加载图会塌，ADR 013 教训）；
+ * 文字工具（manga-text-tools / manga-text-editor，MangaText 混入）：
+ * 标题栏字体/字号/横竖排选项条（字体菜单挂 body fixed 定位）+ 舞台上
+ * 的透明就地编辑框（几何全由 _syncTextEditor 内联控制）。
+ * 拆分契约：与 manga-editor.css（壳）/manga-panel.css（左右面板）选择器
+ * 互不相交，按序加载（index.html），test/css/mangaEditorCss.test.js 防回归。
+ * 配色按 .trae/skills/配色美学（ADR 059）。
+ * ==========================================================================
+ */
+
+/* ==================== 中央舞台 ==================== */
+
+.manga-stage-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: row;   /* 左缘工具条 + 舞台横排（MangaTools 混入） */
+    background: #141519;
+    overflow: hidden;
+}
+
+/* ---- 舞台左缘工具条（选择/画笔，MangaTools 混入） ----
+   全高竖排窄条：图标钮顶部堆叠（画笔的色板与粗细滑块 2026-11-05
+   迁标题栏工具选项条——灯箱顶栏同位，用户拍板） */
+
+.manga-tool-rail {
+    flex-shrink: 0;
+    width: 40px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 0;
+    border-right: 1px solid rgba(128, 128, 128, 0.22);
+    background: #1b1c21;   /* 对齐左栏观感（recipe-dialog-panel 底色），
+                              不垫舞台的 #141519 */
+}
+
+.manga-tool-btn {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.manga-tool-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+.manga-tool-btn.is-active {
+    background: #3b82f6;
+    color: #fff;
+}
+
+/* ---- 标题栏画笔选项条（2026-11-05 自左缘工具条迁入）：粗细滑块
+   （草稿像素 1~40，localStorage 记忆），画笔激活时显示。取色走右栏
+   「色板」分区（2026-11-06 完整取色器迁移，原六预设色点退役，ADR 068） */
+.manga-brush-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 0;
+}
+.manga-brush-tools[hidden] {
+    display: none;
+}
+.manga-brush-width-label {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.manga-brush-width {
+    width: 90px;
+    accent-color: #3b82f6;
+    cursor: pointer;
+}
+.manga-brush-width-val {
+    flex-shrink: 0;
+    min-width: 22px;
+    text-align: right;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.75);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- 标题栏文字选项条（MangaText 混入，文字工具激活时显示）：字体
+   下拉 + 字号 + 横竖排分段 + 色板（色点复用 .manga-tool-color）；
+   字体菜单挂 body（fixed 定位逃出弹窗层叠，z 对齐 LumenDropdown 菜单） ---- */
+.manga-text-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 0;
+}
+.manga-text-tools[hidden] {
+    display: none;
+}
+.manga-font-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;   /* 定宽后文字居左、chevron 钉右缘 */
+    gap: 5px;
+    width: 150px;                     /* 定宽不随字体名长度变化（长名 span 省略号截断） */
+    height: 24px;
+    padding: 0 8px;
+    background: transparent;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    cursor: pointer;
+}
+.manga-font-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.manga-font-btn svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+.manga-font-btn:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+.manga-font-menu {
+    position: fixed;
+    z-index: 1200;   /* LumenDropdown 菜单同层级（弹窗内浮于一切） */
+    min-width: 170px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: #23242a;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.manga-font-menu[hidden] {
+    display: none;
+}
+.manga-font-item {
+    display: block;
+    width: 100%;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.manga-font-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+.manga-font-item.is-active {
+    color: #3b82f6;
+}
+.manga-font-more {
+    opacity: 0.7;
+    font-size: 12px;
+}
+.manga-text-size {
+    width: 58px;
+    height: 24px;
+    padding: 0 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+.manga-text-size:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+.manga-dir-btn {
+    height: 24px;
+    padding: 0 9px;
+    background: transparent;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    cursor: pointer;
+}
+.manga-dir-btn:hover {
+    color: #fff;
+}
+.manga-dir-btn.is-active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #fff;
+}
+
+/* ---- 文字就地编辑框（MangaText._beginEdit 建于 stage-area）：透明
+   textarea 壳——几何/字体/行高/横竖排全部由 _syncTextEditor 内联控制，
+   CSS 只给壳（灯箱 .is-text-editor 同款）；z 高于光标圈(z2) 低于选图
+   浮层(z6)，caret 随文字色 ---- */
+.manga-text-editor {
+    position: absolute;
+    z-index: 3;
+    margin: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
+    box-sizing: border-box;
+    caret-color: currentColor;
+}
+
+/* ---- 标题栏形状选项条（MangaShape 混入，ADR 069，形状工具激活时显示）：
+   类型四钮 + 填充色/红斜杠去填充 + 边框色/红斜杠去边框 + 边宽/圆角滑杆
+   （灯箱 StudioDomBuilder 控件同款；色块=原生 input[type=color] 去壳小
+   方 chip；红斜杠钮 is-active=当前处于去除态） ---- */
+.manga-shape-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 0;
+}
+.manga-shape-tools[hidden] {
+    display: none;
+}
+.manga-shape-type-btn {
+    width: 26px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.manga-shape-type-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+.manga-shape-type-btn.is-active {
+    background: #3b82f6;
+    color: #fff;
+}
+.manga-shape-color {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 5px;
+    background: transparent;
+    cursor: pointer;
+}
+.manga-shape-color::-webkit-color-swatch-wrapper {
+    padding: 2px;
+}
+.manga-shape-color::-webkit-color-swatch {
+    border: none;
+    border-radius: 3px;
+}
+/* 红斜杠去除钮：透明底 chip 叠红斜线（PS 式去除语义）；is-active =
+   当前处于去除态（红底白斜线） */
+.manga-shape-none-btn {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 5px;
+    background: linear-gradient(135deg, transparent 42%, #e5484d 42%, #e5484d 58%, transparent 58%);
+    background-clip: padding-box;   /* 渐变止于边框内缘：红斜杠不透出半透明边框形成红点（灯箱 content-box 同语义） */
+    cursor: pointer;
+}
+.manga-shape-none-btn:hover {
+    border-color: rgba(255, 255, 255, 0.55);
+}
+.manga-shape-none-btn.is-active {
+    background: #e5484d;
+    background-clip: padding-box;   /* shorthand 会重置 clip，随 shorthand 再声明 */
+    border-color: #e5484d;
+    position: relative;
+}
+.manga-shape-none-btn.is-active::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 4px;
+    background: linear-gradient(135deg, transparent 42%, #fff 42%, #fff 58%, transparent 58%);
+}
+.manga-shape-range {
+    width: 80px;
+    accent-color: #3b82f6;
+    cursor: pointer;
+}
+
+/* 画布区：工具条之下的剩余高度（canvas 的定位基准） */
+.manga-stage-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+}
+
+.manga-stage {
+    position: absolute;
+    inset: 0;
+    display: block;
+    touch-action: none;   /* 指针拖拽自己管，禁浏览器手势 */
+}
+
+/* 中键平移（ADR 077，灯箱 .image-editor.panning 同方案）：!important
+   同时压过 JS 内联 cursor 与画笔/移除工具的 cursor:none */
+.manga-stage.panning {
+    cursor: grabbing !important;
+}
+
+/* 画笔光标圈覆盖层（灯箱 selCanvas 同机制）：悬在舞台之上接管光标显示。
+   background 必须显式透明——全局 style.css 的 canvas 规则垫了不透明
+   底色（--canvas-bg），漏写它会整块盖黑舞台（2026-11-05 F5 黑屏根因） */
+.manga-cursor-cv {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* ---- 标题栏工具组：背景参考图（MangaBackground 混入） ----
+   挂「文件」按钮右侧（2026-11-07 用户拍板两钮对调），30px 大行内放得下
+   ——不占舞台空间，画幅再大也不被遮挡 */
+
+.manga-bg-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;   /* 提示条收窄时工具组不让位（按钮不可压缩） */
+    min-width: 0;
+    position: relative;   /* 背景自绘菜单的定位基准（菜单锚按钮下方） */
+}
+
+/* 背景按钮（2026-11-07 用户拍板：与「文件」同款文字按钮，去 caret——
+   自绘菜单复用 manga-file-menu 样式类）。裸文字观感，悬浮叠加高亮 */
+.manga-bg-btn {
+    height: 28px;
+    padding: 0 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #fff;
+    cursor: pointer;
+}
+.manga-bg-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+.manga-bg-menu {
+    min-width: 150px;
+}
+
+
+
+/* ==================== 画布选图面板：覆盖舞台的轻量浮层，单选即关 ==================== */
+
+.manga-bg-picker {
+    position: absolute;
+    inset: 8px;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    background: rgba(18, 19, 24, 0.96);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.manga-bg-picker[hidden] {
+    display: none;
+}
+.manga-bg-picker-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.8);
+    flex-shrink: 0;
+}
+.manga-bg-picker-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 2px;
+}
+.manga-bg-picker-close:hover {
+    color: #fff;
+}
+.manga-bg-picker-grid {
+    flex: 1;
+    overflow: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+    padding: 10px 12px;
+    align-content: start;
+}
+/* 缩略图定高不认 aspect-ratio：懒加载图 aspect-ratio 会塌（ADR 013 教训） */
+.manga-bg-picker-grid img {
+    width: 100%;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    cursor: pointer;
+}
+.manga-bg-picker-grid img:hover {
+    border-color: rgba(59, 130, 246, 0.8);
+}
+.manga-bg-picker-empty {
+    padding: 16px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+}

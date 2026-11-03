@@ -13,8 +13,9 @@
  *   - coord-out-side 右栏：画幅/模式三选置顶（设一次不常动，迁来给左栏
  *     描述腾地方）+ AI 文案与编译 JSON 共用输出框（coord-sec-ai-out flex:1）
  *   - coord-footer：AI 写提示词 / 模型·技能下拉 / 编译 / 复制 / 写入面板 / 新建
- * 配色沿用项目色板：边框 rgba(128,128,128,.3)、输入底 #1b1c21、
- * 悬浮蓝 rgba(120,170,255,*)，磁吸粉线与 StudioMoveTool 同款 #ff7ab8。
+ * 配色按 .trae/skills/配色美学：边框 rgba(128,128,128,.3)、输入底 #1b1c21、
+ * 主按钮实心 #3b82f6（悬停 #2563eb）、悬停白叠加、选中/聚焦蓝 rgba(59,130,246,*)，
+ * 磁吸粉线与 StudioMoveTool 同款 #ff7ab8。
  * 加载顺序：须在 recipe-manager.css 之后（本档不覆盖其规则，仅并存）。
  * ==========================================================================
  */
@@ -37,7 +38,7 @@
     max-width: 480px;
 }
 .coord-status.is-error {
-    color: #ff8080;
+    color: #ef4444;
 }
 
 /* ==================== 并排窗口壳：右缘留白给 Comfy/LLM 面板 ==================== */
@@ -85,7 +86,7 @@
 }
 .coord-resize-handle:hover::after,
 .coord-resize-handle.dragging::after {
-    background: rgba(120, 170, 255, 0.55);
+    background: rgba(59, 130, 246, 0.55);
 }
 
 /* 窄屏回落全屏（三栏编辑器 + 侧面板放不下，恢复模态形态） */
@@ -159,7 +160,7 @@
     outline: none;
 }
 .coord-ai-out:focus {
-    border-color: rgba(120, 170, 255, 0.55);
+    border-color: rgba(59, 130, 246, 0.6);
 }
 
 .coord-sec {
@@ -212,7 +213,7 @@
 }
 .coord-dim-field input:focus,
 .coord-preset:focus {
-    border-color: rgba(120, 170, 255, 0.55);
+    border-color: rgba(59, 130, 246, 0.6);
 }
 .coord-preset {
     flex: 1;
@@ -244,8 +245,8 @@
     border-color: rgba(255, 255, 255, 0.35);
 }
 .coord-mode-btn.active {
-    background: rgba(120, 170, 255, 0.16);
-    border-color: rgba(120, 170, 255, 0.55);
+    background: rgba(59, 130, 246, 0.16);
+    border-color: rgba(59, 130, 246, 0.6);
     color: #fff;
 }
 
@@ -288,7 +289,7 @@
     outline: none;
 }
 .coord-summary:focus {
-    border-color: rgba(120, 170, 255, 0.55);
+    border-color: rgba(59, 130, 246, 0.6);
 }
 .coord-summary::placeholder,
 .coord-item-caption::placeholder,
@@ -338,8 +339,8 @@
     border-color: rgba(255, 255, 255, 0.4);
 }
 .coord-item.selected {
-    border-color: rgba(120, 170, 255, 0.6);
-    background: rgba(120, 170, 255, 0.06);
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.06);
 }
 
 .coord-item-head {
@@ -403,7 +404,7 @@
     transition: color 0.15s, background 0.15s;
 }
 .coord-item-del:hover {
-    color: #ff8080;
+    color: #ef4444;
     background: rgba(255, 128, 128, 0.1);
 }
 
@@ -437,9 +438,9 @@
 }
 /* 菜单展开中：保持透明壳（组件的三类选择器会盖回面板底色+蓝框） */
 .coord-item-layer.lumen-dd-icon-btn.lumen-dd-open {
-    background: rgba(120, 170, 255, 0.12);
+    background: rgba(59, 130, 246, 0.12);
     border: none;
-    color: #cfe4ff;
+    color: #60a5fa;
 }
 
 /* 折叠开关（外壳同图层钮，收起态箭头转向右）：
@@ -496,10 +497,13 @@
 .coord-item.collapsed .coord-item-bbox {
     display: none;
 }
-.coord-item-layer:hover,
+.coord-item-layer:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
 .coord-item-layer.lumen-dd-open {
-    color: #cfe4ff;
-    background: rgba(120, 170, 255, 0.12);
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.12);
 }
 
 /* 图层动作菜单（挂 body）：窄选项不换行 */
@@ -526,7 +530,7 @@
 .coord-item-title:focus,
 .coord-item-text:focus,
 .coord-bbox-n:focus {
-    border-color: rgba(120, 170, 255, 0.55);
+    border-color: rgba(59, 130, 246, 0.6);
 }
 
 /* 框标题输入（编辑器侧元数据：舞台标签显示，编译前剥离） */
@@ -590,9 +594,9 @@
     transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .coord-add-item:hover {
-    border-color: rgba(120, 170, 255, 0.55);
+    border-color: rgba(128, 128, 128, 0.6);
     color: #fff;
-    background: rgba(120, 170, 255, 0.06);
+    background: rgba(255, 255, 255, 0.1);
 }
 
 /* ---- 中央舞台 ---- */
@@ -690,8 +694,8 @@
     border-color: rgba(255, 255, 255, 0.5);
 }
 .coord-gen-toggle input:checked + .coord-gen-toggle-box {
-    background: rgba(120, 170, 255, 0.9);
-    border-color: rgba(120, 170, 255, 0.9);
+    background: rgba(59, 130, 246, 0.9);
+    border-color: rgba(59, 130, 246, 0.9);
 }
 .coord-gen-toggle input:checked + .coord-gen-toggle-box::after {
     content: '';
@@ -708,7 +712,7 @@
 /* 背景不透明度滑块（有背景才显示，即「已设背景」的可见指示） */
 .coord-bg-opacity {
     width: 90px;
-    accent-color: #78aaff;
+    accent-color: #3b82f6;
     cursor: pointer;
 }
 
@@ -767,7 +771,7 @@
     cursor: pointer;
 }
 .coord-bg-picker-grid img:hover {
-    border-color: rgba(120, 170, 255, 0.8);
+    border-color: rgba(59, 130, 246, 0.8);
 }
 .coord-bg-picker-empty {
     padding: 16px;
@@ -839,7 +843,7 @@
     gap: 8px;
 }
 
-/* AI 写提示词：主操作按钮（悬浮蓝高亮档） */
+/* AI 写提示词：主操作按钮（实心强调蓝，skill 主按钮规格） */
 .coord-ai-btn {
     display: flex;
     align-items: center;
@@ -847,24 +851,22 @@
     height: 34px;
     padding: 0 14px;
     border-radius: 8px;
-    border: 1px solid rgba(120, 170, 255, 0.4);
-    background: rgba(120, 170, 255, 0.14);
-    color: #cfe4ff;
+    border: none;
+    background: #3b82f6;
+    color: #fff;
     font-size: 13px;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.15s;
 }
 .coord-ai-btn svg {
     width: 15px;
     height: 15px;
 }
 .coord-ai-btn:hover:not(:disabled) {
-    background: rgba(120, 170, 255, 0.24);
-    border-color: rgba(120, 170, 255, 0.65);
-    color: #fff;
+    background: #2563eb;
 }
 .coord-ai-btn:disabled {
-    opacity: 0.55;
+    opacity: 0.6;
     cursor: default;
 }
 .coord-ai-btn.running svg {
@@ -894,8 +896,8 @@
 .coord-copy-btn:hover:not(:disabled),
 .coord-panel-btn:hover:not(:disabled),
 .coord-new-btn:hover:not(:disabled) {
-    background: rgba(120, 170, 255, 0.12);
-    border-color: rgba(120, 170, 255, 0.35);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(128, 128, 128, 0.4);
     color: #fff;
 }
 .coord-compile-btn:disabled,

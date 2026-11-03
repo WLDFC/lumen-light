@@ -110,11 +110,13 @@ class StudioDomBuilder {
         studio.fontMenuEl.hidden = true;
         studio.fontBtn.addEventListener('click', () => {
             studio.fontMenuEl.hidden = !studio.fontMenuEl.hidden;
+            if (!studio.fontMenuEl.hidden) this._ensureSystemFonts(true);   // PS 同观感：开菜单即自动加载
         });
         const fontWrap = document.createElement('div');
         fontWrap.className = 'is-file-wrap';
         fontWrap.append(studio.fontBtn, studio.fontMenuEl);
-        this._buildFontMenu(StudioTextTool.FONTS);
+        studio._fontList = TextLayout.FONTS;   // 当前字体清单（打开菜单自动换全量，ADR 067）
+        this._buildFontMenu();
         const textSizeLabel = this._sizeLabel('字号');
         studio.textSizeInput = document.createElement('input');
         studio.textSizeInput.type = 'number';
@@ -361,7 +363,7 @@ class StudioDomBuilder {
         resizeHandle.addEventListener('pointerdown', (e) => this._onSideResizeDown(e));
         side.appendChild(resizeHandle);
 
-        // ---- 色板：PS 式内嵌取色器（StudioColorPicker）+ 最近使用/预设网格。
+        // ---- 色板：PS 式内嵌取色器（LumenColorPicker）+ 最近使用/预设网格。
         //      wrapper（paletteEl）承载蒙版禁用态，内部 = 取色器 + 色块网格 ----
         const paletteLabel = document.createElement('div');
         paletteLabel.className = 'is-panel-label';
@@ -627,11 +629,12 @@ class StudioDomBuilder {
 
     // ==================== 顶栏文字选项 ====================
 
-    /** 重建字体下拉清单（每项按自身字体预览，PS 同款）；清单传入精选
-     *  FONTS 或 queryLocalFonts 枚举的系统全量。清单尾部挂「加载系统
-     *  全部字体」入口（仅支持的浏览器显示） */
-    _buildFontMenu(fonts) {
+    /** 重建字体下拉清单（每项按自身字体预览，PS 同款）；清单取
+     *  studio._fontList（精选 FONTS 或后端枚举的系统全量）。仍是精选时
+     *  尾部挂「加载系统全部字体」手动重试项 */
+    _buildFontMenu() {
         const studio = this.studio;
+        const fonts = studio._fontList;
         // 触发器文案 = 当前字体（初始与选项变更后都经此刷新）
         const cur = fonts.find((f) => f.family === studio.textOpts.font);
         studio.fontBtn.querySelector('span').textContent = cur ? cur.label : studio.textOpts.font;
@@ -648,27 +651,44 @@ class StudioDomBuilder {
                 studio.fontBtn.querySelector('span').textContent = f.label;
                 studio.fontMenuEl.hidden = true;
                 studio._text.applyOpts();
-                this._buildFontMenu(fonts);   // 刷新 active 高亮
+                this._buildFontMenu();   // 刷新 active 高亮
             });
             studio.fontMenuEl.appendChild(item);
         }
-        if (window.queryLocalFonts && fonts === StudioTextTool.FONTS) {
+        if (fonts === TextLayout.FONTS) {   // 仍是精选清单才挂重试项（后端枚举，ADR 067）
             const more = document.createElement('button');
             more.type = 'button';
             more.className = 'is-file-item is-font-more';
             more.textContent = '加载系统全部字体…';
-            more.addEventListener('click', async () => {
-                more.textContent = '加载中…';
-                const list = await StudioTextTool.loadSystemFonts();
-                if (list && list.length) {
-                    this._buildFontMenu(list);
-                } else {
-                    more.textContent = '无法枚举系统字体';
-                    setTimeout(() => { more.textContent = '加载系统全部字体…'; }, 2000);
-                }
-            });
+            more.addEventListener('click', () => this._ensureSystemFonts(false));
             studio.fontMenuEl.appendChild(more);
         }
+    }
+
+    /**
+     * 打开菜单自动加载系统全量字体（PS 同观感，ADR 067）：仍是精选清单
+     * 时后台 fetch（每次开窗至多一次，加载中置位防并发），成功换全量就
+     * 地重建；失败静默回落精选并保留手动重试项（auto=false=手动重试，
+     * 重试项文案如实报错 2s）
+     */
+    _ensureSystemFonts(auto) {
+        const studio = this.studio;
+        if (studio._fontList !== TextLayout.FONTS || studio._fontListLoading) return;
+        studio._fontListLoading = true;
+        const more = studio.fontMenuEl.querySelector('.is-font-more');
+        if (more) { more.textContent = '正在加载系统字体…'; more.disabled = true; }
+        TextLayout.loadSystemFonts().then((list) => {
+            studio._fontListLoading = false;
+            if (list && list.length) studio._fontList = list;
+            if (!studio.fontMenuEl.hidden) this._buildFontMenu();
+            if ((!list || !list.length) && !auto) {
+                const retry = studio.fontMenuEl.querySelector('.is-font-more');
+                if (retry) {
+                    retry.textContent = '无法枚举系统字体（后端失败）';
+                    setTimeout(() => { retry.textContent = '加载系统全部字体…'; }, 2000);
+                }
+            }
+        });
     }
 
     /** 横排/竖排切换：更新选项高亮与文字属性（编辑中实时重排） */

@@ -1,7 +1,7 @@
 /**
  * ==========================================================================
- * ImageStudio 子模块：色板取色器（PS 式内嵌面板，自 StudioDomBuilder
- * 色板段的「预设块 + 原生弹窗」方案升级）
+ * Lumen 通用预制件：色板取色器（PS 式内嵌面板）——自灯箱
+ * StudioColorPicker 升格共享（ADR 068），灯箱与漫画编辑器双消费方
  * 作用：内嵌取色面板——当前色/上次色叠放块 + SV 渐变方框（横=饱和度、
  *       纵=明度）+ 垂直色相条 + Hex 输入。拖拽 SV/色相实时
  *       setColor（画笔/文字颜色即时跟随），松手确认入最近使用色；
@@ -10,13 +10,31 @@
  * 颜色流：唯一出口 studio.setColor(hex)；唯一入口 syncFromColor(hex)
  *       （以 _hex 去重防回环）。上次色 = 每次拖拽/Hex 提交开始时的
  *       当前色，点击上次色块回填（PS 同款）。
- * 契约：构造时传入宿主实例；DomBuilder 调 mount(host) 构建面板；
- *       主类 setColor 调 syncFromColor、pushRecentColor 薄代理到
- *       DomBuilder 的最近色逻辑。
+ * 契约：构造时传入宿主实例，宿主须提供——
+ *       setColor(hex)（唯一出口，按宿主语义分发）、color（getter，当前
+ *       工具色）、pushRecentColor(hex)（最近使用入列，可空实现裁剪）、
+ *       _readyDone（拖拽门闸，灯箱=就绪标志/漫画=visible）；
+ *       mount(host) 构建面板到传入容器。样式在 css/lumen-color-picker.css
+ *       （.lumen-cp-*，中性类名双宿主共用）。
  * ==========================================================================
  */
 
-class StudioColorPicker {
+class LumenColorPicker {
+    /** 预设色块（灯箱画笔灯箱同款：红/黑/白/粉红/蓝/橙/浅蓝/绿；
+     *  ImageStudio.COLORS 为本表别名） */
+    static PRESETS = [
+        { name: '红', value: '#ef4444' },
+        { name: '黑', value: '#000000' },
+        { name: '白', value: '#ffffff' },
+        { name: '粉红', value: '#f472b6' },
+        { name: '蓝', value: '#3b82f6' },
+        { name: '橙', value: '#f97316' },
+        { name: '浅蓝', value: '#7dd3fc' },
+        { name: '绿', value: '#22c55e' }
+    ];
+    /** 最近使用色条数（色板行首一格一色，4 列网格恰为一行） */
+    static RECENT_MAX = 4;
+
     constructor(studio) {
         this.studio = studio;
         this.hsv = { h: 0, s: 0, v: 0 };
@@ -62,34 +80,34 @@ class StudioColorPicker {
 
     // ==================== DOM 与交互 ====================
 
-    /** DomBuilder 挂载：构建面板 DOM 到宿主容器 */
+    /** 宿主挂载：构建面板 DOM 到传入容器 */
     mount(host) {
         const studio = this.studio;
         const wrap = document.createElement('div');
-        wrap.className = 'is-color-picker';
+        wrap.className = 'lumen-color-picker';
 
         // 主区：SV 渐变方框（横=饱和度、纵=明度）+ 垂直色相条
         this.svEl = document.createElement('div');
-        this.svEl.className = 'is-cp-sv';
+        this.svEl.className = 'lumen-cp-sv';
         this.svCursor = document.createElement('div');
-        this.svCursor.className = 'is-cp-sv-cursor';
+        this.svCursor.className = 'lumen-cp-sv-cursor';
         this.svEl.appendChild(this.svCursor);
         this.hueEl = document.createElement('div');
-        this.hueEl.className = 'is-cp-hue';
+        this.hueEl.className = 'lumen-cp-hue';
         this.hueCursor = document.createElement('div');
-        this.hueCursor.className = 'is-cp-hue-cursor';
+        this.hueCursor.className = 'lumen-cp-hue-cursor';
         this.hueEl.appendChild(this.hueCursor);
         const main = document.createElement('div');
-        main.className = 'is-cp-main';
+        main.className = 'lumen-cp-main';
         main.append(this.svEl, this.hueEl);
 
         // 当前色/上次色叠放块（上次色在右下露一角，点击回填，PS 同款）
         const pair = document.createElement('div');
-        pair.className = 'is-cp-pair';
+        pair.className = 'lumen-cp-pair';
         this.curEl = document.createElement('div');
-        this.curEl.className = 'is-cp-cur';
+        this.curEl.className = 'lumen-cp-cur';
         this.prevEl = document.createElement('button');
-        this.prevEl.className = 'is-cp-prev';
+        this.prevEl.className = 'lumen-cp-prev';
         this.prevEl.title = '上次使用色：点击恢复';
         this.prevEl.addEventListener('click', () => {
             if (!this.prev) return;
@@ -101,7 +119,7 @@ class StudioColorPicker {
         // Hex 输入（回车/失焦确认，非法回显当前色）
         this.hexEl = document.createElement('input');
         this.hexEl.type = 'text';
-        this.hexEl.className = 'is-cp-hex';
+        this.hexEl.className = 'lumen-cp-hex';
         this.hexEl.maxLength = 7;
         this.hexEl.spellcheck = false;
         this.hexEl.title = '十六进制色值，回车确认';
@@ -110,16 +128,16 @@ class StudioColorPicker {
             if (e.key === 'Enter') { e.preventDefault(); this.hexEl.blur(); }
         });
         this.hexEl.addEventListener('change', () => {
-            const rgb = StudioColorPicker.hexToRgb(this.hexEl.value);
+            const rgb = LumenColorPicker.hexToRgb(this.hexEl.value);
             if (!rgb) { this._syncHexInput(); return; }
             this.prev = studio.color;   // 提交前的色即上次色
-            this.hsv = StudioColorPicker.rgbToHsv(rgb.r, rgb.g, rgb.b);
+            this.hsv = LumenColorPicker.rgbToHsv(rgb.r, rgb.g, rgb.b);
             this._apply();
             studio.pushRecentColor(this._hex);
         });
 
         const row = document.createElement('div');
-        row.className = 'is-cp-row';
+        row.className = 'lumen-cp-row';
         row.append(pair, this.hexEl);
         wrap.append(main, row);
         host.appendChild(wrap);
@@ -161,13 +179,13 @@ class StudioColorPicker {
 
     // ==================== 颜色流转 ====================
 
-    /** 外部来色同步（主类 setColor 调）：hex 相同跳过，防 setColor 回环 */
+    /** 外部来色同步（宿主 setColor 调）：hex 相同跳过，防 setColor 回环 */
     syncFromColor(value) {
-        const rgb = StudioColorPicker.hexToRgb(value);
+        const rgb = LumenColorPicker.hexToRgb(value);
         if (!rgb) return;
-        const hex = StudioColorPicker.rgbToHex(rgb.r, rgb.g, rgb.b);
+        const hex = LumenColorPicker.rgbToHex(rgb.r, rgb.g, rgb.b);
         if (hex === this._hex) return;
-        this.hsv = StudioColorPicker.rgbToHsv(rgb.r, rgb.g, rgb.b);
+        this.hsv = LumenColorPicker.rgbToHsv(rgb.r, rgb.g, rgb.b);
         this._hex = hex;
         this._render();
     }
@@ -175,8 +193,8 @@ class StudioColorPicker {
     /** 拖拽/Hex 改色：渲染面板并写 studio.setColor（syncFromColor 因
      *  _hex 已更新而跳过，不回环） */
     _apply() {
-        const rgb = StudioColorPicker.hsvToRgb(this.hsv.h, this.hsv.s, this.hsv.v);
-        this._hex = StudioColorPicker.rgbToHex(rgb.r, rgb.g, rgb.b);
+        const rgb = LumenColorPicker.hsvToRgb(this.hsv.h, this.hsv.s, this.hsv.v);
+        this._hex = LumenColorPicker.rgbToHex(rgb.r, rgb.g, rgb.b);
         this._render();
         this.studio.setColor(this._hex);
     }
@@ -202,5 +220,5 @@ class StudioColorPicker {
     }
 }
 
-// 暴露到全局作用域（经典 script，ImageStudio.js 之后实例化时消费）
-window.StudioColorPicker = StudioColorPicker;
+// 暴露到全局作用域（经典 script，两编辑器主类之后实例化时消费）
+window.LumenColorPicker = LumenColorPicker;

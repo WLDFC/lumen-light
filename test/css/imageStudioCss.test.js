@@ -134,7 +134,7 @@ describe('ImageStudio CSS 拆分契约（image-studio 三件套）', () => {
             ['image-studio.css', '.is-text-editor', '文字工具：就地编辑框'],
             ['image-studio-panel.css', '.is-layer-row', '面板：图层面板行'],
             ['image-studio-panel.css', '.is-ctxmenu', '面板：图层右键菜单'],
-            ['image-studio-panel.css', '.is-cp-hex', '面板：内嵌取色器'],
+            // 内嵌取色器本体样式已升格共享预制件 css/lumen-color-picker.css（ADR 068）
             ['image-studio-panel.css', '.is-history-row', '面板：历史面板'],
             ['image-studio-panel.css', '.is-palette', '面板：色板容器'],
             ['image-studio-picker.css', '.is-picker-grid', '弹窗：瀑布流网格'],

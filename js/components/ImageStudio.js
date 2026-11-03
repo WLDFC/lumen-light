@@ -43,21 +43,13 @@
  */
 
 class ImageStudio {
-    /** 预设色块（与原画笔灯箱一致：红/黑/白/粉红/蓝/橙/浅蓝/绿） */
-    static COLORS = [
-        { name: '红', value: '#ef4444' },
-        { name: '黑', value: '#000000' },
-        { name: '白', value: '#ffffff' },
-        { name: '粉红', value: '#f472b6' },
-        { name: '蓝', value: '#3b82f6' },
-        { name: '橙', value: '#f97316' },
-        { name: '浅蓝', value: '#7dd3fc' },
-        { name: '绿', value: '#22c55e' }
-    ];
+    /** 预设色块（红/黑/白/粉红/蓝/橙/浅蓝/绿）——定义收敛在
+     *  LumenColorPicker.PRESETS（双编辑器共享，ADR 068），此处别名 */
+    static COLORS = LumenColorPicker.PRESETS;
     /** 遮罩笔迹颜色（全强度存储；显示层按图层透明度×0.55 压暗显示） */
     static MASK_COLOR = '#ff0000';
     /** 最近使用色条数（色板行首一格一色，4 列网格恰为一行） */
-    static RECENT_MAX = 4;
+    static RECENT_MAX = LumenColorPicker.RECENT_MAX;
     /** 历史快照上限（条）：快照 = 图层栈 dataURL 全量序列化，控内存 */
     static HISTORY_MAX = 20;
     /** 遮罩显示压暗系数：呈现惯例的"半透明红"观感，数据永远全强度 */
@@ -143,7 +135,7 @@ class ImageStudio {
         this._adjust = new StudioAdjustTool(this);
         // 模糊笔刷强度（文档像素，σ = 强度/10），顶栏强度滑杆设置
         this.fxStrength = 16;
-        this._colorPicker = new StudioColorPicker(this);
+        this._colorPicker = new LumenColorPicker(this);
         this._history = new StudioHistory(this);
         this._crop = new StudioCropTool(this);
         this._save = new StudioSave(this);
@@ -1199,16 +1191,10 @@ class ImageStudio {
             w: this._cursorD, h: this._cursorD };
     }
 
-    /** 圈样式（黑白互补任意底色可辨）：半透明填充（fx 不填，效果区
-     *  本身显眼）+ 黑外弧 + 白弧（橡皮虚线）+ 中心定位点 */
+    /** 圈样式（黑白互补任意底色可辨）：黑外弧 + 白弧（橡皮虚线）+
+     *  中心定位点——无填充（2026-11-05 用户拍板，画布内容不遮挡） */
     _drawCursorRing(g, x, y, d) {
         const r = d / 2 - 1.5;
-        if (this.tool !== 'fx') {
-            g.beginPath();
-            g.arc(x, y, r, 0, Math.PI * 2);
-            g.fillStyle = 'rgba(0, 0, 0, 0.13)';
-            g.fill();
-        }
         g.setLineDash([]);
         g.lineWidth = 1.2;
         g.beginPath();
@@ -1412,7 +1398,7 @@ class ImageStudio {
         this._refreshThumb(layer);
     }
 
-    // ---- 色板取色器（StudioColorPicker） ----
+    // ---- 色板取色器（LumenColorPicker） ----
     pushRecentColor(value) { return this._dom._pushRecentColor(value); }
 
     // ---- 历史记录（StudioHistory） ----

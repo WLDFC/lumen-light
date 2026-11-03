@@ -22,7 +22,9 @@
  *   - round(v,9) 的银行家舍入 vs Math.round 四舍五入——仅在第十位小数
  *     恰为 5 时不同，对像素坐标无实际影响。
  *
- * 消费方：js/components/CoordinateEditor.js（顶栏「坐标编辑」窗口）。
+ * 消费方：js/components/CoordinateEditor.js（顶栏「坐标编辑」窗口）、
+ *       js/components/MangaEditor.js（顶栏「漫画编辑」窗口，一期复制分叉
+ *       共用本层——改名复制会失去与上游 Python 的对齐锚点，勿复制本文件）。
  * ==========================================================================
  */
 
@@ -304,6 +306,11 @@ const CoordinateLayout = (() => {
         if (typeof raw.background === 'string' &&
             raw.background.startsWith('/api/assets/')) {
             out.background = raw.background;
+            // 背景来源画布图 id（漫画编辑器删图联动清背景用，2026-11-04）：
+            // 仅随有效背景引用一并带回，孤儿 id 不入草稿
+            if (typeof raw.backgroundSrcId === 'string' && raw.backgroundSrcId) {
+                out.backgroundSrcId = raw.backgroundSrcId;
+            }
         }
         return out;
     }

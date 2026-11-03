@@ -182,11 +182,12 @@ const canvasVideosTimestamp = {
 
 app.use(cors()); // 允许跨域请求
 app.use(express.json({ limit: '100mb' })); // 解析 JSON 请求体，最大 100MB（支持 base64 图片）
-// no-cache = 每次都协商缓存（ETag/304 代价极小），但保证前端改代码后
-// 刷新页面必然拿到新文件——裸 express.static 只有 Last-Modified，浏览器
-// 会启发式缓存，曾出现"改了 JS 浏览器仍跑旧代码"的排查陷阱
+// no-store = 完全不缓存（连 304 协商都不留）——no-cache 时代出现过
+// "改了 JS 刷新仍跑旧代码"的排查陷阱（部分浏览器/内嵌 webview 的软
+// 刷新不重校验子资源，直接吃缓存；2026-11-07 IAB 实测复现）。本机自
+// 用服务，全量重下代价可忽略，宁可每次拿新文件
 app.use(express.static('.', {
-    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache')
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-store')
 })); // 提供静态文件服务
 
 // ==================== WebSocket 管理 ====================
@@ -492,6 +493,32 @@ app.use('/api/comfy-prompts', createComfyPromptsRouter({ dataDir: DATA_DIR }));
 // 编辑器防抖自动保存 + 打开时恢复，见 ADR 018）
 const createCoordinateDraftRouter = require('./routes/coordinateDraft');
 app.use('/api/coordinate-draft', createCoordinateDraftRouter({ dataDir: DATA_DIR }));
+
+// 漫画编辑器草稿 API（数据落盘 data/manga-draft.json，全局单份；
+// MangaEditor 专用端点——与坐标编辑器草稿互不覆盖，结构同 coordinateDraft）
+const createMangaDraftRouter = require('./routes/mangaDraft');
+app.use('/api/manga-draft', createMangaDraftRouter({ dataDir: DATA_DIR }));
+
+// 漫画项目 API（/api/manga-projects，数据落盘 data/manga/<id>/：一本漫画
+// 一个独立文件夹——project.json 元数据 + draft.json 草稿 + images/ 生图，
+// ADR 071 交付独立：编辑器产物落项目夹，不再逐层写回画布）
+const createMangaProjectsRouter = require('./routes/mangaProjects');
+app.use('/api/manga-projects', createMangaProjectsRouter({ dataDir: DATA_DIR }));
+
+// 漫画分镜模板 API（内置预设落**根级** manga-templates/presets/——ADR 078
+// 后记迁移：随发行包分发（workflows/ 同款待遇），「我的模板」仍是用户数据
+// 落 data/manga-templates/user/ 绝不入包；一个模板一个 JSON，放文件即生效；
+// 漫画编辑器「分镜模板」弹窗消费）
+const createMangaTemplatesRouter = require('./routes/mangaTemplates');
+app.use('/api/manga-templates', createMangaTemplatesRouter({
+    dataDir: DATA_DIR,
+    presetsDir: path.join(__dirname, 'manga-templates', 'presets'),
+}));
+
+// 系统字体枚举 API（读 Windows 字体注册表，PS 同源数据；两编辑器字体
+// 菜单「加载系统全部字体」消费——取代浏览器 queryLocalFonts 路线，ADR 067）
+const createSystemFontsRouter = require('./routes/systemFonts');
+app.use('/api/system-fonts', createSystemFontsRouter());
 
 // 用户自定义技能 API（/api/skills，数据落盘 data/skills/ 目录，一个技能一个 JSON 文件）
 const createSkillsRouter = require('./routes/skills');

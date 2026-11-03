@@ -13,57 +13,17 @@
  * 竖排：canvas 无原生竖排，逐字自绘——CJK 字符直立逐字下排（列自右向
  *       左），连续西文/数字段整体顺时针旋转 90°（顶朝右，PS 同规则）。
  * 契约：构造时传入宿主 ImageStudio 实例并读写其字段与方法（studio.xxx）；
- *       主类保留同名薄代理（_onTextDown/_renderTextLayer）。
+ *       主类保留同名薄代理（_onTextDown/_renderTextLayer）。测量/绘制/
+ *       拆段/字体清单/字体取数在共享层 js/utils/TextLayout.js（与漫画
+ *       编辑器共用，ADR 067）——本文件只保留宿主接线：就地编辑、
+ *       paintCv 位图管线（mirror/rot 折入）、旋转（rot 折属性）。
  * ==========================================================================
  */
 
 class StudioTextTool {
-    /** 行距/列距与竖排字距（字号倍数）——画布渲染与编辑框样式共用同一值，
-     *  保证提交瞬间（textarea → 位图）文字位置不跳 */
-    static LINE_H = 1.4;
-    static CHAR_ADV = 1.15;
-
-    /** 精选字体清单（Windows 自带中文字体 + 常见西文）。
-     *  浏览器枚举全部本地字体需 queryLocalFonts（Chromium，需授权一次），
-     *  顶栏字体菜单里可按需补充加载；不支持的浏览器保持本清单 */
-    static FONTS = [
-        { label: '微软雅黑', family: 'Microsoft YaHei' },
-        { label: '宋体', family: 'SimSun' },
-        { label: '黑体', family: 'SimHei' },
-        { label: '楷体', family: 'KaiTi' },
-        { label: '仿宋', family: 'FangSong' },
-        { label: '等线', family: 'DengXian' },
-        { label: '思源黑体', family: 'Source Han Sans SC' },
-        { label: '思源宋体', family: 'Source Han Serif SC' },
-        { label: 'Arial', family: 'Arial' },
-        { label: 'Georgia', family: 'Georgia' },
-        { label: 'Times New Roman', family: 'Times New Roman' },
-        { label: 'Courier New', family: 'Courier New' },
-        { label: 'Impact', family: 'Impact' }
-    ];
-
     constructor(studio) {
         this.studio = studio;
         this.editing = null;   // 编辑态 { layer, ta, prev, prevName, isNew }
-    }
-
-    /** 枚举全部本地字体（Chromium queryLocalFonts，需用户授权一次）。
-     *  不支持或用户拒绝授权时返回 null，字体菜单维持精选清单 */
-    static async loadSystemFonts() {
-        if (!window.queryLocalFonts) return null;
-        try {
-            const fonts = await window.queryLocalFonts();
-            const seen = new Set();
-            const list = [];
-            for (const f of fonts) {
-                if (seen.has(f.family)) continue;
-                seen.add(f.family);
-                list.push({ label: f.family, family: f.family });
-            }
-            return list;
-        } catch {
-            return null;
-        }
     }
 
     // ==================== 输入路由（主类 _onPaintDown 转发） ====================
@@ -152,12 +112,12 @@ class StudioTextTool {
         ta.style.height = Math.max(4, layer.paintCv.height * layer.tscale * zoom) + 'px';
         ta.style.padding = (pad * zoom) + 'px';
         ta.style.font = `${t.size * layer.tscale * zoom}px "${t.font}", sans-serif`;
-        ta.style.lineHeight = String(StudioTextTool.LINE_H);
+        ta.style.lineHeight = String(TextLayout.LINE_H);
         ta.style.color = t.color;
         ta.style.writingMode = t.vertical ? 'vertical-rl' : 'horizontal-tb';
         // 竖排字距与画布渲染的 CHAR_ADV 对齐（横排由行高承担）
         ta.style.letterSpacing = t.vertical
-            ? `${(StudioTextTool.CHAR_ADV - 1) * t.size * layer.tscale * zoom}px`
+            ? `${(TextLayout.CHAR_ADV - 1) * t.size * layer.tscale * zoom}px`
             : 'normal';
     }
 
@@ -272,44 +232,18 @@ class StudioTextTool {
 
     /** 把文字按属性渲染进图层画布（画布尺寸 = 文字紧致包围盒 + 周边距，
      *  周边距防字形边缘裁切；空内容画布保持最小可点尺寸且 empty=true，
-     *  命中检测跳过）。编辑中画布隐藏但尺寸照常更新 */
+     *  命中检测跳过）。测量与绘制算法在共享层 TextLayout（ADR 067）；
+     *  旋转/镜像仍折入本层：文字先画进未旋转的 src 位图（mirror 在此
+     *  水平镜像），再整体旋入图层画布（rot 90/270 宽高互换）——属性自
+     *  洽，再次编辑重渲染不丢旋转态。编辑中画布隐藏但尺寸照常更新 */
     _render(layer) {
         const t = layer.text;
-        const size = Math.max(4, t.size);
-        const pad = Math.ceil(size * 0.3);
-        const font = `${size}px "${t.font}", sans-serif`;
-        const lines = String(t.content || '').split('\n');
-        const mctx = document.createElement('canvas').getContext('2d');
-        mctx.font = font;
-        let w; let h;
-        if (!t.vertical) {
-            // 横排：宽 = 最长行，高 = 行数 × 行距
-            let maxW = 0;
-            for (const line of lines) maxW = Math.max(maxW, mctx.measureText(line).width);
-            w = Math.max(maxW, size);
-            h = Math.max(lines.length * size * StudioTextTool.LINE_H, size);
-        } else {
-            // 竖排：列数 = 行数（列宽 = 字号 × 行距），列高 = 列内推进总和
-            w = Math.max(lines.length * size * StudioTextTool.LINE_H, size);
-            let maxCol = 0;
-            for (const line of lines) {
-                let col = 0;
-                for (const run of this._splitRuns(line)) {
-                    col += run.cjk
-                        ? [...run.text].length * size * StudioTextTool.CHAR_ADV
-                        : mctx.measureText(run.text).width;
-                }
-                maxCol = Math.max(maxCol, col);
-            }
-            h = Math.max(maxCol, size);
-        }
-        // 旋转/镜像折入渲染：文字先画进未旋转的 src 位图（mirror 在此
-        // 水平镜像），再整体旋入图层画布（rot 90/270 宽高互换）——
-        // 属性自洽，再次编辑重渲染不丢旋转态
+        const layout = TextLayout.measureTextLayout(t);
+        const pad = layout.pad;
         const rot = (((t.rot || 0) % 360) + 360) % 360;
         const swap = rot === 90 || rot === 270;
-        const srcW = Math.ceil(w) + pad * 2;
-        const srcH = Math.ceil(h) + pad * 2;
+        const srcW = Math.ceil(layout.w) + pad * 2;
+        const srcH = Math.ceil(layout.h) + pad * 2;
         const src = document.createElement('canvas');
         src.width = srcW; src.height = srcH;
         const g = src.getContext('2d');
@@ -330,68 +264,8 @@ class StudioTextTool {
         };
         if (!t.content) { blit(); layer.empty = true; return; }
         layer.empty = false;
-        g.font = font;
-        g.fillStyle = t.color;
-        if (!t.vertical) {
-            g.textAlign = 'left';
-            // 垂直方向复刻 CSS 行盒排版（编辑态 textarea → 提交位图不跳）：
-            // 基线 y = 行盒顶 + 半行距 + 字体内容区上升高。textBaseline='top'
-            // 是 em 顶贴行顶，与 textarea 的半行距居中差约半个行距——表现为
-            // 提交/切工具瞬间文字上跳（用户实测）。fontBoundingBox 不可用的
-            // 环境退回行盒中心对齐（'middle' 近似内容区居中）
-            const m = mctx.measureText('字');
-            const fa = m.fontBoundingBoxAscent;
-            const fd = m.fontBoundingBoxDescent;
-            if (Number.isFinite(fa) && Number.isFinite(fd)) {
-                g.textBaseline = 'alphabetic';
-                const halfLead = (size * StudioTextTool.LINE_H - (fa + fd)) / 2;
-                lines.forEach((line, i) =>
-                    g.fillText(line, pad,
-                        pad + i * size * StudioTextTool.LINE_H + halfLead + fa));
-            } else {
-                g.textBaseline = 'middle';
-                lines.forEach((line, i) =>
-                    g.fillText(line, pad, pad + (i + 0.5) * size * StudioTextTool.LINE_H));
-            }
-        } else {
-            g.textAlign = 'center';
-            g.textBaseline = 'middle';
-            // 列自右向左：首列中心 = 位图右缘内缩半列
-            let colCx = srcW - pad - (size * StudioTextTool.LINE_H) / 2;
-            for (const line of lines) {
-                let cy = pad;
-                for (const run of this._splitRuns(line)) {
-                    if (run.cjk) {
-                        // CJK 字符直立逐字下排
-                        for (const ch of run.text) {
-                            g.fillText(ch, colCx, cy + (size * StudioTextTool.CHAR_ADV) / 2);
-                            cy += size * StudioTextTool.CHAR_ADV;
-                        }
-                    } else {
-                        // 西文/数字段整体顺时针转 90°（顶朝右，自上而下读）
-                        const rw = g.measureText(run.text).width;
-                        g.save();
-                        g.translate(colCx, cy + rw / 2);
-                        g.rotate(Math.PI / 2);
-                        g.fillText(run.text, 0, 0);
-                        g.restore();
-                        cy += rw;
-                    }
-                }
-                colCx -= size * StudioTextTool.LINE_H;
-            }
-        }
+        TextLayout.drawTextContent(g, t, layout);
         blit();
-    }
-
-    /** 按行拆 CJK/西文段：CJK（含全角标点）直立，其余整段旋转 */
-    _splitRuns(line) {
-        const cjkChar = '[\\u2E80-\\u9FFF\\uF900-\\uFAFF\\uFF01-\\uFF60\\u3000-\\u303F]';
-        const runs = [];
-        for (const m of line.match(new RegExp(`${cjkChar}+|[^${cjkChar}]+`, 'g')) || []) {
-            runs.push({ text: m, cjk: new RegExp(`^${cjkChar}`).test(m) });
-        }
-        return runs;
     }
 }
 

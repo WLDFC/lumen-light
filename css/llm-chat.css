@@ -672,7 +672,7 @@
 }
 
 .llm-chat-toolbar .llm-skill-select.has-skill {
-    border-color: rgba(120, 170, 255, 0.55);
+    border-color: rgba(59, 130, 246, 0.6);
 }
 
 /* 指定技能菜单（挂 body，向上弹）：比触发器宽，长技能名不截断 */

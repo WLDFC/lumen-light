@@ -53,6 +53,9 @@
     <link rel="stylesheet" href="css/lumen-batch.css">
     <link rel="stylesheet" href="css/lumen-tree-list.css">
     <link rel="stylesheet" href="css/lumen-confirm.css">
+    <!-- 通用预制件：PS 式色板取色器（灯箱 ImageStudio 与漫画编辑器共用，
+         见 js/components/LumenColorPicker.js） -->
+    <link rel="stylesheet" href="css/lumen-color-picker.css">
     <link rel="stylesheet" href="css/lora-file-select.css">
     <link rel="stylesheet" href="css/lora-trigger.css">
     <link rel="stylesheet" href="css/llm-system-prompt.css">
@@ -71,6 +74,14 @@
     <!-- 坐标编辑器（顶栏按钮：bbox 布局 → MOSS/Flux3 坐标提示词）；窗口壳复用
          recipe-manager.css 的 recipe-dialog 骨架，须在其后加载 -->
     <link rel="stylesheet" href="css/coordinate-editor.css">
+    <!-- 漫画编辑器（顶栏按钮，坐标编辑左侧；一期复制坐标编辑器改名分叉），
+         同样复用 recipe-dialog 骨架，类前缀 .manga-* 与坐标编辑器互不相干。
+         三件套按序加载：窗口壳 → 左右面板 → 舞台（选择器互不相交，
+         契约测试 test/css/mangaEditorCss.test.js 防回归） -->
+    <link rel="stylesheet" href="css/manga-editor.css">
+<link rel="stylesheet" href="css/manga-adjust.css">
+    <link rel="stylesheet" href="css/manga-panel.css">
+    <link rel="stylesheet" href="css/manga-stage.css">
     <link rel="stylesheet" href="css/node.css">
     <!-- 顶栏样式放在 save-manager.css / prompt-panel.css 之后，
          以便覆盖被收纳进顶栏的按钮原有的 fixed 定位相关声明 -->
@@ -479,6 +490,12 @@
     <!-- 坐标编辑 Layout 纯函数层：MOSS 草稿 schema/校验/编译（compile_prompt.py
          的 JS 移植），CoordinateEditor 消费，须先于其加载 -->
     <script defer src="js/utils/CoordinateLayout.js"></script>
+    <!-- 文字层共享纯函数层：测量/绘制/拆段/字体清单/后端字体取数（ADR 067），
+         ImageStudio 与 MangaEditor 双编辑器消费，须先于两者主类加载 -->
+    <script defer src="js/utils/TextLayout.js"></script>
+    <!-- 形状几何共享纯函数层：类型表/气泡尾巴/外伸/路径/绘制原语（ADR 069），
+         StudioShapeTool 与 MangaShape 双消费方，须先于两者加载 -->
+    <script defer src="js/utils/ShapeLayout.js"></script>
     <!-- 生成任务停止控件（任务级 X 按钮 + AbortController 内核）：
          面板 ■停止与生图节点 X 共用，需先于使用方加载 -->
     <script defer src="js/components/GenStopControl.js"></script>
@@ -571,7 +588,7 @@
     <script defer src="js/components/image-studio/StudioShapeTool.js"></script>
     <script defer src="js/components/image-studio/StudioBlurTool.js"></script>
     <script defer src="js/components/image-studio/StudioAdjustTool.js"></script>
-    <script defer src="js/components/image-studio/StudioColorPicker.js"></script>
+    <script defer src="js/components/LumenColorPicker.js"></script>
     <script defer src="js/components/image-studio/StudioHistory.js"></script>
     <script defer src="js/components/image-studio/StudioCropTool.js"></script>
     <script defer src="js/components/image-studio/StudioSave.js"></script>
@@ -609,6 +626,34 @@
     <script defer src="js/components/coordinate-editor/CoordDraftStore.js"></script>
     <script defer src="js/components/coordinate-editor/CoordAi.js"></script>
     <script defer src="js/components/coordinate-editor/CoordBackground.js"></script>
+    <!-- 漫画编辑器（顶栏「漫画编辑」按钮，坐标编辑左侧；一期复制坐标编辑器
+         改名分叉，见 js/components/MangaEditor.js）。加载顺序同坐标编辑器：
+         主类先于混入模块，且后于 CoordinateLayout（共用其编译层） -->
+    <script defer src="js/components/MangaEditor.js"></script>
+    <!-- 调色工具（ADR 074 自灯箱 StudioAdjustTool 迁移）：独立类，主类构造器实例化 -->
+    <script defer src="js/components/manga-editor/MangaAdjustTool.js"></script>
+    <!-- ç§»é¤å·¥å·ï¼2026-11-07 èªç¯ç®± ImageStudio ç§»é¤æ¨¡å¼è¿ç§»ï¼ADR 076ï¼é®ç½©æ¶æ¹+æ¾æèªå¨ LaMa æ¹é¤ï¼ç¬ç«ç±»ï¼ -->
+    <script defer src="js/components/manga-editor/MangaRemoveTool.js"></script>
+    <!-- 漫画编辑器子模块：原型混入（partial-class，ADR 026），须后于主类加载 -->
+    <script defer src="js/components/manga-editor/MangaDom.js"></script>
+    <script defer src="js/components/manga-editor/MangaPanel.js"></script>
+    <script defer src="js/components/manga-editor/MangaStage.js"></script>
+<script defer src="js/components/manga-editor/MangaGestures.js"></script>
+    <script defer src="js/components/manga-editor/MangaTools.js"></script>
+    <script defer src="js/components/manga-editor/MangaLayers.js"></script>
+<script defer src="js/components/manga-editor/MangaPageRender.js"></script>
+<script defer src="js/components/manga-editor/MangaLayerPanel.js"></script>
+    <script defer src="js/components/manga-editor/MangaHistory.js"></script>
+    <script defer src="js/components/manga-editor/MangaDraftStore.js"></script>
+    <script defer src="js/components/manga-editor/MangaAi.js"></script>
+    <script defer src="js/components/manga-editor/MangaBackground.js"></script>
+    <script defer src="js/components/manga-editor/MangaTemplates.js"></script>
+    <script defer src="js/components/manga-editor/MangaExport.js"></script>
+    <script defer src="js/components/manga-editor/MangaPages.js"></script>
+    <script defer src="js/components/manga-editor/MangaGenerate.js"></script>
+    <script defer src="js/components/manga-editor/MangaText.js"></script>
+    <script defer src="js/components/manga-editor/MangaShape.js"></script>
+    <script defer src="js/components/manga-editor/MangaProjects.js"></script>
     <!-- 设置分类面板需先于 SettingsManager 加载：SettingsManager 构造时会实例化它们 -->
     <script defer src="js/components/settings/SettingsGeneralPanel.js"></script>
     <script defer src="js/components/settings/SettingsApiPanel.js"></script>

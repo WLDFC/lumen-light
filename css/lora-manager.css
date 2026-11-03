@@ -794,8 +794,8 @@
 .lora-toolbar-right .lora-refresh-btn:hover,
 .lora-toolbar-right .lora-batch-btn:hover,
 .lora-toolbar-right .lora-fetch-btn:hover {
-    background: rgba(120, 170, 255, 0.12);
-    border-color: rgba(120, 170, 255, 0.35);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(128, 128, 128, 0.4);
     color: #fff;
 }
 
@@ -922,7 +922,7 @@
 }
 .lora-fetch-field input[type="text"]:focus,
 .lora-fetch-field input[type="password"]:focus {
-    border-color: rgba(120, 170, 255, 0.5);
+    border-color: rgba(59, 130, 246, 0.6);
 }
 .lora-fetch-actions {
     display: flex;
@@ -960,7 +960,7 @@
     cursor: pointer;
 }
 .lora-fetch-choices button:hover {
-    border-color: rgba(120, 170, 255, 0.4);
+    border-color: rgba(128, 128, 128, 0.4);
     color: #fff;
 }
 .lora-fetch-choices button.primary {

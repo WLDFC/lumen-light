@@ -12,6 +12,8 @@
 //
 // 范围约定（与 update.bat 的 PKG_DIR_LIST / 根文件清单同源，两处须同步改）：
 //   目录：css js routes utils pi-extensions workflows image tools lumen_nodes
+//         manga-templates（内置分镜预设，ADR 078 后记迁移：根级+随包分发；
+//         用户自存模板在 data/manga-templates/user/ 属用户数据不入包）
 //   根文件：index.html help.html server.js package.json package-lock.json
 //           start-server.bat 清理缓存.bat 说明.txt update.bat
 //   绝不入包：data/（用户数据与 API Key）、save/、tag/、docs/（开发者文档）、
@@ -37,7 +39,7 @@ const LEGACY_ZIP_PATH = path.join(OUT_DIR, 'lumen-update.zip');
 // 跨机器解压有乱码风险；bsdtar 写 UTF-8 标志位，两端一致。
 const TAR = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
 
-const PACKAGE_DIRS = ['css', 'js', 'routes', 'utils', 'pi-extensions', 'workflows', 'image', 'tools', 'lumen_nodes'];
+const PACKAGE_DIRS = ['css', 'js', 'routes', 'utils', 'pi-extensions', 'workflows', 'image', 'tools', 'lumen_nodes', 'manga-templates'];
 const PACKAGE_ROOT_FILES = [
   'index.html', 'help.html', 'server.js', 'package.json', 'package-lock.json',
   'start-server.bat', '清理缓存.bat', '说明.txt', 'update.bat',

@@ -70,6 +70,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 编译导出 MOSS/Flux3 坐标提示词；见 js/components/CoordinateEditor.js）
     window.coordinateEditor = new CoordinateEditor();
 
+    // 初始化漫画编辑器（顶栏「漫画编辑」按钮，插在坐标编辑左侧：一期整体
+    // 复制坐标编辑器改名分叉，行为等同；独立草稿端点与键名，见
+    // js/components/MangaEditor.js。须在 coordinateEditor 之后实例化，
+    // 按钮插入逻辑要拿它的按钮当参照）
+    window.mangaEditor = new MangaEditor();
+
     // 初始化设置管理器
     window.settingsManager = new SettingsManager();
 

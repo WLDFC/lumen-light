@@ -1,7 +1,7 @@
 {
   "_comment_项目说明": "本文件是 Node.js 项目的配置中心：项目信息、依赖清单（npm install 依据）、命令快捷方式。注意 JSON 不支持 // 注释，以下 _comment_ 开头的字段仅作说明用途，npm 会自动忽略。",
   "name": "lumen-light",
-  "version": "0.3.0.9",
+  "version": "0.3.2.2",
   "description": "流光 LumenLight：AI 绘画工作台（画布 + ComfyUI 工作流 + LLM 对话绘图）",
   "main": "index.js",
   "_comment_main": "入口文件声明。本项目直接用 node server.js 启动后端，此项实际未使用",
@@ -10,6 +10,17 @@
     "test": "jest"
   },
   "_comment_scripts_test": "运行 npm test 时执行 jest，自动跑 test/ 目录下的全部单元测试",
+  "jest": {
+    "modulePathIgnorePatterns": [
+      "<rootDir>/pi/",
+      "<rootDir>/runtime/",
+      "<rootDir>/mcp/",
+      "<rootDir>/models/",
+      "<rootDir>/Real-ESRGAN/",
+      "<rootDir>/workflows/"
+    ]
+  },
+  "_comment_jest": "Jest 配置。modulePathIgnorePatterns：把与代码无关的重目录排除出模块爬扫（haste 扫描默认走全仓库根）——pi/ 是 134MB 的内嵌 agent 运行包（含自带 node_modules）、runtime/ 内置 Node、mcp/ 是 Python venv、models/ 是 ONNX 权重、Real-ESRGAN/ 是绿色版程序、workflows/ 是 ComfyUI 工作流 JSON 模板，扫它们纯属空转（冷跑分钟级→秒级）；test/ 下的测试只 require 项目内 routes/js/utils，不受影响",
   "keywords": [],
   "author": "",
   "license": "GPL-3.0-only",

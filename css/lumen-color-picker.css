@@ -1,0 +1,119 @@
+/**
+ * ==========================================================================
+ * Lumen 通用预制件样式：PS 式色板取色器（LumenColorPicker）
+ * ==========================================================================
+ * 灯箱 ImageStudio（右侧色板区）与漫画编辑器（右栏「色板」分区）双消费方，
+ * 自 image-studio-panel.css 的 .is-cp-* 段升格迁移改中性类名（ADR 068）。
+ * 结构：SV 渐变方框（底色两层渐变由组件 _render 内联写入）+ 垂直色相条
+ * + 当前/上次色叠块 + Hex 输入；容器宽高由宿主给出（面板宽度自适应）。
+ * ==========================================================================
+ */
+
+.lumen-color-picker {
+    padding-bottom: 10px;
+}
+
+/* 主区：SV 渐变方框 + 垂直色相条 */
+.lumen-cp-main {
+    display: flex;
+    gap: 8px;
+    height: 140px;
+}
+
+.lumen-cp-sv {
+    position: relative;
+    flex: 1;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    cursor: crosshair;
+    /* 底色两层渐变由 LumenColorPicker._render 内联写入：
+       黑（自下）+ 白→当前色相纯色（自右） */
+}
+
+.lumen-cp-sv-cursor {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+    pointer-events: none;       /* 游标不挡方框拖拽 */
+}
+
+.lumen-cp-hue {
+    position: relative;
+    width: 14px;
+    flex: none;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 2px;
+    background: linear-gradient(to bottom,
+        #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+    cursor: ns-resize;
+}
+
+.lumen-cp-hue-cursor {
+    position: absolute;
+    left: -3px;
+    right: -3px;
+    height: 5px;
+    border: 2px solid #fff;
+    border-radius: 3px;
+    transform: translateY(-50%);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+}
+
+/* 当前色/上次色叠放块 + Hex 输入 */
+.lumen-cp-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 10px;
+}
+
+.lumen-cp-pair {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex: none;
+}
+
+.lumen-cp-cur {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 21px;
+    height: 21px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    z-index: 1;
+}
+
+.lumen-cp-prev {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 21px;
+    height: 21px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+}
+
+.lumen-cp-hex {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #fff;
+    font-size: 12px;
+    font-family: monospace;
+    outline: none;
+}
+
+.lumen-cp-hex:focus {
+    border-color: #3b82f6;
+}

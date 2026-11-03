@@ -20,7 +20,7 @@ $ReleaseBase = 'https://github.com/WLDFC/lumen-light/releases/latest/download'
 $MirrorPrefix = 'https://gh-proxy.com/'
 if ($env:LUMEN_UPDATE_BASE) { $ReleaseBase = $env:LUMEN_UPDATE_BASE }
 
-$PackageDirs = @('css','js','routes','utils','pi-extensions','workflows','image','tools','lumen_nodes')
+$PackageDirs = @('css','js','routes','utils','pi-extensions','workflows','image','tools','lumen_nodes','manga-templates')
 $PackageRootFiles = @('index.html','help.html','server.js','package.json','package-lock.json',
   'start-server.bat','清理缓存.bat','说明.txt','update.bat')
 

@@ -1,0 +1,100 @@
+{
+  "draft": {
+    "pages": [
+      {
+        "width": 832,
+        "height": 1216,
+        "bbox_coord_space": "abs",
+        "bbox_format": "xyxy",
+        "summary": {
+          "caption": "一页彩色漫画，亚丝娜穿着校服在教室",
+          "canvas": "multi_panel"
+        },
+        "items": [
+          {
+            "label": "character",
+            "caption": "亚丝娜走进教室的正面视图",
+            "bbox": [
+              416,
+              0,
+              832,
+              1216
+            ],
+            "cid": 0
+          },
+          {
+            "label": "object",
+            "caption": "从外面开门的分镜，只能看到开门的，看不到亚丝娜",
+            "bbox": [
+              0,
+              0,
+              416,
+              608
+            ],
+            "cid": 1
+          },
+          {
+            "label": "object",
+            "caption": "亚丝娜的黑丝沾上了白色的粘稠液体，腿部特写",
+            "bbox": [
+              0,
+              608,
+              416,
+              1216
+            ],
+            "cid": 2
+          }
+        ],
+        "drawLayers": [
+          {
+            "id": 1,
+            "name": "生成落图",
+            "visible": true,
+            "image": {
+              "src": "/api/manga-projects/m-20261107-8t3q/images/1794070985309-1.png",
+              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794070985309-1.png",
+              "bbox": [
+                0,
+                0,
+                832,
+                1216
+              ]
+            }
+          },
+          {
+            "id": 2,
+            "name": "生成落图",
+            "visible": true,
+            "image": {
+              "src": "/api/manga-projects/m-20261107-8t3q/images/1794071071604-1.png",
+              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794071071604-1.png",
+              "bbox": [
+                0,
+                0,
+                832,
+                1216
+              ]
+            }
+          },
+          {
+            "id": 3,
+            "name": "生成落图",
+            "visible": true,
+            "image": {
+              "src": "/api/manga-projects/m-20261107-8t3q/images/1794071124603-1.png",
+              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794071124603-1.png",
+              "bbox": [
+                0,
+                0,
+                832,
+                1216
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "active": 0
+  },
+  "savedAt": 1794071468253
+}
