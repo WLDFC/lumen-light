@@ -1,0 +1,698 @@
+/* ==========================================================================
+   图层拆分窗口（LayerSplit，2026-11-13）
+   壳复用 recipe-dialog 体系（与 LoRA 管理器同尺寸同观感），本文件只管
+   窗口内部：取图区 / 校准框叠加 / 图层编辑舞台 / 图层面板。
+   ========================================================================== */
+
+/* ===== 通用 ===== */
+.ls-status {
+    padding: 6px 14px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    min-height: 18px;
+}
+.ls-status.error {
+    color: #f87171;
+}
+.ls-hidden {
+    display: none !important;
+}
+
+/* ===== 工具行（标题下主操作行） ===== */
+.ls-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px 0;
+    flex-wrap: wrap;
+}
+.ls-btn {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12.5px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s, border-color 0.15s;
+}
+.ls-btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+}
+.ls-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+.ls-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.ls-btn.primary {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
+}
+.ls-btn.primary:hover {
+    background: rgba(59, 130, 246, 0.3);
+}
+.ls-btn.running {
+    border-color: rgba(245, 158, 11, 0.5);
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbbf24;
+}
+.ls-spacer {
+    flex: 1;
+}
+
+/* ===== 内容分栏 ===== */
+.ls-content {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    padding: 10px 14px 14px;
+    gap: 12px;
+}
+.ls-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    position: relative;
+    overflow: hidden;
+}
+.ls-side {
+    width: 300px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;   /* 图标轨 + 内容面板（漫画编辑器右侧工具轨同款） */
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+}
+.ls-side-rail {
+    width: 40px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.02);
+}
+.ls-rail-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.ls-rail-btn svg {
+    width: 15px;
+    height: 15px;
+}
+.ls-rail-btn:hover {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.06);
+}
+.ls-rail-btn.on {
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.18);
+    border-color: rgba(59, 130, 246, 0.45);
+}
+.ls-side-panel {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ls-side-header {
+    padding: 10px 12px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.ls-side-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 12px;
+}
+
+/* ===== 取图阶段 ===== */
+.ls-pick {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+}
+.ls-pick-drop {
+    width: 100%;
+    flex: 1;
+    border: 2px dashed rgba(255, 255, 255, 0.18);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+    transition: border-color 0.15s, background 0.15s;
+}
+.ls-pick-drop.dragover {
+    border-color: rgba(59, 130, 246, 0.7);
+    background: rgba(59, 130, 246, 0.06);
+}
+.ls-model-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 460px;
+}
+/* ===== Comfy | API 分段开关（漫画编辑器同款交互，2026-11-13） ===== */
+.ls-mode-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.ls-mode-switch {
+    display: inline-flex;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+}
+.ls-mode-btn {
+    height: 28px;
+    padding: 0 14px;
+    border: none;
+    background: #0f0f12;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.ls-mode-btn + .ls-mode-btn {
+    border-left: 1px solid rgba(128, 128, 128, 0.3);
+}
+.ls-mode-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.06);
+}
+.ls-mode-btn.active {
+    background: #3b82f6;
+    color: #fff;
+}
+.ls-mode-desc {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.ls-cutout-channel {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.6);
+}
+.ls-model-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.7);
+}
+.ls-model-row label {
+    width: 76px;
+    flex-shrink: 0;
+    text-align: right;
+}
+.ls-model-row input {
+    flex: 1;
+    height: 30px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.9);
+    padding: 0 10px;
+    font-size: 12.5px;
+}
+.ls-model-row input:focus {
+    outline: none;
+    border-color: rgba(59, 130, 246, 0.6);
+}
+/* 模型下拉（LumenDropdown 触发器）：尺寸对齐输入框观感 */
+.ls-model-row .ls-model-dd {
+    flex: 1;
+    min-width: 0;
+}
+.ls-model-dd .lumen-dd-trigger {
+    width: 100%;
+    height: 30px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.3);
+    font-size: 12.5px;
+}
+.ls-model-dd .lumen-dd-trigger:hover {
+    border-color: rgba(59, 130, 246, 0.5);
+}
+.ls-model-hint {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.38);
+    width: 100%;
+    max-width: 460px;
+    line-height: 1.6;
+}
+/* 识别提示词编辑区（模型设置侧栏下方） */
+.ls-prompt-block {
+    margin-top: 12px;
+    width: 100%;
+    max-width: 460px;
+}
+.ls-prompt-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+}
+.ls-prompt-reset {
+    border: none;
+    background: transparent;
+    color: #60a5fa;
+    font-size: 11.5px;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+.ls-prompt-reset:hover {
+    text-decoration: underline;
+}
+.ls-prompt-ta {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.82);
+    padding: 8px 9px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.55;
+}
+.ls-prompt-ta:focus {
+    outline: none;
+    border-color: rgba(59, 130, 246, 0.6);
+}
+
+/* ===== 主区预览（校准阶段） ===== */
+.ls-preview-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    padding: 12px;
+    position: relative;
+}
+.ls-preview-box {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;   /* 双上限 + flex 收裹：图按 contain 缩进预览区（不然
+                           大图按原始尺寸溢出，底部被裁——2026-11-13 用户反馈） */
+    display: flex;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.ls-preview-box img {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+.ls-preview-box.draw-mode {
+    cursor: crosshair;
+}
+
+/* 校准框叠加（绝对定位于预览盒上，与显示像素 1:1） */
+.ls-box {
+    position: absolute;
+    border: 1.6px solid #60a5fa;
+    box-sizing: border-box;
+    cursor: move;
+}
+.ls-box.off {
+    opacity: 0.35;
+    border-style: dashed;
+}
+.ls-box.active {
+    border-color: #fbbf24;
+    border-width: 2px;
+    z-index: 3;
+}
+.ls-box .ls-box-tag {
+    position: absolute;
+    top: -18px;
+    left: -1.6px;
+    font-size: 10.5px;
+    line-height: 17px;
+    padding: 0 6px;
+    border-radius: 4px 4px 0 0;
+    background: rgba(96, 165, 250, 0.85);
+    color: #10131a;
+    white-space: nowrap;
+    pointer-events: none;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ls-box.off .ls-box-tag {
+    background: rgba(255, 255, 255, 0.35);
+}
+/* 框边拉伸热区（2026-11-13 用户反馈：不要可见圆点，整条边可拉）——
+   不可见热区叠在框边上，光标随边向变化；四角为斜向热区（叠边之上）。
+   坑：方向类是 ls-h-*（.ls-handle.n 这种匹配不上，热区会 0 尺寸叠原点） */
+.ls-box .ls-handle {
+    position: absolute;
+    background: transparent;
+    border: none;
+}
+.ls-box .ls-handle.ls-h-n { left: 0; top: -4px; width: 100%; height: 8px; cursor: ns-resize; }
+.ls-box .ls-handle.ls-h-s { left: 0; bottom: -4px; width: 100%; height: 8px; cursor: ns-resize; }
+.ls-box .ls-handle.ls-h-e { top: 0; right: -4px; width: 8px; height: 100%; cursor: ew-resize; }
+.ls-box .ls-handle.ls-h-w { top: 0; left: -4px; width: 8px; height: 100%; cursor: ew-resize; }
+.ls-box .ls-handle.ls-h-nw { left: -6px; top: -6px; width: 15px; height: 15px; cursor: nwse-resize; }
+.ls-box .ls-handle.ls-h-ne { right: -6px; top: -6px; width: 15px; height: 15px; cursor: nesw-resize; }
+.ls-box .ls-handle.ls-h-sw { left: -6px; bottom: -6px; width: 15px; height: 15px; cursor: nesw-resize; }
+.ls-box .ls-handle.ls-h-se { right: -6px; bottom: -6px; width: 15px; height: 15px; cursor: nwse-resize; }
+
+/* ===== 右栏：框列表（校准） ===== */
+.ls-box-item {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px 9px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+.ls-box-item:hover {
+    border-color: rgba(255, 255, 255, 0.28);
+}
+.ls-box-item.active {
+    border-color: rgba(251, 191, 36, 0.6);
+}
+.ls-box-item.off {
+    opacity: 0.45;
+}
+.ls-box-item-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.ls-box-item-head input[type="checkbox"] {
+    accent-color: #3b82f6;
+    flex-shrink: 0;
+}
+.ls-box-item-name {
+    flex: 1;
+    min-width: 0;
+    height: 24px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    padding: 0 5px;
+}
+.ls-box-item-name:focus {
+    outline: none;
+    border-color: rgba(59, 130, 246, 0.5);
+    background: rgba(0, 0, 0, 0.3);
+}
+.ls-box-item-del {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    padding: 2px;
+    flex-shrink: 0;
+}
+.ls-box-item-del:hover {
+    color: #f87171;
+}
+.ls-box-item-meta {
+    margin-top: 5px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+}
+.ls-box-item-meta select {
+    height: 22px;
+    border-radius: 5px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: #0f0f12;
+    color: #fff;
+    font-size: 11px;
+}
+/* 原生 option 弹层=凹陷层 #0f0f12（配色美学 skill：背景层规范） */
+.ls-box-item-meta select option {
+    background: #0f0f12;
+    color: #fff;
+}
+.ls-box-item-meta select option:hover,
+.ls-box-item-meta select option:checked {
+    background: #2a2b31;
+}
+.ls-side-empty {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 12.5px;
+    text-align: center;
+    padding: 24px 8px;
+    line-height: 1.7;
+}
+
+/* ===== 编辑阶段：舞台 + 图层面板 ===== */
+.ls-stage-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+}
+.ls-stage-cv {
+    /* 覆盖 style.css 的全局 canvas 规则（position:fixed + 100vw/vh 是给
+       画布主画布的）——舞台 canvas 必须留在窗口布局流内 */
+    position: relative;
+    width: auto;
+    height: auto;
+    background: transparent;
+    max-width: 100%;
+    max-height: 100%;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    cursor: default;
+}
+
+/* 图层条目（漫画图层卡同语言） */
+.ls-layer-item {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 7px 9px;
+    margin-bottom: 7px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.ls-layer-item:hover {
+    border-color: rgba(255, 255, 255, 0.28);
+}
+.ls-layer-item.active {
+    border-color: rgba(251, 191, 36, 0.65);
+    background: rgba(251, 191, 36, 0.06);
+}
+.ls-layer-item.off {
+    opacity: 0.45;
+}
+.ls-layer-thumb {
+    width: 40px;
+    height: 40px;
+    border-radius: 5px;
+    background:
+        conic-gradient(rgba(255,255,255,0.14) 0 25%, transparent 0 50%, rgba(255,255,255,0.14) 0 75%, transparent 0) 0 0/14px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    object-fit: contain;
+    flex-shrink: 0;
+}
+.ls-layer-info {
+    flex: 1;
+    min-width: 0;
+}
+.ls-layer-name {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.85);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ls-layer-sub {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.38);
+    margin-top: 2px;
+}
+.ls-layer-eye,
+.ls-layer-del,
+.ls-layer-cutout,
+.ls-layer-key,
+.ls-layer-cutout-ai,
+.ls-layer-restore {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    padding: 3px;
+    flex-shrink: 0;
+}
+.ls-layer-eye:hover,
+.ls-layer-cutout:hover,
+.ls-layer-key:hover,
+.ls-layer-cutout-ai:hover,
+.ls-layer-restore:hover,
+.ls-layer-del:hover {
+    color: #fff;
+}
+.ls-layer-cutout:hover {
+    color: #34d399;
+}
+.ls-layer-key:hover {
+    color: #38bdf8;
+}
+.ls-layer-cutout-ai:hover {
+    color: #fbbf24;   /* 云端=琥珀色暗示按张计费 */
+}
+.ls-layer-del:hover {
+    color: #f87171;
+}
+.ls-layer-ops {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+/* 选中层属性区（不透明度 + 背景层补齐双版本切换） */
+.ls-layer-props {
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    border-radius: 8px;
+    padding: 9px 10px;
+    margin-bottom: 9px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+}
+.ls-layer-props .ls-opacity-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.ls-layer-props input[type="range"] {
+    flex: 1;
+    accent-color: #3b82f6;
+}
+.ls-layer-props .ls-opacity-val {
+    width: 38px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.85);
+}
+.ls-inpaint-versions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+.ls-inpaint-versions .ls-btn {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 11px;
+}
+.ls-inpaint-versions .ls-btn.on {
+    border-color: rgba(59, 130, 246, 0.7);
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+}
+
+/* ==================== 全屏壳（2026-11-14 用户「改成全屏」，坐标编辑器同款） ====================
+   基类 recipe-dialog 的 24px 内边距会在四周露一条遮罩带——改 5px 贴边
+   （与右侧面板 top:5/bottom:5 固定定位同值对齐，左 5px 对称）；right 无
+   条件吃 --ls-gap 变量、默认 0px 全屏，布局钮开=预制件实测写入拉出留白、
+   关=0px（无需 lora-layout 类与媒体查询兜底，视口不足时预制件自行强制
+   回落 0px）。
+   **选择器必须带 .recipe-dialog 双类（0,2,0）**：本文件在 index.html 里
+   先于 recipe-manager.css 加载（36 行 vs 69 行），单类选择器同优先级
+   会被基类 inset:0/padding:24px 后加载覆盖——布局钮写变量无效+全屏失效
+   （2026-11-14 实测踩中；coord 没踩中只因它的 css 排在基类后） */
+.recipe-dialog.layer-split-dialog {
+    right: var(--ls-gap, 0px);
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 5px;
+    padding-right: 0;
+}
+
+/* ==================== 布局钮（2026-11-14，LumenLayoutPanel 预制件） ====================
+   同 LoRA/提示词/漫画/坐标编辑器第五处：开=右缘留白露出右侧 Comfy 面板、
+   关=全屏。按钮在工具行右端（用户点名：与左侧添加框/上传图片同排对齐，
+   margin-left:auto 推到行尾），观感与 .ls-btn 同组同款；蓝系激活（持久
+   布局态）。勿借 lumen-batch-btn（批量预制件按类找触发器） */
+.ls-toolbar .ls-layout-btn {
+    margin-left: auto;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12.5px;
+    font-family: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ls-toolbar .ls-layout-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+.ls-toolbar .ls-layout-btn.is-active {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.2);
+    color: #fff;
+}
+.ls-toolbar .ls-layout-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
