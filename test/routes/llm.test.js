@@ -38,6 +38,16 @@ jest.mock('fs', () => ({
                                     { id: 'gpt-image-2', type: 'image' },
                                     { id: 'deepseek-chat', type: 'chat' }
                                 ]
+                            },
+                            // 接口格式 = Responses 的厂商（2026-11-20）：
+                            // 验证载荷自动转换与 /responses 路由
+                            ResponsesRelay: {
+                                endpoint: 'https://responses.test.com/v1',
+                                apiKey: 'responses-key',
+                                apiType: 'responses',
+                                models: [
+                                    { id: 'gpt-6.1-sol', type: 'chat' }
+                                ]
                             }
                         }
                     }
@@ -50,19 +60,34 @@ jest.mock('fs', () => ({
 
 // mock 提供商请求函数
 const mockRequestChatCompletions = jest.fn();
+const mockRequestChatResponses = jest.fn();
 const mockRequestImageGeneration = jest.fn();
 const mockRequestImageEdit = jest.fn();
 const mockProxyImageDownload = jest.fn();
 
-jest.mock('../../utils/llmProviders', () => ({
-    buildChatUrl: jest.fn((endpoint) => new URL(`${endpoint}/chat/completions`)),
-    buildImageGenerationUrl: jest.fn((endpoint) => new URL(`${endpoint}/images/generations`)),
-    buildImageEditUrl: jest.fn((endpoint) => new URL(`${endpoint}/images/edits`)),
-    requestChatCompletions: (...args) => mockRequestChatCompletions(...args),
-    requestImageGeneration: (...args) => mockRequestImageGeneration(...args),
-    requestImageEdit: (...args) => mockRequestImageEdit(...args),
-    proxyImageDownload: (...args) => mockProxyImageDownload(...args)
-}));
+// 纯函数（build*/convert/extract）用 requireActual 真身；网络函数 mock。
+// requestChatAuto 必须整体 mock：真身内部引用模块内局域 requestChatCompletions，
+// 不经 exports 对象，requireActual 铺底拦不住真实 HTTP——镜像真身路由逻辑
+// （URL 由端点构造）让既有断言形状保持不变
+jest.mock('../../utils/llmProviders', () => {
+    const actual = jest.requireActual('../../utils/llmProviders');
+    return {
+        ...actual,
+        requestChatCompletions: (...args) => mockRequestChatCompletions(...args),
+        requestImageGeneration: (...args) => mockRequestImageGeneration(...args),
+        requestImageEdit: (...args) => mockRequestImageEdit(...args),
+        proxyImageDownload: (...args) => mockProxyImageDownload(...args),
+        requestChatAuto: (endpoint, apiKey, payload, apiType, signal) => {
+            if (apiType === 'responses') {
+                const url = new URL(`${String(endpoint).replace(/\/$/, '')}/responses`);
+                return mockRequestChatResponses(url, apiKey,
+                    actual.convertChatPayloadToResponses(payload), signal);
+            }
+            const url = new URL(`${String(endpoint).replace(/\/$/, '')}/chat/completions`);
+            return mockRequestChatCompletions(url, apiKey, payload, signal);
+        }
+    };
+});
 
 const createLlmRouter = require('../../routes/llm');
 
@@ -367,5 +392,33 @@ describe('显式 provider 路由（同名模型多厂商共存）', () => {
         expect(res.statusCode).toBe(200);
         const [, apiKey] = mockRequestChatCompletions.mock.calls[0];
         expect(apiKey).toBe('other-key');
+    });
+
+    test('Responses 厂商：走 /responses 且载荷自动转换、文本从 output[] 提取', async () => {
+        mockRequestChatResponses.mockResolvedValue({
+            output: [{ type: 'message', content: [{ type: 'output_text', text: 'Responses 回复' }] }]
+        });
+
+        const app = createApp();
+        const res = await request(app)
+            .post('/api/llm/chat')
+            .send({
+                model: 'gpt-6.1-sol',
+                messages: [{ role: 'user', content: '你好' }],
+                provider: 'ResponsesRelay'
+            });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.status).toBe('ok');
+        expect(res.body.reply).toBe('Responses 回复');
+        expect(mockRequestChatResponses).toHaveBeenCalledTimes(1);
+
+        const [url, apiKey, payload] = mockRequestChatResponses.mock.calls[0];
+        expect(url.pathname).toBe('/v1/responses');
+        expect(apiKey).toBe('responses-key');
+        expect(payload.model).toBe('gpt-6.1-sol');
+        expect(payload.input).toEqual([
+            { role: 'user', content: [{ type: 'input_text', text: '你好' }] }
+        ]);
     });
 });

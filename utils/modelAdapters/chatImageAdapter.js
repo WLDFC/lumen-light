@@ -10,8 +10,8 @@
  */
 
 const {
-    buildChatUrl,
-    requestChatCompletions
+    requestChatAuto,
+    extractResponsesText
 } = require('../llmProviders');
 const {
     isChatImageEditModel,
@@ -44,9 +44,8 @@ module.exports = {
         const sizeHint = buildAspectRatioHint(size);
         const fullPrompt = sizeHint ? `${prompt || ''}\n\n${sizeHint}` : (prompt || '');
 
-        const chatUrl = buildChatUrl(provider.config.endpoint);
         console.log(`🎨 [${provider.name}] 对话式图像编辑: 模型=${model}, 参考图数量=${images.length}`);
-        const chatResult = await requestChatCompletions(chatUrl, provider.config.apiKey, {
+        const chatResult = await requestChatAuto(provider.config.endpoint, provider.config.apiKey, {
             model,
             messages: [{
                 role: 'user',
@@ -58,9 +57,14 @@ module.exports = {
                     }))
                 ]
             }]
-        }, signal);
+        }, provider.config.apiType, signal);
 
-        const { imageSrc, reply } = extractImageFromChatReply(chatResult);
+        // Responses 返回折回 completions 形状喂既有提取（生成的图片以
+        // markdown 嵌在回复文本里，拿到文本则提取逻辑零改动）
+        const normalized = provider.config.apiType === 'responses'
+            ? { choices: [{ message: { content: extractResponsesText(chatResult) } }] }
+            : chatResult;
+        const { imageSrc, reply } = extractImageFromChatReply(normalized);
         if (!imageSrc) {
             const brief = reply ? reply.slice(0, 200) : '';
             throw new Error(brief ? `模型未返回图片，其回复为：${brief}` : '模型未返回图片');

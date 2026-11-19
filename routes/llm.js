@@ -16,8 +16,8 @@ const fs = require('fs').promises;
 const path = require('path');
 
 const {
-    buildChatUrl,
-    requestChatCompletions,
+    requestChatAuto,
+    extractResponsesText,
     proxyImageDownload
 } = require('../utils/llmProviders');
 
@@ -172,14 +172,17 @@ function createLlmRouter({ dataDir }) {
                 return { role: msg.role, content: msg.content };
             });
 
-            const chatUrl = buildChatUrl(config.endpoint);
-            const result = await requestChatCompletions(chatUrl, config.apiKey, {
+            // 按厂商接口格式分流（设置 → API「接口格式」）：Responses 中转
+            // 载荷自动转换（messages→input/system→instructions），返回统一提取
+            const result = await requestChatAuto(config.endpoint, config.apiKey, {
                 model,
                 messages: payloadMessages
-            });
+            }, config.apiType);
 
-            // 提取模型回复文本
-            const reply = result.choices?.[0]?.message?.content || '';
+            // 提取模型回复文本（Responses 走 output[] 提取，兼容 choices 兜底）
+            const reply = config.apiType === 'responses'
+                ? extractResponsesText(result)
+                : (result.choices?.[0]?.message?.content || '');
             res.json({ status: 'ok', reply });
         } catch (error) {
             console.error('LLM 聊天请求失败:', error);

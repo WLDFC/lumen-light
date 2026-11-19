@@ -181,6 +181,18 @@ class SettingsApiPanel {
                     <input type="password" id="settingsApiKey" class="settings-input"
                            placeholder="sk-..." value="${LumenLight.escapeHtml(config.apiKey || '')}">
                 </div>
+                <div class="settings-form-item">
+                    <label for="settingsApiFormat">接口格式</label>
+                    <select id="settingsApiFormat" class="settings-input">
+                        <option value="completions" ${(config.apiType || 'completions') === 'completions' ? 'selected' : ''}>OpenAI Compatible（chat/completions，默认）</option>
+                        <option value="responses" ${config.apiType === 'responses' ? 'selected' : ''}>OpenAI Responses（/v1/responses）</option>
+                    </select>
+                    <div class="settings-models-hint">
+                        中转站报错含 chat_completions_disabled / “请改用 /v1/responses” 时选 Responses。
+                        影响范围：面板对话、agent 模式、对话类生图模型；生图走 /images 的模型不受影响。
+                        保存后 agent 自动重连，无需手动重启。
+                    </div>
+                </div>
 
                 <!-- 模型配置 -->
                 <div class="settings-models-section">
@@ -436,15 +448,17 @@ class SettingsApiPanel {
             return;
         }
 
-        // 1. 先把当前表单中的端点、Key、模型保存到上一个厂商配置中
+        // 1. 先把当前表单中的端点、Key、接口格式、模型保存到上一个厂商配置中
         const endpoint = document.getElementById('settingsApiEndpoint')?.value.trim() || '';
         const apiKey = document.getElementById('settingsApiKey')?.value.trim() || '';
+        const apiType = document.getElementById('settingsApiFormat')?.value === 'responses'
+            ? 'responses' : 'completions';
         const models = this.collectModelsFromForm();
 
         if (!this.settings.api.providers) {
             this.settings.api.providers = {};
         }
-        this.settings.api.providers[previousProvider] = { endpoint, apiKey, models };
+        this.settings.api.providers[previousProvider] = { endpoint, apiKey, apiType, models };
 
         // 2. 切换当前厂商
         this.settings.api.currentProvider = newProvider;
@@ -569,6 +583,9 @@ class SettingsApiPanel {
         const provider = (this.settings.api && this.settings.api.currentProvider) || 'Deepseek';
         const endpoint = document.getElementById('settingsApiEndpoint')?.value.trim() || '';
         const apiKey = document.getElementById('settingsApiKey')?.value.trim() || '';
+        // 接口格式：completions（默认）| responses（设置 → API「接口格式」）
+        const apiType = document.getElementById('settingsApiFormat')?.value === 'responses'
+            ? 'responses' : 'completions';
         const aligned = this.collectModelsFromForm();
         const models = keepEmptyRows ? aligned : aligned.filter(Boolean);
 
@@ -583,7 +600,7 @@ class SettingsApiPanel {
             currentProvider: provider,
             providers: {
                 ...existingProviders,
-                [provider]: { endpoint, apiKey, models }
+                [provider]: { endpoint, apiKey, apiType, models }
             },
             bindings
         };

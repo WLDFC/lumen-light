@@ -31,6 +31,131 @@ function buildChatUrl(endpoint) {
 }
 
 /**
+ * 将端点地址转换为 Responses API 请求的 URL 对象
+ * （部分中转站已停用 /v1/chat/completions，只收 /v1/responses——
+ * 设置 → API 厂商编辑区选「OpenAI Responses」时走此通道）
+ * 兼容 https://api.example.com/v1 与 https://api.example.com/v1/ 两种写法
+ * @param {string} endpoint - API 端点地址
+ * @returns {URL} 完整的请求 URL
+ */
+function buildResponsesUrl(endpoint) {
+    const url = new URL(endpoint.trim());
+    url.pathname = url.pathname.replace(/\/$/, '') + '/responses';
+    return url;
+}
+
+/**
+ * OpenAI chat/completions 载荷 → Responses API 载荷（纯函数，vm 可测）。
+ * 映射规则：
+ *   - system 消息合并为顶层 instructions（Responses 无 system 角色）
+ *   - user 文本 → input_text；assistant 文本 → output_text（各自的角色部件类型）
+ *   - image_url 多模态部件 → input_image（dataUrl 直传，user 消息）
+ *   - 其他角色/空部件丢弃；input 不产出空条目
+ * @param {Object} payload - { model, messages: [{role, content}] } completions 形状
+ * @returns {Object} { model, instructions?, input: [{role, content:[...]}] } Responses 形状
+ */
+function convertChatPayloadToResponses(payload) {
+    const messages = Array.isArray(payload && payload.messages) ? payload.messages : [];
+    const instructions = [];
+    const input = [];
+    for (const msg of messages) {
+        const role = msg && msg.role;
+        const content = msg && msg.content;
+        if (role === 'system') {
+            if (typeof content === 'string') {
+                if (content) instructions.push(content);
+            } else if (Array.isArray(content)) {
+                for (const part of content) {
+                    if (part && part.type === 'text' && part.text) instructions.push(part.text);
+                }
+            }
+            continue;
+        }
+        if (role !== 'user' && role !== 'assistant') continue;
+        const textType = role === 'assistant' ? 'output_text' : 'input_text';
+        const parts = [];
+        if (typeof content === 'string') {
+            if (content) parts.push({ type: textType, text: content });
+        } else if (Array.isArray(content)) {
+            for (const part of content) {
+                if (!part) continue;
+                if (part.type === 'text' && part.text) {
+                    parts.push({ type: textType, text: part.text });
+                } else if (part.type === 'image_url' && part.image_url && part.image_url.url) {
+                    parts.push({ type: 'input_image', image_url: part.image_url.url });
+                }
+            }
+        }
+        if (parts.length) input.push({ role, content: parts });
+    }
+    const body = { model: payload && payload.model, input };
+    if (instructions.length) body.instructions = instructions.join('\n\n');
+    return body;
+}
+
+/**
+ * 从 Responses API 返回中提取回复文本（纯函数，vm 可测）。兼容三种形态：
+ *   1. 标准 output[]：type==='message' 项的 content[].output_text 拼接
+ *      （reasoning 等非 message 项跳过）
+ *   2. output_text 便捷字段（SDK 代理/部分中转直接给）
+ *   3. choices 兜底（个别中转在 /responses 上仍回 completions 形状）
+ * @param {Object} result - Responses（或混合形状）返回 JSON
+ * @returns {string} 回复文本（提取不到返回 ''）
+ */
+function extractResponsesText(result) {
+    if (!result || typeof result !== 'object') return '';
+    if (Array.isArray(result.output)) {
+        const texts = [];
+        for (const item of result.output) {
+            if (!item || item.type !== 'message') continue;
+            const parts = Array.isArray(item.content) ? item.content : [];
+            for (const part of parts) {
+                if (part && part.type === 'output_text' && typeof part.text === 'string') {
+                    texts.push(part.text);
+                }
+            }
+        }
+        if (texts.length) return texts.join('');
+    }
+    if (typeof result.output_text === 'string' && result.output_text) return result.output_text;
+    if (Array.isArray(result.choices) && result.choices[0]) {
+        const content = result.choices[0].message && result.choices[0].message.content;
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) {
+            return content.map((p) => (p && typeof p.text === 'string' ? p.text : '')).join('');
+        }
+    }
+    return '';
+}
+
+/**
+ * 按厂商接口格式发起聊天请求（统一入口）：
+ *   apiType === 'responses' → {endpoint}/responses（OpenAI Responses API，
+ *   载荷自动转换）；否则 → {endpoint}/chat/completions（OpenAI 兼容，载荷原样）。
+ * 返回原始 JSON，文本提取用 extractResponsesText（responses）或
+ * choices 路径（completions，由调用方按 apiType 分支）
+ * @param {string} endpoint - 厂商端点地址
+ * @param {string} apiKey - API Key
+ * @param {Object} payload - chat/completions 形状载荷 { model, messages }
+ * @param {string} [apiType] - 'completions'（缺省）| 'responses'
+ * @param {AbortSignal} [signal] - 中止信号
+ * @returns {Promise<Object>} 接口返回的 JSON
+ */
+async function requestChatAuto(endpoint, apiKey, payload, apiType, signal) {
+    if (apiType === 'responses') {
+        return requestJson(
+            buildResponsesUrl(endpoint),
+            apiKey,
+            JSON.stringify(convertChatPayloadToResponses(payload)),
+            120000,
+            '解析模型响应失败',
+            signal
+        );
+    }
+    return requestChatCompletions(buildChatUrl(endpoint), apiKey, payload, signal);
+}
+
+/**
  * 将端点地址转换为图像生成请求的 URL 对象
  * 兼容 https://api.example.com/v1 与 https://api.example.com/v1/ 两种写法
  * @param {string} endpoint - API 端点地址
@@ -441,9 +566,13 @@ function proxyImageDownload(imageUrl) {
 
 module.exports = {
     buildChatUrl,
+    buildResponsesUrl,
     buildImageGenerationUrl,
     buildImageEditUrl,
     requestChatCompletions,
+    requestChatAuto,
+    convertChatPayloadToResponses,
+    extractResponsesText,
     requestImageGeneration,
     requestImageEdit,
     proxyImageDownload,
