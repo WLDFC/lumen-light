@@ -25,6 +25,13 @@ AI 绘画工作台：无限画布 + ComfyUI 工作流（本地 / RunningHub 云�
 
 ![坐标编辑器：手画元素框位，自动编译成坐标提示词](docs/images/QQ20261104-001207.png)
 
+<p align="center">
+  <img src="docs/images/QQ_2026-11-12_01-56-45.png" width="49%" alt="物体移除前：画面带有豆包 AI 生成水印">
+  <img src="docs/images/QQ_2026-11-12_01-57-24.png" width="49%" alt="物体移除后：水印抹除干净">
+</p>
+
+<p align="center"><sub>ImageStudio 物体移除：一键抹掉「豆包 AI 生成」水印（左：移除前，右：移除后）</sub></p>
+
 ## 下载与启动
 
 1. 从 [Releases](../../releases) 下载发行包 zip，解压到任意目录；
