@@ -1,0 +1,12 @@
+{
+  "name": "lumen-light-cloud-gateway",
+  "private": true,
+  "description": "LumenLight 云端网关（公网部署门卫：访问码鉴权 + 出站地址改写 + HTTP/WS 反向代理）",
+  "main": "gateway.js",
+  "scripts": {
+    "start": "node gateway.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  }
+}

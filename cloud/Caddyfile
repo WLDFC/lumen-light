@@ -1,0 +1,19 @@
+# ==========================================================================
+# LumenLight 云端域名门（Caddy 自动 HTTPS）
+# ==========================================================================
+# 用法：
+#   1. 把下面 your.domain.com 换成你的域名，并保证 DNS A 记录指向 VPS 的公网 IP
+#   2. caddy.exe 与本文件放同一目录，测试：caddy validate --config Caddyfile
+#      前台试跑：caddy run --config Caddyfile
+#   3. 常驻：注册成系统服务（管理员 CMD，路径按实际改）：
+#        sc create LumenCaddy binPath= "C:\caddy\caddy.exe run --config C:\caddy\Caddyfile" start= auto
+#      或用 NSSM。首次启动 Caddy 自动申请 Let's Encrypt 证书并续期
+#      （80/443 需在安全组与防火墙放行 443；80 只用于跳转，可不开）
+#
+# 云端门卫架构（见 部署说明.md）：
+#   浏览器 → https://域名(Caddy:443) → cloud/gateway.js(:8081，鉴权+改写) → 原始后端(:8080，仅本机)
+# ==========================================================================
+
+your.domain.com {
+    reverse_proxy 127.0.0.1:8081
+}

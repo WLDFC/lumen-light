@@ -1,0 +1,4 @@
+# 访问码与运行产物不入库
+config.json
+node_modules/
+dist/
