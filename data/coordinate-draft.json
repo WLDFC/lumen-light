@@ -8,7 +8,19 @@
       "caption": "",
       "canvas": "single"
     },
-    "items": []
+    "items": [
+      {
+        "cid": 0,
+        "label": "object",
+        "caption": "",
+        "bbox": [
+          136,
+          200,
+          693,
+          716
+        ]
+      }
+    ]
   },
-  "savedAt": 1794069901214
+  "savedAt": 1794247049668
 }

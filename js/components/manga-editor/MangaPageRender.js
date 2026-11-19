@@ -22,6 +22,9 @@ Object.assign(window.MangaEditor.prototype, {
      * 层栈整体在元素框之下（元素是结构化数据恒在最上），背景参考图更在层栈之下。
      * 逐层不透明度（2026-11-04 自灯箱迁移）：layer.opacity 缺省 1，save/
      * restore 包裹防泄漏到后续绘制。
+     * 剪贴蒙版按组渲染（2026-11-11）：基底→置入链→形状基底描边补笔，
+     * 补笔让分镜框线整体盖在置入图之上（轮廓独立于置入内容，方便做漫画）；
+     * 剪贴层不单独渲染（基底隐藏/缺失→整链不显示，PS 同语义）。
      * 页裁剪按内容分派（ADR 070）：图片位图与形状层不裁页——移出画布后
      * 在页外黑边区依然可见（灯箱同款；形状出界移动 2026-11-07 用户拍板
      * 补遗）；笔迹/文字仍裁页内（画笔不该画出页外，文字按画幅裁剪是既有
@@ -39,11 +42,45 @@ Object.assign(window.MangaEditor.prototype, {
         ctx.save();
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
-        for (const layer of layers) {
+        // 剪贴链预扫：基底下标 → 链顶下标（紧随其上的连续剪贴层）。
+        // 链式语义下剪贴层的基底=下方最近未剪贴层，链在层栈上天然连续；
+        // 「基底→置入链→形状基底描边补笔」按组渲染取代逐层独立判定
+        const chainEnd = new Array(layers.length).fill(-1);
+        for (let i = 0; i < layers.length; i++) {
+            const l = layers[i];
+            if (!l || !l.clipped) continue;
+            for (let j = i - 1; j >= 0; j--) {
+                const b = layers[j];
+                if (b && !b.clipped) {
+                    if (chainEnd[j] < i) chainEnd[j] = i;
+                    break;
+                }
+            }
+        }
+        for (let i = 0; i < layers.length; i++) {
+            const layer = layers[i];
             if (!layer || layer.visible === false) continue;
+            // 剪贴蒙版（2026-11-11，PS 同语义）：内容只在本层下方最近未
+            // 剪贴层（基底）的不透明像素内显示。剪贴层不在此单独渲染——
+            // 已随其基底组画过（见链渲染块）；走到这里说明基底隐藏或
+            // 缺失，整链不显示正是目标语义。离屏两步：内容/基底各 1:1
+            // 草稿分辨率落 scratch，destination-in 拿基底 alpha 裁内容后
+            // 按层不透明度压回舞台。挂本函数=舞台/导出/整页合成同口径
+            // 自动一致
+            if (layer.clipped) continue;
+            const ce = chainEnd[i];
+            const hasChain = ce > i;
+            // 形状基底拆两笔：填充随层位先画，描边等置入链全部压回后再
+            // 叠——置入图的遮罩含描边 alpha，会盖住框线内半边；链顶补笔
+            // 让分镜框线恒在最上（2026-11-11 用户诉求：轮廓独立于置入
+            // 内容）。遮罩仍用基底完整内容渲染，置入图可顶到路径中线
+            const shapeBase = hasChain && !!layer.shape;
             ctx.save();
             ctx.globalAlpha = this._layerOpacity(layer);
-            if (layer.image && layer.image.src) {
+            if (shapeBase) {
+                // 不裁页：形状出界可见（同下方形状分支口径，ADR 070）
+                this._drawShapeLayer(ctx, layer, X, Y, scale, 'fill');
+            } else if (layer.image && layer.image.src) {
                 const img = this._ensureLayerImage(layer.image.src);
                 const imgReady = img.complete && img.naturalWidth;
                 // 调色预览钩子（MangaAdjustTool，ADR 074）：该层调色中改画
@@ -107,6 +144,25 @@ Object.assign(window.MangaEditor.prototype, {
                 ctx.restore();
             }
             ctx.restore();
+            // 置入链渲染：基底画完后逐层压回（自底向上），随后形状基底
+            // 补描边笔——框线整体盖在置入内容之上，内半边不再被吃掉。
+            // 遮罩内基底按其层不透明度参与（_renderClippedLayer 内部处理）
+            if (hasChain) {
+                for (let j = i + 1; j <= ce; j++) {
+                    const cl = layers[j];
+                    if (!cl || cl.visible === false) continue;
+                    ctx.save();
+                    ctx.globalAlpha = this._layerOpacity(cl);
+                    this._renderClippedLayer(ctx, cl, layer, X, Y, scale, d);
+                    ctx.restore();
+                }
+                if (shapeBase) {
+                    ctx.save();
+                    ctx.globalAlpha = this._layerOpacity(layer);
+                    this._drawShapeLayer(ctx, layer, X, Y, scale, 'stroke');
+                    ctx.restore();
+                }
+            }
         }
         ctx.restore();
     },
@@ -146,6 +202,75 @@ Object.assign(window.MangaEditor.prototype, {
         }
         g.globalCompositeOperation = 'source-over';
         ctx.drawImage(sc, X(0), Y(0), d.width * scale, d.height * scale);
+    },
+
+    // ==================== 剪贴蒙版（2026-11-11，PS Clipping Mask 同语义） ====================
+
+    /** 剪贴基底：本层下方最近的未剪贴层（PS 链式语义——多个剪贴层挂
+     *  同一基底；拖拽排序后按新位置自动定基）。返回层对象或 null */
+    _clipBaseFor(layer) {
+        const layers = this._ensureDrawLayers();
+        const idx = layers.indexOf(layer);
+        if (idx < 0) return null;
+        for (let i = idx - 1; i >= 0; i--) {
+            const l = layers[i];
+            if (l && !l.clipped) return l;
+        }
+        return null;
+    },
+
+    /**
+     * 层内容 1:1 草稿分辨率落任意 ctx（剪贴蒙版的内容/基底共用通道）：
+     * 四类内容与 _drawPageLayers 分支同口径——图片+层内笔迹走
+     * _drawImageLayerScratch（含橡皮 destination-out 语义）、纯笔迹层走
+     * _drawStrokeLayerScratch、文字/形状恒等变换矢量现画。调色预览
+     * 钩子照常命中
+     */
+    _renderLayerContentTo(g, layer, d) {
+        const id = (v) => v;
+        if (layer.image && layer.image.src) {
+            const img = this._ensureLayerImage(layer.image.src);
+            const adjPrev = this._adjustPreview && this._adjustPreview.layerId === layer.id
+                ? this._adjustPreview.cv : null;
+            const drawSrc = adjPrev || (img.complete && img.naturalWidth ? img : null);
+            this._drawImageLayerScratch(g, layer, id, id, 1, d, drawSrc);
+            return;
+        }
+        if (layer.text) { this._drawTextLayer(g, layer, id, id, 1); return; }
+        if (layer.shape) { this._drawShapeLayer(g, layer, id, id, 1); return; }
+        if (Array.isArray(layer.strokes)) {
+            this._drawStrokeLayerScratch(g, layer, id, id, 1, d);
+        }
+    },
+
+    /**
+     * 剪贴层渲染：内容 scratch 与基底 scratch 各 1:1 草稿分辨率合成，
+     * destination-in 拿基底 alpha 裁内容，结果按层不透明度压回舞台
+     * （调用方已设 globalAlpha）。scratch 复用两块实例级画布——基底
+     * 内容渲染可能内部再借 _imgScratch/_strokeScratch，互不冲突。
+     * 基底按其层不透明度参与遮罩（PS 同语义：基底越透明剪贴越透）
+     */
+    _renderClippedLayer(ctx, layer, base, X, Y, scale, d) {
+        if (!this._clipScratchA) this._clipScratchA = document.createElement('canvas');
+        if (!this._clipScratchB) this._clipScratchB = document.createElement('canvas');
+        const a = this._clipScratchA;
+        const b = this._clipScratchB;
+        if (a.width !== d.width || a.height !== d.height) { a.width = d.width; a.height = d.height; }
+        if (b.width !== d.width || b.height !== d.height) { b.width = d.width; b.height = d.height; }
+        const ga = a.getContext('2d');
+        ga.setTransform(1, 0, 0, 1, 0, 0);
+        ga.clearRect(0, 0, a.width, a.height);
+        ga.globalAlpha = this._layerOpacity(base);
+        this._renderLayerContentTo(ga, base, d);
+        ga.globalAlpha = 1;
+        const gb = b.getContext('2d');
+        gb.setTransform(1, 0, 0, 1, 0, 0);
+        gb.clearRect(0, 0, b.width, b.height);
+        this._renderLayerContentTo(gb, layer, d);
+        gb.globalCompositeOperation = 'destination-in';
+        gb.drawImage(a, 0, 0);
+        gb.globalCompositeOperation = 'source-over';
+        ctx.drawImage(b, X(0), Y(0), d.width * scale, d.height * scale);
     },
 
     /** 层不透明度归一：缺省 1；0.05~1 之外越界值钳回边界（渲染层兜底，

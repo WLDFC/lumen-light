@@ -11,6 +11,7 @@
  * 业务逻辑已拆分到以下模块：
  *   - routes/comfy.js       : ComfyUI 交互 API
  *   - routes/workflows.js   : 工作流文件管理 API
+ *   - routes/canvasTemplates.js: 画布工作流模板 API（工作流模板窗口）
  *   - routes/canvasImages.js: 画板图片槽位 API
  *   - routes/upscale.js     : 高清放大 API
  *   - routes/rembg.js       : 抠图去背景 API
@@ -34,6 +35,7 @@ const { v4: uuidv4 } = require('uuid'); // UUID 生成库
 // 导入业务路由模块
 const createComfyRouter = require('./routes/comfy');
 const createWorkflowsRouter = require('./routes/workflows');
+const createCanvasTemplatesRouter = require('./routes/canvasTemplates');
 const createCanvasImagesRouter = require('./routes/canvasImages');
 const createCanvasVideoRouter = require('./routes/canvasVideo');
 const createSavesRouter = require('./routes/saves');
@@ -47,6 +49,7 @@ const rembgRouter = require('./routes/rembg');
 const createSettingsRouter = require('./routes/settings');
 const createLlmRouter = require('./routes/llm');
 const createTagsRouter = require('./routes/tags');
+const createGalleryRouter = require('./routes/gallery');
 const createComfyNodeRouter = require('./routes/comfyNode');
 const createRunningHubRouter = require('./routes/runninghub');
 const MCPManager = require('./utils/mcpManager');
@@ -285,6 +288,12 @@ wss.on('connection', (ws) => {
 
 // ==================== 挂载业务路由 ====================
 
+// ComfyUI 进度中继（2026-11-08）：常驻一条到 ComfyUI 的 WS，把采样进度/
+// KSampler 式预览帧/执行报错转译成自家 WS 消息推给画布与面板——生成本身
+// 不经中继（断连只损反馈不损出图），断线自动重连（utils/comfyWsRelay）
+const { ComfyWsRelay } = require('./utils/comfyWsRelay');
+new ComfyWsRelay({ comfyApiUrl: COMFY_API_URL, clients }).start();
+
 // ComfyUI 相关 API（/api/receive-image、/api/prompts、/api/run-comfy、/api/comfy-status）
 app.use('/api', createComfyRouter({
     clients,
@@ -299,6 +308,12 @@ app.use('/api', createComfyRouter({
 app.use('/api/workflows', createWorkflowsRouter({
     workflowsDir: WORKFLOWS_DIR,
     layoutsFile: path.join(__dirname, 'data', 'workflow-layouts.json')
+}));
+
+// 画布工作流模板 API（/api/canvas-templates；模板存 workflows/canvas-templates/
+// 子目录，与 Comfy 工作流下拉扫描同仓不同层——非递归 readdir 天然隔离）
+app.use('/api/canvas-templates', createCanvasTemplatesRouter({
+    templatesDir: path.join(WORKFLOWS_DIR, 'canvas-templates')
 }));
 
 // 画板图片槽位 API（/api/canvas-image）
@@ -477,6 +492,10 @@ app.use('/api/llm', createLlmRouter({ dataDir: DATA_DIR }));
 
 // 图片提示词标签 API（/api/tags）
 app.use('/api/tags', createTagsRouter({ tagsDir: TAGS_DIR }));
+
+// 在线画廊 API（/api/gallery：Civitai/Danbooru 列表归一化 + 图片流式代理；
+// 网络层复用 utils/civitai.js 三级代理，图片缓存只驻内存不落盘，ADR 090）
+app.use('/api/gallery', createGalleryRouter());
 
 // 系统提示词库 API（数据落盘 data/prompts.json）。
 // 注意：路径不能叫 /api/prompts —— ComfyUI 路由（挂载在 /api）已占用

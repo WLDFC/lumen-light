@@ -36,9 +36,10 @@ Object.assign(window.MangaEditor.prototype, {
                             <button type="button" class="manga-file-item" data-act="canvas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>从画布选择图片…</button>
                         </div>
                     </div>
-                    <div class="manga-header-right">
-                        <span class="manga-status"></span>
-                        <button type="button" class="manga-project-btn" title="项目：新建/打开/删除漫画项目（一本漫画一个独立文件夹，生成图落项目内）">项目</button>
+                <div class="manga-header-right">
+                    <span class="manga-status"></span>
+                    <button type="button" class="manga-layout-btn" title="布局：右缘拉出留白，露出右侧 Comfy/LLM 面板">布局</button>
+                    <button type="button" class="manga-project-btn" title="项目：新建/打开/删除漫画项目（一本漫画一个独立文件夹，生成图落项目内）">项目</button>
                         <div class="manga-export-wrap">
                             <button type="button" class="manga-export-page-btn" title="导出：本页到画布 / 本页到本地 / 本项目全部页面合成图打包到本地">导出</button>
                             <div class="manga-file-menu manga-export-menu" hidden>
@@ -150,6 +151,8 @@ Object.assign(window.MangaEditor.prototype, {
                         </div>
                         <button type="button" class="manga-genmodel-select" aria-label="选择 API 生图模型" aria-haspopup="listbox" title="API 生图模型（仅 API 模式可用；Comfy 模式的工作流与主模型在右侧面板选择，此按钮占位锁定防跳动）"></button>
                         <button type="button" class="manga-gen-btn" title="Comfy 模式：编译产物写入面板正面框 2（框 1 留质量词）并触发面板提交，出图自动落当前页图层；API 模式：直连出图。编译失败时改用右栏文本">生成</button>
+                        <button type="button" class="manga-gen-batch-btn" title="逐格生成：选中几格就只生成几格（点选单格、Shift+点击多选，未选中=当前页全部元素框）——提示词=景别词+元素描述，尺寸=框等比放大到约 1MP，出图缩回落进各自的框，串行排队可随时停止。仅 Comfy 模式">逐格</button>
+                        <button type="button" class="manga-edit-btn" title="用右侧 Comfy 面板的提示词与槽位直接生成（不注入元素框编译产物，框内内容面板自理），出图自动落当前页图层——图生图编辑请先用图层右键『添加到编辑』把图送进面板槽位。仅 Comfy 面板模式">编辑</button>
                     </div>
                 </footer>
             </div>
@@ -225,8 +228,8 @@ Object.assign(window.MangaEditor.prototype, {
         // 生图模型下拉与「生成」按钮：MangaGenerate 混入自建
         //（_buildGenerateTools，本文件只出 DOM 壳）
 
-        // 预设下拉（占位项 + PRESET_SIZES）
-        this.presetSel.innerHTML = '<option value="">预设…</option>' +
+        // 预设下拉（占位项 + PRESET_SIZES；占位不带省略号——按钮定宽只求放下二字）
+        this.presetSel.innerHTML = '<option value="">预设</option>' +
             CoordinateLayout.PRESET_SIZES.map((p, i) =>
                 `<option value="${i}">${LumenLight.escapeHtml(p.label)}</option>`).join('');
         this.presetSel.addEventListener('change', () => {
@@ -356,6 +359,29 @@ Object.assign(window.MangaEditor.prototype, {
         this.stageCv.addEventListener('dblclick', (e) => this._onStageDblClick(e));
         // 滚轮缩放画布（passive:false 才能 preventDefault 拦截弹窗滚动）
         this.stageCv.addEventListener('wheel', (e) => this._onStageWheel(e), { passive: false });
+        // 资产库拖入落层（2026-11-12）：资产库窗口里拖资产到舞台 = 置入为
+        // 当前页图片层，落点=光标处（与文件菜单置入同链路：/api/assets
+        // 内容寻址入库换引用，草稿只存引用防膨胀）。dragover 仅在资产拖拽
+        // 进行中放行（自定义类型标记 + 实例登记 File，见 AssetLibrary
+        // dragstart），其余拖拽不响应；drop 晚于 dragstart 的异步 getFile
+        // 由 _dragFile 空值保护兜住（与画布同口径）
+        this.stageCv.addEventListener('dragover', (e) => {
+            if (window.assetLibrary?._dragFile) e.preventDefault();
+        });
+        this.stageCv.addEventListener('drop', (e) => {
+            const lib = window.assetLibrary;
+            if (!lib?._dragFile) return;
+            if (!e.dataTransfer.types.includes('application/x-lumen-asset')) return;
+            e.preventDefault();
+            const p = this._localPoint(e);
+            const d = this._toDraft(p.px, p.py);
+            this._placeImageFile(lib._dragFile, {
+                x: Math.max(0, Math.min(this.draft.width, d.x)),
+                y: Math.max(0, Math.min(this.draft.height, d.y))
+            }).catch((err) => {
+                this._status('资产置入失败：' + ((err && err.message) || err), true);
+            });
+        });
         // 舞台左缘工具条（选择/画笔，MangaTools 混入）
         this._buildToolRail();
         // 右栏右缘收纳图标栏（画幅+模式 / 图层 / 输出框，独立开关）
@@ -394,6 +420,15 @@ Object.assign(window.MangaEditor.prototype, {
                 return;
             }
             if (e.key === 'Escape') {
+                // 钢笔落点会话中先取消多边形（不关窗；焦点在输入框里不抢——
+                // 用户可能在改标题，会话保留等点回舞台继续）
+                if (this._pen) {
+                    const t = e.target;
+                    if (!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'))) {
+                        this._penCancel();
+                        return;
+                    }
+                }
                 // 关闭确认浮层开着时先收浮层（取消，留在编辑器）
                 if (this._confirmEl && !this._confirmEl.hidden) {
                     this._hideSaveConfirm();
@@ -416,6 +451,15 @@ Object.assign(window.MangaEditor.prototype, {
                 else this._redoHist();
                 return;
             }
+            // 钢笔会话中 Enter=闭合提交（焦点在输入框里放行——不抢表单提交）
+            if (e.key === 'Enter' && this._pen) {
+                const t = e.target;
+                if (!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'))) {
+                    e.preventDefault();
+                    this._penClose();
+                    return;
+                }
+            }
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 const t = e.target;
                 if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
@@ -435,11 +479,13 @@ Object.assign(window.MangaEditor.prototype, {
             if (this.visible) this._renderStage();
         });
 
-        // 舞台悬浮工具条：背景参考图与生成图透显（MangaBackground 混入）
-        this._buildBackgroundTools();
-
-        // 标题栏「分镜模板」按钮（MangaTemplates 混入，插在「背景」右边）
+        // 标题栏「分镜模板」按钮（MangaTemplates 混入，插在「文件」右边）
         this._buildTemplateTools();
+
+        // 标题栏「资产库」按钮（2026-11-12）：分镜模板右边，打开画布同款
+        // 本地资产库单例，窗口钉在左栏（整体描述+元素列）矩形上——不遮
+        // 选页栏与右侧工具列（定位模式同分镜模板弹窗）
+        this._buildAssetLibraryBtn();
 
         // 标题栏画笔选项条：色板 + 粗细滑块（MangaTools 混入，画笔激活时显示）
         this._buildBrushBar();
@@ -463,12 +509,76 @@ Object.assign(window.MangaEditor.prototype, {
         rz.title = '拖拽调整窗口宽度（右侧留白给 Comfy/LLM 面板）';
         el.appendChild(rz);
         rz.addEventListener('pointerdown', (ev) => this._onEdgeResizeStart(ev, rz));
-        this._applyStoredGap();
+
+        // 布局开关（2026-11-08，LumenLayoutPanel 预制件，项目钮左侧）：
+        // 开=右缘拉出留白并排、关=全屏。留白取值与 lora/recipe 分叉——
+        // 拖拽记忆优先（右缘手柄的自由宽度，用户拍板的口径），无记忆回落
+        // 面板实测；壳无条件吃 --manga-gap 变量（关=0px 全屏），无需 css 类
+        this._layout = new LumenLayoutPanel({
+            button: el.querySelector('.manga-layout-btn'),
+            dialog: () => this.dialog,
+            storageKey: 'lumen.mangaLayout',
+            cssClass: null,
+            gapVar: '--manga-gap',
+            offGap: '0px',
+            getGap: () => {
+                const raw = Number(localStorage.getItem('lumenLight.mangaDialogGap'));
+                if (Number.isFinite(raw) && raw > 0) {
+                    return this._clampGap(raw, window.innerWidth);
+                }
+                return window.SidePanelLayout.defaultGap(window.innerWidth, 900);
+            },
+            onChange: () => {
+                if (this.visible) this._renderStage();
+                // 并排留白变化会挪左栏矩形——资产库锚定窗跟随重定位
+                window.assetLibrary?.refitAnchor();
+            }
+        });
+        this._layout.applyStored();
 
         // 首次构建后恢复上次保存的草稿（异步；见 ADR 018）。保存点快照
         // 先按当前文档建基线（恢复成功后 _loadSavedDraft 会重建）
         this._exportSnap = this._docSnapshot();
         this._loadSavedDraft();
+    },
+
+    /**
+     * 标题栏「资产库」文字按钮（2026-11-12）：分镜模板右边，打开画布同款
+     * 本地资产库单例（window.assetLibrary）。窗口锚定在左栏（整体描述+
+     * 元素列 aside.manga-side）实测矩形上——避开选页栏与右侧工具列，
+     * 定位模式同分镜模板弹窗（fixed 坐标=视口坐标，左栏 rect 直接可用）；
+     * 布局开关经 onChange、窗口 resize 由 AssetLibrary 内建监听跟随重定位。
+     * 与分镜模板弹窗互斥（同占左栏，开一个收另一个）；再点一次按钮=关闭，
+     * 关窗态经 hideCb 回调同步按钮高亮
+     */
+    _buildAssetLibraryBtn() {
+        const header = this.dialog.querySelector('.recipe-dialog-header');
+        if (!header || !window.assetLibrary) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'manga-title-btn';
+        btn.title = '资产库：浏览本地图片/视频素材（标签管理，双击灯箱预览）';
+        btn.textContent = '资产库';
+        btn.addEventListener('click', async () => {
+            const lib = window.assetLibrary;
+            // 已钉在本编辑器上开着 = 再点关闭（画布默认态打开中不可能出现
+            // ——漫画全屏壳盖住画布入口；防御性落到重开到锚定位）
+            if (lib.el.classList.contains('show') && lib._anchorFn) {
+                lib.hide();
+                return;
+            }
+            this._closeTemplatePopup();   // 与模板弹窗互斥：同占左栏
+            lib.hideCb = () => btn.classList.remove('is-active');
+            await lib.show(() => {
+                const anchor = this.dialog.querySelector('.manga-side:not(.manga-out-side)');
+                return anchor ? anchor.getBoundingClientRect() : null;
+            });
+            btn.classList.add('is-active');
+        });
+        // 插在「分镜模板」右边（_buildTemplateTools 先行，_tplBtnEl 必已存在）
+        const tplBtn = this._tplBtnEl;
+        if (tplBtn && tplBtn.nextSibling) header.insertBefore(btn, tplBtn.nextSibling);
+        else header.appendChild(btn);
     },
 
     /**

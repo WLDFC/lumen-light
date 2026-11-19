@@ -103,7 +103,6 @@ Object.assign(window.MangaEditor.prototype, {
         this._invalidateCompiled();   // 草稿变了 → 自动保存（持久化跟随回滚）
         this._renderAll();
         if (this.railListEl) this._renderRail();
-        this._syncPageBackgroundUi(); // 活动页背景可能随回滚变化（MangaPages 混入）
     },
 
     _undoHist() {

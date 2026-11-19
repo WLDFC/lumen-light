@@ -385,7 +385,12 @@
     color: #4ade80;
 }
 
-/* ===== C 站正文框（备注框移除后，独占其空间：220px 触发词 + 备注原 220px） ===== */
+/* ===== 备注块（2026-11-12 恢复）：触发词下方，高度=触发词块一半 ===== */
+.lora-trigger-block.lora-note-block {
+    height: 110px;                 /* 触发词 220px 的一半 */
+}
+
+/* ===== C 站正文框（2026-11-12 备注框回归后维持原高） ===== */
 .lora-trigger-block.lora-desc-block {
     height: 660px;                 /* 内容靠整窗滚动查看 */
 }
@@ -774,6 +779,7 @@
    批量钮带预制件加的 lumen-batch-btn 基础类（40×40 图标钮），且
    lumen-batch.css 在 index.html 里后于本文件加载——同权重会输，故一律
    挂 .lora-toolbar-right 前缀抬权重压过它 */
+.lora-toolbar-right .lora-layout-btn,
 .lora-toolbar-right .lora-refresh-btn,
 .lora-toolbar-right .lora-batch-btn,
 .lora-toolbar-right .lora-fetch-btn {
@@ -791,6 +797,7 @@
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
+.lora-toolbar-right .lora-layout-btn:hover,
 .lora-toolbar-right .lora-refresh-btn:hover,
 .lora-toolbar-right .lora-batch-btn:hover,
 .lora-toolbar-right .lora-fetch-btn:hover {
@@ -805,6 +812,23 @@
     border-color: rgba(34, 197, 94, 0.6);
     background: rgba(34, 197, 94, 0.16);
     color: #22c55e;
+}
+
+/* 布局钮激活态：蓝系（与绿区分——批量是临时态，布局是持久布局态）；
+   置灰=视口放不下（JS 按阈值 disable） */
+.lora-toolbar-right .lora-layout-btn.is-active {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.16);
+    color: #60a5fa;
+}
+.lora-toolbar-right .lora-layout-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.lora-toolbar-right .lora-layout-btn:disabled:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.75);
 }
 
 /* 刷新扫描中：降透明 + 图标转圈（防重入由 JS 兜底）；置于悬停规则之后，
@@ -1074,4 +1098,15 @@
     padding: 8px;
     color: rgba(255, 255, 255, 0.4);
     font-size: 13px;
+}
+
+/* ===== 布局模式（2026-11-08）：本窗口专属部分 =====
+   共享壳规则（右缘留白/留边/媒体回落/工具行换行）在 recipe-manager.css
+   的 .recipe-dialog.lora-layout 共享段（提示词管理器同消费），此处只留
+   LoRA 封面网格的列数适配 */
+
+/* 封面网格放弃固定 8 列：按剩余宽度自适应（150px 单元保可读性，
+   侧栏 160~220px、窄留白下约 3 列，宽留白接近原 8 列） */
+.lora-dialog.lora-layout .lora-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }

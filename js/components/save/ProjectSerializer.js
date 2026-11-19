@@ -128,8 +128,13 @@ class ProjectSerializer {
                 source: img.source,
                 prompt: img.prompt || '',
                 negativePrompt: img.negativePrompt || '',
+                // 创建时间（组内时间排序键，2026-11-16；无值不写字段——
+                // 旧数据恢复后走 GroupLayout 排序回退链，不写失真时间）
+                ...(img.created ? { created: img.created } : {}),
                 // 生成参数记录（溯源/生成同款，GenRecord；无记录的图不写字段）
                 ...(img.genInfo ? { genInfo: img.genInfo } : {}),
+                // 忽略状态（ComfyUI bypass 语义；未忽略不写字段）
+                ...(img.bypassed ? { bypassed: true } : {}),
                 // 编辑笔迹层（非破坏性图层，data URL；无笔迹时不写字段）
                 ...(img.editStrokes ? { editStrokes: img.editStrokes } : {}),
                 ...(img.editStrokesOpacity !== undefined
@@ -183,8 +188,13 @@ class ProjectSerializer {
                 source: img.source,
                 prompt: img.prompt || '',
                 negativePrompt: img.negativePrompt || '',
+                // 创建时间（组内时间排序键，2026-11-16；无值不写字段——
+                // 旧数据恢复后走 GroupLayout 排序回退链，不写失真时间）
+                ...(img.created ? { created: img.created } : {}),
                 // 生成参数记录（溯源/生成同款，GenRecord；无记录的图不写字段）
                 ...(img.genInfo ? { genInfo: img.genInfo } : {}),
+                // 忽略状态（ComfyUI bypass 语义；未忽略不写字段）
+                ...(img.bypassed ? { bypassed: true } : {}),
                 // 编辑笔迹层（非破坏性图层，data URL 内嵌 project.json）
                 ...(img.editStrokes ? { editStrokes: img.editStrokes } : {}),
                 ...(img.editStrokesOpacity !== undefined
@@ -264,6 +274,9 @@ class ProjectSerializer {
             .map(node => {
                 const d = node.toJSON();
                 if (node.seqId) d.seqId = node.seqId;   // 编号随存档持久化（删除不复用）
+                // 创建时间随存档持久化（组内时间排序键；统一收集点一处覆盖
+                // 全部节点类，不改各 toJSON）
+                if (node.created) d.created = node.created;
                 return d;
             });
     }
@@ -287,7 +300,9 @@ class ProjectSerializer {
             x: g.x,
             y: g.y,
             width: g.width,
-            height: g.height
+            height: g.height,
+            // 上次布局模式（「按时间排序」在其基础上重排；未排版过不写字段）
+            ...(g.layoutMode ? { layoutMode: g.layoutMode } : {})
         }));
     }
 
@@ -387,11 +402,18 @@ class ProjectSerializer {
                         source: imgData.source || 'save',
                         prompt: imgData.prompt || '',
                         negativePrompt: imgData.negativePrompt || '',
-                        created: Date.now()
+                        // 创建时间回填（组内时间排序键）：仅存档有值时恢复；
+                        // 旧存档缺失不写 Date.now()（失真值）——时间排序走
+                        // GroupLayout 回退链（genInfo.time/文件名戳/位置序）
+                        created: imgData.created
                     };
                     // 生成参数记录（溯源/生成同款，GenRecord）：随存档恢复
                     if (imgData.genInfo) {
                         imageObj.genInfo = imgData.genInfo;
+                    }
+                    // 忽略状态（ComfyUI bypass 语义）：随存档恢复
+                    if (imgData.bypassed === true) {
+                        imageObj.bypassed = true;
                     }
                     // 编辑笔迹层（非破坏性图层）：恢复字段并异步加载位图，
                     // 就位后补一次重绘（渲染器把笔迹层叠画在原图上）
@@ -555,6 +577,9 @@ class ProjectSerializer {
                     ? g.titleNS
                     : Math.max(Math.min(g.width, g.height) / GroupManager.DESIGN_BASE, 0.01),
                 collect: g.collect === true,
+                // 上次布局模式（按时间排序在其基础上重排；旧存档无字段 → ''
+                // 回退宫格；未知脏值在 arrange 里自然落到宫格分支）
+                layoutMode: g.layoutMode || '',
                 x: g.x,
                 y: g.y,
                 width: Math.max(g.width, GroupManager.MIN_WIDTH),
@@ -565,6 +590,8 @@ class ProjectSerializer {
         // 聚集唯一性收口：脏数据/手工编辑的存档可能带出多个 collect=true，
         // 归一只保留第一个（开关联动在 GroupManager.setCollect）
         GroupManager.normalizeCollectGroups(manager.groups);
+        // 组集合变化通知（书签节点等派生消费者刷新条目）
+        window.dispatchEvent(new CustomEvent('canvasGroupsChanged'));
     }
 
     /**
@@ -608,6 +635,13 @@ class ProjectSerializer {
                 // 文本节点：备注/注释，仅恢复几何与文本
                 node = new TextNode(
                     this.canvas, n.x, n.y, n.text,
+                    { width: n.width, height: n.height }
+                );
+            } else if (n.type === NodeTypes.SOURCE.BOOKMARK_NODE) {
+                // 书签节点：编组快捷跳转目录，仅恢复几何
+                // （绑定关系纯派生——组集合恢复完成后节点自行刷新条目）
+                node = new BookmarkNode(
+                    this.canvas, n.x, n.y,
                     { width: n.width, height: n.height }
                 );
             } else if (n.type === NodeTypes.SOURCE.IMAGE_GEN_NODE) {
@@ -668,6 +702,11 @@ class ProjectSerializer {
             } else {
                 continue;  // 未来扩展其他节点类型在这里分发
             }
+            // 忽略状态回填（ComfyUI bypass 语义）：构造时默认 false，
+            // 存档记录了 bypassed 的节点统一在此恢复（含 DOM 类）
+            if (n.bypassed === true && typeof node.setBypassed === 'function') {
+                node.setBypassed(true);
+            }
             // 自定义标题回填（旧存档无 title 字段 → 保持类默认标题；
             // 恢复流程的写入由 RealtimeSaveManager 的 restoring 标志抑制）
             if (n.title) node.setTitle(n.title);
@@ -677,6 +716,10 @@ class ProjectSerializer {
                 node.seqId = n.seqId;
                 node.refreshTitle();
             }
+            // 创建时间回填（组内时间排序键）：覆盖构造器的 Date.now()；
+            // 旧存档无值则清掉（失真值），时间排序走回退链
+            if (n.created) node.created = n.created;
+            else delete node.created;
             this.canvas.images.images.push(node);
             idMap.set(n.id, node.id);
         }

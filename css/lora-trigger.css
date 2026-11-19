@@ -71,13 +71,15 @@
 
 /* ---------- 管理弹窗 ---------- */
 
-/* 全屏遮罩 + 画布中央窗口。z-index 1150：高于面板(999)/资产库等窗口，
-   低于 LumenDropdown 菜单(1200)——弹窗内的下拉菜单必须浮在弹窗之上 */
+/* 全屏遮罩 + 画布中央窗口。z-index 1330：高于 LoRA 管理器窗口(1200，复用
+   .recipe-dialog)及其内部浮层(投递 1250/信息窗 1300/选图 1310/删除确认 1320)
+   ——两窗同开时触发词窗口在上（2026-11-10 用户反馈被管理器遮挡）；
+   低于 LumenDropdown 菜单(1350)——弹窗内的下拉菜单必须浮在弹窗之上 */
 .lora-trigger-overlay {
     display: none;
     position: fixed;
     inset: 0;
-    z-index: 1150;
+    z-index: 1330;
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.55);

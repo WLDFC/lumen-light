@@ -7,14 +7,22 @@
  *
  * 错误格式说明：ComfyUI 校验失败时 error 为 {type, message, details}
  * 对象，其他失败时可能直接是字符串，这里统一解析成可读 message。
+ *
+ * client_id 统一（2026-11-08）：ComfyUI 的 progress/预览事件按提交时的
+ * client_id 定向回送——所有提交统一用 comfyWsRelay 的固定 client_id，
+ * 事件才会流到后端那条中继 WS 连接上（此前各提交各造 client_id，进度
+ * 与预览永远无人接收）。
  * ==========================================================================
  */
+
+const { COMFY_RELAY_CLIENT_ID } = require('./comfyWsRelay');
 
 /**
  * 提交工作流到 ComfyUI /prompt 接口并校验响应
  * @param {string} comfyApiUrl - ComfyUI API 地址
  * @param {Object} workflow - 注入完成的 ComfyUI 工作流对象
- * @param {string} clientIdPrefix - client_id 前缀（区分提交来源：面板/生图节点）
+ * @param {string} [clientIdPrefix] - 已废弃（统一走 COMFY_RELAY_CLIENT_ID，
+ *        参数保留兼容既有调用点）
  * @param {number} [timeoutMs=30000] - 请求超时毫秒数
  * @returns {Promise<{promptId: string}>} 提交成功时的 prompt id
  */
@@ -24,7 +32,7 @@ async function submitPromptToComfy(comfyApiUrl, workflow, clientIdPrefix, timeou
     try {
         const promptData = {
             prompt: workflow,
-            client_id: `${clientIdPrefix}_${Date.now()}`
+            client_id: COMFY_RELAY_CLIENT_ID
         };
 
         const response = await fetch(`${comfyApiUrl}/prompt`, {

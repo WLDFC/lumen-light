@@ -13,7 +13,8 @@
  *   - 输出坐标归一化到 (0,0) 起点：调用方按「组左上角 + 内边距」平移
  *     后写入成员，组矩形随之重_fit（锚点=组左上角不动）
  *   - 排列顺序 = 当前位置的阅读顺序（左→右、上→下，行容差吸收 y 抖动），
- *     重复执行结果稳定
+ *     重复执行结果稳定；arrange 第三参可传预排序成员（时间排序覆盖，
+ *     见 sortTimeOrder）
  * ==========================================================================
  */
 
@@ -25,15 +26,19 @@ class GroupLayout {
      * 排列入口
      * @param {string} mode - 'grid' | 'waterfall' | 'horizontal' | 'vertical'
      * @param {Array} members - 成员对象数组（不修改入参）
+     * @param {Array} [ordered] - 预排序成员（如 sortTimeOrder 产物）；缺省
+     *   按当前位置阅读序（几何算法只消费传入序，坐标语义不受影响）
      * @returns {{placements: Array<{obj, x, y}>, width: number, height: number}}
      *   placements 归一化到 (0,0) 起点；width/height 为内容包围盒
      */
-    static arrange(mode, members) {
-        const ordered = GroupLayout.sortReadingOrder(members);
-        if (mode === 'horizontal') return GroupLayout.horizontal(ordered);
-        if (mode === 'vertical') return GroupLayout.vertical(ordered);
-        if (mode === 'waterfall') return GroupLayout.waterfall(ordered);
-        return GroupLayout.grid(ordered);
+    static arrange(mode, members, ordered) {
+        const finalOrder = Array.isArray(ordered)
+            ? ordered
+            : GroupLayout.sortReadingOrder(members);
+        if (mode === 'horizontal') return GroupLayout.horizontal(finalOrder);
+        if (mode === 'vertical') return GroupLayout.vertical(finalOrder);
+        if (mode === 'waterfall') return GroupLayout.waterfall(finalOrder);
+        return GroupLayout.grid(finalOrder);
     }
 
     /**
@@ -59,6 +64,52 @@ class GroupLayout {
         }
         if (current.length > 0) rows.push(current);
         return rows.flatMap(row => row.sort((a, b) => a.x - b.x));
+    }
+
+    /**
+     * 成员时间键（组内按时间排序，2026-11-16）。回退链：
+     * created（随存档持久化，ProjectSerializer collectImages/collectNodes
+     * 回写）→ genInfo.time（GenRecord 生成时间，旧存档生成图可用）→
+     * name/videoUrl/audioUrl 内嵌 13 位毫秒戳（旧存档放大/扩图/抠图产物
+     * 的 `${前缀}_${Date.now()}.扩展名` 命名约定）→ Infinity（无时间线索，
+     * 如本地拖入图）
+     * @param {Object} obj - 画布成员对象
+     * @returns {number} 毫秒时间戳；无时间线索返回 Infinity
+     */
+    static timeKeyOf(obj) {
+        if (typeof obj.created === 'number' &&
+            Number.isFinite(obj.created) && obj.created > 0) {
+            return obj.created;
+        }
+        if (obj.genInfo && typeof obj.genInfo.time === 'number' &&
+            Number.isFinite(obj.genInfo.time) && obj.genInfo.time > 0) {
+            return obj.genInfo.time;
+        }
+        const src = String(obj.name || obj.videoUrl || obj.audioUrl || '');
+        const m = src.match(/_(\d{13})(?:\.\w+)?$/);
+        return m ? Number(m[1]) : Infinity;
+    }
+
+    /**
+     * 时间顺序排序（组内按时间排序）：先按当前位置阅读序打底（同毫秒
+     * 并列与无时间成员的稳定基座，JS sort 稳定），再按 timeKeyOf 排序。
+     * 无时间成员（Infinity）排在有时段之后、组内保持阅读序，升降两个
+     * 方向语义一致。不修改入参数组。
+     * @param {Array} members - 成员对象数组
+     * @param {string} [dir] - 'asc'（缺省，旧→新=最旧在阅读序首位）|
+     *                         'desc'（新→旧=最新在阅读序首位）
+     * @returns {Array} 排序后的成员数组（新数组）
+     */
+    static sortTimeOrder(members, dir = 'asc') {
+        const base = GroupLayout.sortReadingOrder(members);
+        return base.sort((a, b) => {
+            const ka = GroupLayout.timeKeyOf(a);
+            const kb = GroupLayout.timeKeyOf(b);
+            if (ka === Infinity && kb === Infinity) return 0;
+            if (ka === Infinity) return 1;      // 无时间尾置（两方向一致）
+            if (kb === Infinity) return -1;
+            return dir === 'desc' ? kb - ka : ka - kb;
+        });
     }
 
     /**

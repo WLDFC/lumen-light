@@ -60,9 +60,10 @@
 /* ===== 列表（挂 body，行式：一行一个 LoRA） ===== */
 .lfs-menu {
     position: fixed;
-    z-index: 1200;    /* 弹窗层级（项目层级表：节点 995/工具栏 997/面板 999/
-                         弹窗 ≥1200——低于面板会被面板容器整体盖住，见
-                         image-editor.css 同款注释） */
+    z-index: 1360;    /* 菜单族最高档：压过全部宿主——节点 995/面板 999/弹窗
+                         ≥1200（收藏与 LoRA 管理器）及触发词弹窗 1330（弹窗内
+                         LoRA 下拉要浮在弹窗上，2026-11-10 随触发词弹窗
+                         1150→1330 联动抬升；LumenDropdown 菜单 1350 同规则） */
     width: min(400px, calc(100vw - 24px));
     max-height: min(560px, calc(100vh - 32px));
     display: flex;
@@ -195,4 +196,37 @@
 }
 .lfs-cell.is-empty .lfs-cell-name {
     color: #9aa0aa;
+}
+
+/* ===== 悬停大图预览（挂 body 单例；lora 框/清单行停 500ms 后浮现） ===== */
+.lfs-hover-preview {
+    position: fixed;
+    z-index: 1370;    /* 菜单族之上：清单行 hover 时与 .lfs-menu(1360) 并存 */
+    width: 240px;
+    height: 320px;    /* 3:4 与 LoRA 管理器封面同比例 */
+    display: none;
+    overflow: hidden;
+    border-radius: 10px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    background: #17181d;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    pointer-events: none;   /* 纯展示层绝不截获鼠标——锚点 mouseleave 即唯一关闭信号 */
+}
+.lfs-hover-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+/* 无封面 sidecar 的 LoRA：占位块（与 .lfs-cover-fallback 同款渐变） */
+.lfs-hover-preview.is-empty::after {
+    content: '∅';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 56px;
+    color: rgba(255, 255, 255, 0.25);
+    background: linear-gradient(145deg, #31344a 0%, #23253a 60%, #1d1e2e 100%);
 }

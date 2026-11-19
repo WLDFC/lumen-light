@@ -28,6 +28,7 @@ Object.assign(window.CoordinateEditor.prototype, {
                         <h2>坐标编辑</h2>
                     </div>
                     <div class="coord-header-right">
+                        <button type="button" class="coord-layout-btn" title="布局：右缘拉出留白，露出右侧 Comfy/LLM 面板">布局</button>
                         <span class="coord-status"></span>
                         <button class="recipe-dialog-close" type="button" title="关闭坐标编辑" aria-label="关闭坐标编辑窗口"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                     </div>
@@ -295,7 +296,29 @@ Object.assign(window.CoordinateEditor.prototype, {
         rz.title = '拖拽调整窗口宽度（右侧留白给 Comfy/LLM 面板）';
         el.appendChild(rz);
         rz.addEventListener('pointerdown', (ev) => this._onEdgeResizeStart(ev, rz));
-        this._applyStoredGap();
+
+        // 布局开关（2026-11-08，LumenLayoutPanel 预制件，标题栏右上角）：
+        // 开=右缘拉出留白并排、关=全屏（原「宽屏恒并排」策略退役，与
+        // LoRA/提示词/漫画编辑器对齐）。留白取值：拖拽记忆优先（右缘手柄
+        // 的自由宽度），无记忆回落面板实测；壳无条件吃 --coord-gap 变量
+        // （关=0px 全屏），无需 css 类
+        this._layout = new LumenLayoutPanel({
+            button: el.querySelector('.coord-layout-btn'),
+            dialog: () => this.dialog,
+            storageKey: 'lumen.coordLayout',
+            cssClass: null,
+            gapVar: '--coord-gap',
+            offGap: '0px',
+            getGap: () => {
+                const raw = Number(localStorage.getItem('lumenLight.coordDialogGap'));
+                if (Number.isFinite(raw) && raw > 0) {
+                    return this._clampGap(raw, window.innerWidth);
+                }
+                return window.SidePanelLayout.defaultGap(window.innerWidth, 900);
+            },
+            onChange: () => { if (this.visible) this._renderStage(); }
+        });
+        this._layout.applyStored();
 
         // 首次构建后恢复上次保存的草稿（异步；见 ADR 018）
         this._loadSavedDraft();

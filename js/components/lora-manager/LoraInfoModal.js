@@ -154,10 +154,22 @@ class LoraInfoModal {
      * 封面可从画布或本地图片更换（写成 sidecar 预览文件）
      * @param {Object} lora - lora 数据（path/name/folder/sizeBytes/mtime）
      */
-    open(lora) {
+    async open(lora) {
         const host = this.host;
         host._closeInfoModal();
         host._infoLora = lora;
+        // 全量 C 站记录按需取（2026-11-12 sidecar 化后 /pins 聚合不再携带
+        // description 大字段）：底模 / 页面链接 / 说明正文三处渲染都靠它；
+        // 未获取过（empty）保持占位。等待期间被切到别的 lora 则本次作废
+        try {
+            const r = await fetch(`/api/lora/civitai/info?path=${encodeURIComponent(lora.path)}`)
+                .then((x) => x.json()).catch(() => null);
+            if (host._infoLora !== lora) return;
+            if (r && r.status === 'ok' && r.info) {
+                host.civitai = host.civitai || {};
+                host.civitai[lora.path] = r.info;
+            }
+        } catch { /* 信息缺失不阻断开窗 */ }
         const overlay = document.createElement('div');
         overlay.className = 'lora-info-overlay';
         const bust = host._bustMap && host._bustMap[lora.path];
@@ -199,6 +211,20 @@ class LoraInfoModal {
                         </div>
                     </div>
                     <div class="lora-trigger-text"></div>
+                </div>
+                <div class="lora-trigger-block lora-note-block">
+                    <div class="lora-trigger-head">
+                        <span>备注</span>
+                        <div class="lora-trigger-tools">
+                            <button type="button" class="lora-note-copy" title="复制备注">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                            <button type="button" class="lora-note-edit" title="编辑备注">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="lora-trigger-text lora-note-text"></div>
                 </div>
                 <div class="lora-trigger-block lora-desc-block">
                     <div class="lora-trigger-head">
@@ -392,8 +418,15 @@ class LoraInfoModal {
             kind: 'trigger', store: 'triggers', label: '触发词',
             emptyText: '无需触发词', placeholder: '逗号分隔多个触发词，留空清除'
         });
-        // 备注编辑框已按需求移除（历史备注数据仍保留在 lora-meta.json，
-        // 后端 /note 接口未动）
+        // 备注块（2026-11-12 用户要求恢复——曾按旧需求移除）：触发词下方、
+        // 高度减半（CSS .lora-note-block），数据走 /note 接口（sidecar.note），
+        // 就地编辑/复制与触发词块共用 _wireMetaTextBlock
+        this._wireMetaTextBlock(overlay, lora, {
+            textSel: '.lora-note-text', editSel: '.lora-note-edit',
+            copySel: '.lora-note-copy', copyTitle: '复制备注',
+            kind: 'note', store: 'notes', label: '备注',
+            emptyText: '无备注', placeholder: '给自己的备注，留空清除'
+        });
 
         // 模型说明：净化后的 HTML 按原排版渲染（整窗滚动查看全文）；
         // 无记录显示占位——重新「从 Civitai 获取」即可补齐

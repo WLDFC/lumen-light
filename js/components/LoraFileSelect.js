@@ -14,8 +14,13 @@
  *
  * 交互形态：触发器（当前封面小图 + 友好名）→ 菜单挂 body（搜索框 +
  * 封面网格）。封面走 /api/lora/preview?path=（key 与 Comfy lora_name 同源，
- * 1 天浏览器缓存）；置顶/友好名/触发词来自 /api/lora/pins（lora-meta.json，
- * 进程内共享缓存一次）。
+ * 1 天浏览器缓存）；置顶/友好名/触发词来自 /api/lora/pins（聚合自 per-LoRA
+ * sidecar JSON，进程内共享缓存一次）。
+ *
+ * 悬停大图预览（2026-11-10，用户需求：几千个 LoRA 靠小缩略图难辨认）：
+ * 鼠标在 lora 框（关闭态触发器）或菜单清单行上停留 500ms 后，浮现 3:4
+ * 大图封面（挂 body 单例，切值换 src 不重建 DOM）。设置 → 通用 → LoRA
+ * 可关（SettingsManager.getLoraHoverPreviewEnabled，每次 hover 现查）。
  * ==========================================================================
  */
 
@@ -45,6 +50,90 @@ class LoraFileSelect {
         return LoraFileSelect._metaPromise;
     }
 
+    // ===== 悬停大图预览（静态单例弹层；全局只建一次，hover 切 src 不重建） =====
+
+    static _previewEl = null;
+    static _previewImg = null;
+    static _previewAnchor = null;
+    static _previewShown = false;
+    static _previewFollow = null;
+
+    /** 惰性建单例弹层（挂 body，fixed 定位；样式见 css/lora-file-select.css） */
+    static _ensurePreview() {
+        if (LoraFileSelect._previewEl) return;
+        const el = document.createElement('div');
+        el.className = 'lfs-hover-preview';
+        const img = document.createElement('img');
+        img.decoding = 'async';
+        img.alt = '';
+        el.appendChild(img);
+        document.body.appendChild(el);
+        LoraFileSelect._previewEl = el;
+        LoraFileSelect._previewImg = img;
+    }
+
+    /**
+     * 显示大图预览（锚点左侧优先，放不下翻右侧，钳制在视口内）
+     * @param {HTMLElement} anchorEl - 锚点元素（lora 框或清单行）
+     * @param {string} rel - LoRA 相对路径（封面 key 与 Comfy lora_name 同源）
+     */
+    static _showPreview(anchorEl, rel) {
+        LoraFileSelect._ensurePreview();
+        const el = LoraFileSelect._previewEl;
+        const img = LoraFileSelect._previewImg;
+        // 无封面（/api/lora/preview 404）：占位块，不弹空窗
+        el.classList.remove('is-empty');
+        img.style.display = '';
+        img.onerror = () => {
+            el.classList.add('is-empty');
+            img.style.display = 'none';
+        };
+        img.src = `/api/lora/preview?path=${encodeURIComponent(rel)}`;
+        LoraFileSelect._previewAnchor = anchorEl;
+        LoraFileSelect._previewShown = true;
+        // 先隐藏量尺寸再定位（同步读 offset 强制布局，与菜单定位同策略——
+        // rAF 在页面不可见时冻结，不等 rAF）
+        el.style.visibility = 'hidden';
+        el.style.display = 'block';
+        LoraFileSelect._positionPreview();
+        el.style.visibility = '';
+        // 锚漂移跟随（面板滚动/菜单网格滚动/窗口缩放）；监听只挂一次
+        if (!LoraFileSelect._previewFollow) {
+            LoraFileSelect._previewFollow = () => {
+                if (LoraFileSelect._previewShown) LoraFileSelect._positionPreview();
+            };
+            window.addEventListener('scroll', LoraFileSelect._previewFollow, true);
+            window.addEventListener('resize', LoraFileSelect._previewFollow);
+        }
+    }
+
+    /** 按锚点当前位置重定位；锚点已脱离 DOM（重渲染/关菜单）即整体关闭 */
+    static _positionPreview() {
+        const el = LoraFileSelect._previewEl;
+        const anchor = LoraFileSelect._previewAnchor;
+        if (!el || !LoraFileSelect._previewShown) return;
+        if (!anchor || !anchor.isConnected) { LoraFileSelect._hidePreview(); return; }
+        const rect = anchor.getBoundingClientRect();
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const pw = el.offsetWidth, ph = el.offsetHeight;
+        // 左侧优先：原生 title 说明框从光标处向右下伸展，弹层居左水平
+        // 错开互不遮挡，也不盖右侧相邻节点/面板内容；放不下（贴屏幕左缘）
+        // 翻右侧。顶沿对齐锚点，钳制在视口内
+        let left = rect.left - pw - 8;
+        if (left < 8) left = rect.right + 8;
+        left = Math.max(8, Math.min(left, vw - pw - 8));
+        const top = Math.max(8, Math.min(rect.top, vh - ph - 8));
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+    }
+
+    static _hidePreview() {
+        if (!LoraFileSelect._previewEl || !LoraFileSelect._previewShown) return;
+        LoraFileSelect._previewEl.style.display = 'none';
+        LoraFileSelect._previewShown = false;
+        LoraFileSelect._previewAnchor = null;
+    }
+
     /**
      * @param {HTMLElement} host - 挂载元素（div，需预先带好宿主要认的 class）
      * @param {Object} [options]
@@ -62,6 +151,8 @@ class LoraFileSelect {
         this.emptyLabel = options.emptyLabel || '-- 选择 LoRA 文件 --';
         this.hint = '';                 // 清单不可用时的灰字提示
         this.menu = null;               // 打开中的菜单元素（挂 body）
+        this._previewTimer = null;      // 悬停预览延迟计时器
+        this._lastHoverCell = null;     // 预览防抖：同格内子元素间移动不重置计时
 
         host.value = this.value;        // 宿主 e.target.value 兼容
         this._renderTrigger();
@@ -72,6 +163,13 @@ class LoraFileSelect {
             if (this.files.length === 0 && !this.value) return;   // 清单不可用不开
             this._openMenu();
         });
+        // 悬停大图预览（触发器面）：停 500ms 弹当前值的大图；移出/点按即取消
+        host.addEventListener('mouseenter', () => {
+            if (this.menu) return;      // 菜单开着时不做触发器预览
+            this._schedulePreview(host, this.value);
+        });
+        host.addEventListener('mouseleave', () => this._cancelPreview());
+        host.addEventListener('mousedown', () => this._cancelPreview());
         // 元数据（友好名/置顶）就绪后刷新触发器显示
         LoraFileSelect.loadMeta().then(() => { if (this.host) this._renderTrigger(); });
     }
@@ -85,6 +183,7 @@ class LoraFileSelect {
      * @param {string} [hint] - 清单不可用提示（'ComfyUI 未连接' 等；空=正常）
      */
     setFiles(files, selected, hint = '') {
+        this._cancelPreview();          // 值/清单将变：撤掉未决或已显的旧值预览
         this.files = Array.isArray(files) ? files.slice() : [];
         this.hint = hint || '';
         if (selected !== undefined) this.value = selected || '';
@@ -97,15 +196,41 @@ class LoraFileSelect {
      * @param {string} v
      */
     setValue(v) {
+        this._cancelPreview();
         this.value = v || '';
         this.host.value = this.value;
         this._renderTrigger();
     }
 
     destroy() {
+        this._cancelPreview();
         this._closeMenu();
         if (this.host && this.host._lfs === this) this.host._lfs = null;
         this.host = null;
+    }
+
+    // ==================== 悬停大图预览（实例侧） ====================
+
+    /**
+     * 调度预览：延迟 500ms 后显示（快速扫过不弹图，停留才弹）。
+     * 每次调度先撤旧的（隐藏已显弹层 + 清未决计时）——在行间移动时
+     * 弹层收起、停住 500ms 才再弹，避免陈旧图片残留
+     * @param {HTMLElement} anchorEl - 锚点（lora 框或清单行）
+     * @param {string} rel - LoRA 相对路径；空串（空选项）不弹
+     */
+    _schedulePreview(anchorEl, rel) {
+        this._cancelPreview();
+        if (!rel || !SettingsManager.getLoraHoverPreviewEnabled()) return;
+        this._previewTimer = setTimeout(() => {
+            this._previewTimer = null;
+            LoraFileSelect._showPreview(anchorEl, rel);
+        }, 500);
+    }
+
+    /** 撤销预览：清未决计时 + 隐藏已显弹层（静态单例，随意多次调用无害） */
+    _cancelPreview() {
+        if (this._previewTimer) { clearTimeout(this._previewTimer); this._previewTimer = null; }
+        LoraFileSelect._hidePreview();
     }
 
     // ==================== 显示 ====================
@@ -152,6 +277,7 @@ class LoraFileSelect {
 
     _openMenu() {
         if (_openInstance && _openInstance !== this) _openInstance._closeMenu();
+        this._cancelPreview();          // 开菜单：撤掉触发器面的预览
         const esc = (s) => LumenLight.escapeHtml(s);
         const meta = LoraFileSelect._meta;
         // 排序：置顶在前，其余保持清单原序（与 Comfy 清单一致，便于对照）
@@ -231,6 +357,21 @@ class LoraFileSelect {
             if (cell) this._pick(cell.dataset.rel);
         });
 
+        // 悬停大图预览（菜单行面）：事件委托挂 grid——过滤重建 cells 后监听
+        // 仍在。mouseover 在格内子元素（封面/名字）间移动会重复触发，用
+        // _lastHoverCell 挡住，避免同格内抖动反复重置 500ms 计时
+        grid.addEventListener('mouseover', (e) => {
+            const cell = e.target.closest('.lfs-cell');
+            if (!cell) { this._lastHoverCell = null; this._cancelPreview(); return; }
+            if (cell === this._lastHoverCell) return;
+            this._lastHoverCell = cell;
+            this._schedulePreview(cell, cell.dataset.rel);   // 空选项 rel='' 只撤不弹
+        });
+        grid.addEventListener('mouseleave', () => {
+            this._lastHoverCell = null;
+            this._cancelPreview();
+        });
+
         // 键盘：↑↓ 循环移动活跃格、Enter 选中、Esc 关闭
         menu.addEventListener('keydown', (e) => {
             const cells = [...grid.querySelectorAll('.lfs-cell')];
@@ -286,6 +427,7 @@ class LoraFileSelect {
     _closeMenu() {
         if (this.menu) { this.menu.remove(); this.menu = null; }
         if (_openInstance === this) _openInstance = null;
+        this._cancelPreview();          // 菜单没了，行面预览一并撤（弹层是单例）
         if (this._outside) {
             document.removeEventListener('mousedown', this._outside, true);
             window.removeEventListener('resize', this._resize);

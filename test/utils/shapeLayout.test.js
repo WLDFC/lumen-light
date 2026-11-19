@@ -39,7 +39,7 @@ describe('ShapeLayout 类型与映射表（ADR 069）', () => {
     test('TAIL_DEG/TYPE_NAME 全量在册', () => {
         expect(ShapeLayout.TAIL_DEG).toEqual({ rb: 45, lb: 135, lt: 225, rt: 315 });
         expect(ShapeLayout.TYPE_NAME).toEqual({
-            rect: '矩形', round: '圆角矩形', ellipse: '椭圆', bubble: '气泡框'
+            rect: '矩形', round: '圆角矩形', ellipse: '椭圆', bubble: '气泡框', poly: '多边形'
         });
     });
     test('MIRROR_TAIL 对合（翻转两次还原）；旋转换位成环', () => {
@@ -124,6 +124,74 @@ describe('ShapeLayout.buildPath（按类型构建路径）', () => {
         expect(p.calls.filter((c) => c[0] === 'lineTo')).toHaveLength(65);   // 64 弧段+1 尖端
         expect(p.calls.filter((c) => c[0] === 'quadraticCurveTo')).toHaveLength(1);
         expect(p.calls[p.calls.length - 1][0]).toBe('closePath');
+    });
+    test('poly：radius 0 走直线折线（与旧渲染一致）；radius>0 委托 polyPath 圆角', () => {
+        const straight = new context.Path2D();
+        ShapeLayout.buildPath(straight, 0, 0, 100, 100, {
+            type: 'poly', points: [[0, 0], [100, 0], [100, 100]]
+        });
+        expect(straight.calls).toEqual([
+            ['moveTo', 0, 0], ['lineTo', 100, 0], ['lineTo', 100, 100], ['closePath']
+        ]);
+        const rounded = new context.Path2D();
+        ShapeLayout.buildPath(rounded, 0, 0, 100, 100, {
+            type: 'poly', points: [[0, 0], [100, 0], [100, 100]], radius: 10
+        });
+        expect(rounded.calls.filter((c) => c[0] === 'arcTo')).toHaveLength(3);
+    });
+});
+
+describe('ShapeLayout.polyPath（多边形顶点圆角过渡，2026-11-11）', () => {
+    const SQUARE = { type: 'poly', points: [[0, 0], [100, 0], [100, 100], [0, 100]] };
+    // 浮点容差归一：tan(π/4) 双精度 ≠1 会让切点带 1e-15 尾差，按 6 位取整
+    const fx = (calls) => calls.map((c) => c.map((v) => typeof v === 'number' ? Number(v.toFixed(6)) : v));
+
+    test('正方形 r=10：每角切点距角 r，arcTo 真圆弧', () => {
+        const p = new context.Path2D();
+        ShapeLayout.polyPath(p, 0, 0, { ...SQUARE, radius: 10 });
+        // 直角 t=r/tan(45°)=10；起点=角0入切点（末边 x=0 上），closePath 补末边
+        expect(fx(p.calls)).toEqual([
+            ['moveTo', 0, 10],
+            ['arcTo', 0, 0, 10, 0, 10],
+            ['arcTo', 100, 0, 100, 10, 10],
+            ['arcTo', 100, 100, 90, 100, 10],
+            ['arcTo', 0, 100, 0, 90, 10],
+            ['closePath']
+        ]);
+    });
+
+    test('锐角钳制：等边三角形 r=60 → 切线长钳半边 50，有效半径回代', () => {
+        const p = new context.Path2D();
+        ShapeLayout.polyPath(p, 0, 0, {
+            type: 'poly', points: [[0, 0], [100, 0], [50, 50 * Math.sqrt(3)]], radius: 60
+        });
+        const arcs = p.calls.filter((c) => c[0] === 'arcTo');
+        expect(p.calls.filter((c) => c[0] === 'moveTo')).toHaveLength(1);
+        // 60° 角 t=60/tan(30°)≈103.9 > 50 → 钳 50；rEff=50·tan(30°)≈28.87
+        expect(arcs[0][5]).toBeCloseTo(50 * Math.tan(Math.PI / 6), 1);
+        // 角 0 (0,0) 的出切点在朝 (100,0) 边上距角 50
+        expect(arcs[0][1]).toBeCloseTo(0, 6);
+        expect(arcs[0][2]).toBeCloseTo(0, 6);
+        expect(arcs[0][3]).toBeCloseTo(50, 6);
+        expect(arcs[0][4]).toBeCloseTo(0, 6);
+    });
+
+    test('退化角：共线角直连不圆角，其余角照常 arcTo', () => {
+        const p = new context.Path2D();
+        ShapeLayout.polyPath(p, 0, 0, {
+            type: 'poly',
+            points: [[0, 0], [50, 0], [100, 0], [100, 100]],   // (50,0) 处三点共线
+            radius: 8
+        });
+        expect(p.calls.map((c) => c[0])).toEqual(
+            ['moveTo', 'arcTo', 'lineTo', 'arcTo', 'arcTo', 'closePath']);
+    });
+
+    test('偏移包围盒原点：切点坐标带 x,y 平移', () => {
+        const p = new context.Path2D();
+        ShapeLayout.polyPath(p, 10, 20, { ...SQUARE, radius: 10 });
+        expect(fx(p.calls)[0]).toEqual(['moveTo', 10, 30]);            // (0,10)+(10,20)
+        expect(fx(p.calls)[1]).toEqual(['arcTo', 10, 20, 20, 20, 10]); // 角 (0,0) 平移
     });
 });
 

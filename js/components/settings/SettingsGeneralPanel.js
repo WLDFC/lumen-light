@@ -26,6 +26,7 @@ class SettingsGeneralPanel {
         const checked = SettingsManager.getShowResizeHandles() ? 'checked' : '';
         const quality = SettingsManager.getImageQuality();
         const acChecked = SettingsManager.getPromptAutocompleteEnabled() ? 'checked' : '';
+        const hpChecked = SettingsManager.getLoraHoverPreviewEnabled() ? 'checked' : '';
 
         contentEl.innerHTML = `
             <div class="settings-form">
@@ -110,6 +111,24 @@ class SettingsGeneralPanel {
                 </div>
                 <div class="settings-models-section">
                     <div class="settings-models-header">
+                        <span class="settings-models-title">LoRA</span>
+                    </div>
+                    <div class="settings-switch-row">
+                        <div class="settings-switch-info">
+                            <span class="settings-switch-label">封面悬停预览</span>
+                            <span class="settings-switch-desc">
+                                鼠标在 LoRA 选择框或下拉清单行上停留片刻时，浮出大图封面
+                                便于辨认（清单行内小缩略图看不清时用）。关闭后悬停不再弹图
+                            </span>
+                        </div>
+                        <label class="settings-switch">
+                            <input type="checkbox" id="settingsLoraHoverPreview" ${hpChecked}>
+                            <span class="settings-switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-models-section">
+                    <div class="settings-models-header">
                         <span class="settings-models-title">提示词</span>
                     </div>
                     <div class="settings-switch-row">
@@ -157,6 +176,14 @@ class SettingsGeneralPanel {
         if (acEl) {
             acEl.onchange = () => {
                 SettingsManager.setPromptAutocompleteEnabled(acEl.checked);
+            };
+        }
+
+        // LoRA 封面悬停预览开关：LoraFileSelect 每次 hover 现查此值，切换即生效
+        const hpEl = document.getElementById('settingsLoraHoverPreview');
+        if (hpEl) {
+            hpEl.onchange = () => {
+                SettingsManager.setLoraHoverPreviewEnabled(hpEl.checked);
             };
         }
 

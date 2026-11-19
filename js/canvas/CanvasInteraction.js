@@ -211,6 +211,19 @@ class CanvasInteraction {
             }
         }
 
+        // 数字键 1-9/0：书签节点快捷跳转——按全局分配表（书签节点按创建
+        // 顺序先到先得，见 BookmarkNode.collectShortcutAssignments）把视口
+        // 平移到对应编组（保持当前缩放仅居中）。无分配表或未命中时不拦，
+        // 放行浏览器默认行为
+        if (/^Digit[0-9]$/.test(e.code) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const hit = window.BookmarkNode?.collectShortcutAssignments?.(this.canvas)?.get(e.key);
+            if (hit) {
+                e.preventDefault();
+                hit.node.jumpToGroup(hit.group);
+                return;
+            }
+        }
+
         // Delete 键删除选中的对象（Backspace 不触发删除，避免输入框误操作）：
         // 图片/节点整对象删除；组只删组壳，成员原样保留（解除编组的入口）。
         // 删除的捕获/执行/入栈统一走历史模块（撤销栈持有被删对象，

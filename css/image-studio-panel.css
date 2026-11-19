@@ -81,6 +81,16 @@
     background: rgba(59, 130, 246, 0.12);
 }
 
+/* 图层行剪贴蒙版角标（2026-11-11 自漫画编辑器移植，↳ 蓝标同款）：
+   剪贴层内容只在下方基底图层的不透明像素内显示 */
+.is-layer-clip {
+    flex: none;
+    color: #6cebff;
+    font-size: 12px;
+    line-height: 1;
+    cursor: help;
+}
+
 /* 遮罩层：遮罩模式下激活行 = 当前遮罩涂画目标，PS 式暗红底 +
    红描边（与遮罩笔迹同色系），和普通激活蓝一眼区分 */
 .is-layer-row.active.masking {

@@ -40,7 +40,6 @@ Object.assign(window.MangaEditor.prototype, {
         this.railCtxMenu = new LumenContextMenu({ container: this.dialog });
         this.pageConfirmDialog = new LumenConfirmDialog({ container: this.dialog });
         this._thumbTimer = null;
-        this._thumbBgCache = new Map();   // 缩略图背景图缓存（url → Image，见 _thumbBgImg）
         // Ctrl+PageUp / Ctrl+PageDown 切页（document 级，弹窗可见才响应；
         // 焦点守卫与历史快捷键同款——并排时面板内放行）
         document.addEventListener('keydown', (e) => {
@@ -105,25 +104,6 @@ Object.assign(window.MangaEditor.prototype, {
     },
 
     /**
-     * 缩略图背景图缓存（url → Image）：背景引用是内容寻址资产 URL，
-     * 同 url 恒同图可长期复用；未命中异步加载，onload 就绪后该缩略图
-     * 仍在 DOM 时就地重绘（已被整建替换则跳过——重建路径会带缓存
-     * 命中重画，不丢图）
-     */
-    _thumbBgImg(url, cv, page) {
-        if (!this._thumbBgCache) this._thumbBgCache = new Map();
-        let img = this._thumbBgCache.get(url);
-        if (img) return img;
-        img = new Image();
-        img.onload = () => {
-            if (cv.isConnected) this._drawPageThumb(cv, page);
-        };
-        img.src = url;
-        this._thumbBgCache.set(url, img);
-        return img;
-    },
-
-    /**
      * 页面缩略图：按页面比例铺底 + 元素框迷你色框（_colorFor 与舞台同源，
      * 同一框两处颜色一致）。宽度固定 64px（80px 栏 − 左右 padding 8×2），
      * 高按画幅比例、118px 封顶
@@ -145,17 +125,6 @@ Object.assign(window.MangaEditor.prototype, {
         ctx.fillStyle = 'rgba(255,255,255,0.05)';
         ctx.fillRect(0, 0, w, h);
         const s = w / page.width;
-        // 背景参考图（生成图/手动设置）：纸白垫底 + 铺满原图实显——缩略图
-        // 是页面内容缩影，舞台的透显滑块是视图态不进缩略图（2026-11-04：
-        // 生成图此前不进缩略图，用户看不出哪页已落图）
-        if (page.background) {
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, w, h);
-            const bgImg = this._thumbBgImg(page.background, cv, page);
-            if (bgImg && bgImg.complete && bgImg.naturalWidth) {
-                ctx.drawImage(bgImg, 0, 0, w, h);
-            }
-        }
         // 图层迷你层（MangaLayers 混入）：可见笔迹层逐层画线；图片层画缓存
         // 里已就绪的图（未加载完跳过——onload 会触发舞台与面板刷新）；
         // 文字层按属性渲染文字预览；逐层不透明度与舞台同口径（_layerOpacity）
@@ -220,8 +189,7 @@ Object.assign(window.MangaEditor.prototype, {
             const [x1, y1, x2, y2] = item.bbox;
             const id = Number.isInteger(item.cid) ? item.cid : 0;
             const color = this._colorFor(id);
-            ctx.fillStyle = this._hexA(color, 0.16);
-            ctx.fillRect(x1 * s, y1 * s, (x2 - x1) * s, (y2 - y1) * s);
+            // 只描轮廓不刷填充（与舞台 _drawBox 同口径，2026-11-12 用户拍板）
             ctx.strokeStyle = color;
             ctx.lineWidth = 1;
             ctx.strokeRect(x1 * s + 0.5, y1 * s + 0.5,
@@ -251,6 +219,7 @@ Object.assign(window.MangaEditor.prototype, {
      */
     _resetForPageSwap() {
         this.selected = -1;
+        if (this._multiSelected) this._multiSelected.clear();   // 多选集合页内语义，页换即失效（逐格生成范围）
         this._abortTextEdit();   // 就地编辑框随页收起（正常已被 _switchPage 提交，此处兜底）
         if (this._collapsedCids) this._collapsedCids.clear();
         if (this._hiddenCids) this._hiddenCids.clear();
@@ -290,25 +259,9 @@ Object.assign(window.MangaEditor.prototype, {
         this.draft = this.pages[i];
         this._resetForPageSwap();
         this._renderAll();
-        this._syncPageBackgroundUi();
         this._renderRail();
         this._scheduleSave();   // active 序号也持久化
         return true;
-    },
-
-    /** 背景图元素对齐活动页（切页/回滚共用）：页有背景则加载，无则清空 */
-    _syncPageBackgroundUi() {
-        if (typeof this._loadBackgroundImg !== 'function') return;
-        if (this.draft.background) {
-            this._loadBackgroundImg(this.draft.background);
-        } else if (this._bgImg || this._bgLoadedUrl) {
-            this._bgImg = null;
-            this._bgLoadedUrl = '';
-            // 清掉旧页背景必须立即重绘：_switchPage 的 _renderAll 跑在本
-            // 同步之前（画的是还挂着上一页背景的帧），不补绘舞台就滞留
-            // 上一页的图像（2026-11-04 用户实测切页 2 仍见页 1 生成图）
-            if (this.visible) this._renderStage();
-        }
     },
 
     // ==================== 页面操作（文档级历史） ====================
@@ -329,7 +282,6 @@ Object.assign(window.MangaEditor.prototype, {
         this.activePage = 0;
         this.draft = this.pages[0];
         this._resetForPageSwap();     // 界面态全重置
-        this._setBackground('');      // 背景参考图一并清除（草稿字段+舞台+悬浮条）
         this._resetHistory();         // 新基线：旧历史作废
         this._invalidateCompiled();   // 触发自动保存新文档
         this._renderAll();
@@ -398,7 +350,6 @@ Object.assign(window.MangaEditor.prototype, {
         this._resetForPageSwap();
         this._invalidateCompiled();   // 自动保存（缩略图刷新随之触发）
         this._renderAll();
-        this._syncPageBackgroundUi();
         this._renderRail();
         this._status(`已删除第 ${i + 1} 页`);
     },

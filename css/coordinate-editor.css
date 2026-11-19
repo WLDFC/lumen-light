@@ -4,8 +4,9 @@
  * ==========================================================================
  * 窗口壳复用 recipe-manager.css 的 recipe-dialog 全屏弹窗骨架
  * （recipe-dialog-panel / header / close），本档只补内部排布：
- *   - coord-dialog 并排窗口壳：右缘留白（--coord-gap）露出 Comfy/LLM 面板
- *     同屏操作，拖拽手柄可调；窄屏（<1500px）媒体查询回落全屏模态
+ *   - coord-dialog 并排窗口壳：右缘留白（--coord-gap，默认 0px 全屏，
+ *     标题栏「布局」钮切换）露出 Comfy/LLM 面板同屏操作，拖拽手柄可调；
+ *     窄屏（<1500px）媒体查询回落全屏模态
  *   - coord-body：左侧设置面板（coord-side）+ 中央画布舞台（coord-stage）
  *     + 右侧输出面板（coord-out-side，与左栏同宽）
  *   - coord-side 左栏：整体描述（coord-sec-summary）与元素卡片列表
@@ -29,6 +30,40 @@
     min-width: 0;
 }
 
+/* 标题栏加高到 45px（2026-11-08 对齐漫画编辑器：共享壳 30px 定高，
+   布局钮上标题栏后同规格预留竖向空间） */
+.coord-dialog .recipe-dialog-header {
+    height: 45px;
+    min-height: 45px;
+}
+
+/* 布局钮（2026-11-08，LumenLayoutPanel 预制件，标题栏右上角）：观感
+   对齐漫画编辑器标题文字按钮；激活蓝、置灰两态由预制件管类名 */
+.coord-layout-btn {
+    flex-shrink: 0;
+    padding: 5px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.coord-layout-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+.coord-layout-btn.is-active {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.16);
+    color: #60a5fa;
+}
+.coord-layout-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .coord-status {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.6);
@@ -48,7 +83,8 @@
    宽屏（≥1500px）生效；默认留白由编辑器按面板实际宽度对齐（见
    _defaultGap），拖拽右缘可调并存 localStorage */
 .coord-dialog {
-    right: var(--coord-gap, 552px);
+    right: var(--coord-gap, 0px);   /* 默认全屏（2026-11-08「布局」钮接管：
+        开=预制件实测写入、关=0px；原宽屏恒并排默认 552px 退役） */
     /* 高度对齐右侧面板：prompt-panel-container 为 top:5/bottom:5 固定定位，
      这里的上下留边必须与它同值（改面板留边时同步此处） */
     padding-top: 5px;
@@ -493,8 +529,7 @@
     transform: rotate(-90deg);
 }
 .coord-item.collapsed .coord-item-caption,
-.coord-item.collapsed .coord-item-text,
-.coord-item.collapsed .coord-item-bbox {
+.coord-item.collapsed .coord-item-text {
     display: none;
 }
 .coord-item-layer:hover {
@@ -528,8 +563,7 @@
 }
 .coord-item-caption:focus,
 .coord-item-title:focus,
-.coord-item-text:focus,
-.coord-bbox-n:focus {
+.coord-item-text:focus {
     border-color: rgba(59, 130, 246, 0.6);
 }
 
@@ -560,25 +594,6 @@
     font-size: 12.5px;
     outline: none;
     margin-bottom: 6px;
-}
-
-.coord-item-bbox {
-    display: flex;
-    gap: 4px;
-}
-.coord-bbox-n {
-    width: 0;
-    flex: 1;
-    height: 26px;
-    padding: 0 5px;
-    box-sizing: border-box;
-    border: 1px solid rgba(128, 128, 128, 0.25);
-    border-radius: 5px;
-    background: rgba(27, 28, 33, 0.7);
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 11.5px;
-    font-family: Consolas, 'Courier New', monospace;
-    outline: none;
 }
 
 .coord-add-item {

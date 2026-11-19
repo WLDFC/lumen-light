@@ -309,8 +309,13 @@ Object.assign(window.MangaEditor.prototype, {
         this._renderStage();
     },
 
-    /** 清元素选中（图层选中与元素选中互斥的另一半，MangaStage 也用） */
+    /** 清元素选中（图层选中与元素选中互斥的另一半，MangaStage 也用）：
+     *  多选集合（逐格范围）一并清掉——选了层就是离开元素选择语境 */
     _clearElementSelection() {
+        if (this._multiSelected && this._multiSelected.size) {
+            this._multiSelected.clear();
+            this._syncMultiSelectUi();
+        }
         if (this.selected < 0) return;
         this.selected = -1;
         if (this.itemsEl) {
@@ -321,9 +326,19 @@ Object.assign(window.MangaEditor.prototype, {
 
     // ==================== 图片层 ====================
 
-    /** 置入本地图：读文件 → /api/assets 内容寻址入库 → contain 适配画幅居中落层 */
-    async _placeImageFile(file) {
+    /**
+     * 置入本地图：读文件 → /api/assets 内容寻址入库 → contain 适配画幅落层。
+     * @param {File} file - 图片文件
+     * @param {{x:number,y:number}} [center] - 拖放落点（bbox 中心对齐它，
+     *        中心钳画幅内防整图掉出页外；2026-11-12 资产库拖入用）。
+     *        缺省 = contain 适配画幅居中（文件菜单置入同款）
+     */
+    async _placeImageFile(file, center) {
         if (!file) return;
+        if (file.type && file.type.startsWith('video/')) {
+            this._status('视频素材暂不支持置入漫画页（仅图片）', true);
+            return;
+        }
         const dataUrl = await new Promise((res, rej) => {
             const r = new FileReader();
             r.onload = () => res(String(r.result));
@@ -337,7 +352,7 @@ Object.assign(window.MangaEditor.prototype, {
             img.onerror = () => rej(new Error('图片解码失败'));
             img.src = url;
         });
-        this._addImageLayer(url, dim.w, dim.h);
+        this._addImageLayer(url, dim.w, dim.h, null, center);
         this._status('已置入图片图层');
     },
 
@@ -447,6 +462,13 @@ Object.assign(window.MangaEditor.prototype, {
         const imgs = ((window.canvas && window.canvas.images && window.canvas.images.images) || [])
             .filter((o) => this._filePickerSelected && this._filePickerSelected.has(o.id));
         this._closeFileCanvasPicker();
+        // 分镜识别模式：不落图层，取第一张选中图交给识别流程
+        //（MangaTemplateDetect 混入，2026-11-09）
+        if (this._detectPickerMode) {
+            this._detectPickerMode = false;
+            if (imgs.length) this._detectFromDataUrl(imgs[0].img.src);
+            return;
+        }
         let seq = 1;
         let ok = 0;
         for (const o of imgs) {
@@ -466,17 +488,23 @@ Object.assign(window.MangaEditor.prototype, {
         if (imgs.length > 1 && ok) this._status(`已置入 ${ok} 张画布图片图层`);
     },
 
-    _addImageLayer(url, natW, natH, label) {
-        const layers = this._ensureDrawLayers();
-        const before = this._histSnapshot();
+    _addImageLayer(url, natW, natH, label, center) {
         const d = this.draft;
         const id = this._allocLayerId();
-        const layer = this._makeImageLayerRecord(d, url, natW, natH, id, label);
+        const layer = this._makeImageLayerRecord(d, url, natW, natH, id, label, center);
+        return this._insertImageLayer(layer, label || '置入图片');
+    },
+
+    /** 图片层入活动页层栈（当前层之上）+ 选中 + 历史 + 收口刷新。
+     *  _addImageLayer / _addImageLayerBBox 共用落栈管线（2026-11-12 抽取） */
+    _insertImageLayer(layer, histLabel) {
+        const layers = this._ensureDrawLayers();
+        const before = this._histSnapshot();
         const at = layers.findIndex((l) => l.id === this._activeLayerId);
         layers.splice(at >= 0 ? at + 1 : layers.length, 0, layer);
-        this._selLayerId = id;
+        this._selLayerId = layer.id;
         this._clearElementSelection();
-        this._commitHistory(before, label || '置入图片');
+        this._commitHistory(before, histLabel);
         this._draftTouched = true;
         this._scheduleSave();
         this._scheduleThumbRefresh();
@@ -485,15 +513,36 @@ Object.assign(window.MangaEditor.prototype, {
         return layer;   // 生成捕获路径据此盖 canvasImgId 溯源戳（MangaGenerate）
     },
 
+    /** 显式 bbox 图片层（逐格生成落框，2026-11-12）：bbox=元素框
+     *  （草稿坐标 [x1,y1,x2,y2]）精确填满——生成尺寸等比于框，落框仅余
+     *  64 取整的亚像素级比例差，不做 contain 适配 */
+    _addImageLayerBBox(url, bbox, name) {
+        const id = this._allocLayerId();
+        const layer = {
+            id, name: name || `图片 ${id}`, visible: true,
+            image: { src: url, fromSrc: url, bbox: bbox.slice() }
+        };
+        return this._insertImageLayer(layer, '逐格生成');
+    },
+
     /**
-     * 图片层记录：contain 适配画幅居中（生成图/置入图同款落位几何）。
+     * 图片层记录：contain 适配画幅落位（生成图/置入图同款落位几何）。
+     * @param {{x:number,y:number}} [center] - 拖放落点：bbox 中心对齐它
+     *        （中心钳画幅内——拖到页缘只露一半也抓得回，整图出页抓不住）；
+     *        缺省 = 画幅居中。
      * fromSrc = 原始引用（保存写回画布时按它定位对应图——橡皮烘焙/抠图
      * 会把 src 换成新内容，原始指向靠它保留）
      */
-    _makeImageLayerRecord(page, url, natW, natH, id, name) {
+    _makeImageLayerRecord(page, url, natW, natH, id, name, center) {
         const fit = Math.min(page.width / natW, page.height / natH);
         const w = natW * fit, h = natH * fit;
-        const x = (page.width - w) / 2, y = (page.height - h) / 2;
+        let x = (page.width - w) / 2, y = (page.height - h) / 2;
+        if (center) {
+            const cx = Math.max(0, Math.min(page.width, center.x));
+            const cy = Math.max(0, Math.min(page.height, center.y));
+            x = cx - w / 2;
+            y = cy - h / 2;
+        }
         return {
             id, name: name || `图片 ${id}`, visible: true,
             image: { src: url, fromSrc: url, bbox: [x, y, x + w, y + h] }
@@ -517,6 +566,25 @@ Object.assign(window.MangaEditor.prototype, {
         if (this.visible) this._renderStage();
         this._renderLayerPanel();
         return layer;   // 生成捕获路径据此盖 canvasImgId 溯源戳（MangaGenerate）
+    },
+
+    /** 显式 bbox 图片层异页直写（逐格生成 2026-11-12）：几何同
+     *  _addImageLayerBBox，落层同 _addImageLayerToPage 直写口径 */
+    _addImageLayerBBoxToPage(page, url, bbox, name) {
+        if (!page) return null;
+        if (!Array.isArray(page.drawLayers)) page.drawLayers = [];
+        const id = this._allocLayerId();
+        const layer = {
+            id, name: name || `图片 ${id}`, visible: true,
+            image: { src: url, fromSrc: url, bbox: bbox.slice() }
+        };
+        page.drawLayers.push(layer);
+        this._draftTouched = true;
+        this._scheduleSave();
+        this._scheduleThumbRefresh();
+        if (this.visible) this._renderStage();
+        this._renderLayerPanel();
+        return layer;
     },
 
     /**
@@ -615,21 +683,51 @@ Object.assign(window.MangaEditor.prototype, {
         };
     },
 
-    _snapLayerEdges(box, edgesX, edgesY) {
+    /**
+     * 图片层等比缩放磁吸（灯箱 StudioMoveTool._snapResize 同款移植，
+     * 2026-11-11 随图片层等比缩放改造替换旧 _snapLayerEdges）：等比缩放
+     * 两轴共享一个倍率，故把画幅边/中心候选换算成倍率（边贴边
+     * newLen=|t-anchor|、中心对齐 newLen=2|t-anchor|），与指针原始倍率取
+     * 长度差最近者（阈值内）；两轴同时命中只听长度差更近的一轴。
+     * @param {number[]} orig 拖拽起点的 bbox
+     * @param {string} anchor 八向锚点 id（nw/n/ne/e/se/s/sw/w）
+     * @param {number} factor 指针原始倍率（已过最小边下限钳制）
+     * @returns {{factor: number, guides: Array}} factor=吸附修正后的倍率
+     *   （无命中=原倍率），guides=吸附参考线（{axis,pos}，同移动磁吸格式）
+     */
+    _snapLayerResize(orig, anchor, factor) {
         const thr = 8 / this._view.scale;   // 灯箱 SNAP_PX=8 同款（元素框保持 6）
+        const ow = Math.max(1, orig[2] - orig[0]);
+        const oh = Math.max(1, orig[3] - orig[1]);
+        const anchorX = anchor.includes('w') ? orig[2] : orig[0];
+        const anchorY = anchor.includes('n') ? orig[3] : orig[1];
+        const west = anchor.includes('w');   // 锚点在右，左缘移动
+        const north = anchor.includes('n');  // 锚点在下，上缘移动
         const tx = CoordinateLayout.axisTargets(this.draft.width, []);
         const ty = CoordinateLayout.axisTargets(this.draft.height, []);
-        const out = box.slice();
-        const guides = [];
-        for (const k of edgesX) {
-            const s = CoordinateLayout.snapValue(out[k], tx, thr);
-            if (s.snapped) { out[k] = s.value; guides.push({ axis: 'x', pos: s.value }); }
-        }
-        for (const k of edgesY) {
-            const s = CoordinateLayout.snapValue(out[k], ty, thr);
-            if (s.snapped) { out[k] = s.value; guides.push({ axis: 'y', pos: s.value }); }
-        }
-        return { box: out, guides };
+        const minEdge = (window.LumenLight?.config?.minImageSize) || 24;
+        let best = null;
+        const consider = (baseLen, ax, isV) => {
+            for (const t of (isV ? ty : tx)) {
+                const edge = isV ? (north ? ax - t : t - ax)
+                                 : (west ? ax - t : t - ax);
+                for (const newLen of [edge, edge * 2]) {   // 边贴边 / 中心对齐
+                    if (newLen <= 0) continue;             // 候选在锚点移动方向之外
+                    const r = newLen / baseLen;
+                    if (Math.min(ow, oh) * r < minEdge) continue;
+                    const delta = Math.abs(newLen - baseLen * factor);
+                    if (delta > thr) continue;
+                    if (!best || delta < best.delta) {
+                        best = { factor: r, delta,
+                                 guide: { axis: isV ? 'y' : 'x', pos: t } };
+                    }
+                }
+            }
+        };
+        consider(ow, anchorX, false);
+        consider(oh, anchorY, true);
+        return best ? { factor: best.factor, guides: [best.guide] }
+                    : { factor, guides: [] };
     },
 
 });

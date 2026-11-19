@@ -502,8 +502,9 @@ class ComfyGenNode extends BaseCanvasNode {
         }
 
         this.removePlaceholder();
+        const phHandles = [];
         for (let i = 0; i < count; i++) {
-            this.createPlaceholder(res, i);
+            phHandles.push(this.createPlaceholder(res, i));
         }
 
         // 看门狗为"无进展超时"：每收到一张图就重新计时（大批次整批
@@ -556,6 +557,11 @@ class ComfyGenNode extends BaseCanvasNode {
                 }
                 if (result.promptId) {
                     this._submittedPromptIds.push(result.promptId);
+                    // promptId ↔ 占位图绑定（2026-11-08）：Comfy 中继的采样
+                    // 进度/预览/失败事件按此定向（第 i 张提交对应第 i 张占位图）
+                    if (phHandles[i]) {
+                        window.placeholderManager.bindPromptId(phHandles[i], result.promptId);
+                    }
                 }
             }
         } catch (error) {
@@ -647,8 +653,7 @@ class ComfyGenNode extends BaseCanvasNode {
     /**
      * 结束本轮生成：复位按钮与计数状态（占位图清理由落图/失败路径自行处理）
      */
-    _finishGeneration() {
-        // 任务中心结算：停止=中性（已完成部分附注），正常=完成
+    _finishGeneration() {        // 任务中心结算：停止=中性（已完成部分附注），正常=完成
         if (this._taskRef) {
             const p = this._pending;
             if (this.stopControl.aborted) {
@@ -669,6 +674,45 @@ class ComfyGenNode extends BaseCanvasNode {
         this.stopControl.end();
         this.generateBtn.disabled = false;
         this.generateBtn.textContent = '生成';
+    }
+
+    /**
+     * 生成活动回调（2026-11-08，PlaceholderManager.setProgress 触发）：
+     * Comfy 中继的采样进度=有进展——重置本节点的无进展看门狗（10 分钟
+     * 无新图兜底），长采样（单张超过看门狗时长）不再被误杀
+     */
+    onGenerationActivity() {
+        if (this.isGenerating) this._armWatchdog();
+    }
+
+    /**
+     * 生成失败收尾（2026-11-08）：后端执行终态（WS 中继 execution_error /
+     * history 看门狗）经 PlaceholderManager.failGeneration 回调到这里——
+     * 该 prompt 的占位图已进失败态（红框驻留画布供查看原因，用户可删），
+     * 本方法只收敛计数与运行态：期望数减一（那张图不会来了），其余在跑
+     * 的 prompt 继续正常回流；全部落定时任务按 failed 结算。幂等——
+     * 中继与看门狗双源广播只生效一次（failGeneration 侧已幂等，这里
+     * 以 isGenerating/_pending 为闸）
+     * @param {string} message - 失败原因（可读，已含节点定位）
+     */
+    onGenerationFailed(message) {
+        if (!this.isGenerating || !this._pending) return;
+        this._pending.expected = Math.max(this._pending.received, this._pending.expected - 1);
+        window.socket?.showNotification?.(`生成失败：${message || 'ComfyUI 执行失败'}`, 8000);
+        if (this._pending.received >= this._pending.expected) {
+            this._taskRef?.end('failed', message || '生成失败');
+            this._taskRef = null;
+            if (this._watchdog) {
+                clearTimeout(this._watchdog);
+                this._watchdog = null;
+            }
+            this.isGenerating = false;
+            this._pending = null;
+            this._activeGenInfo = null;
+            this.stopControl.end();
+            this.generateBtn.disabled = false;
+            this.generateBtn.textContent = '生成';
+        }
     }
 
     /**

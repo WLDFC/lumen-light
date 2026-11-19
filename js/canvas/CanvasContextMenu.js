@@ -6,12 +6,21 @@
  *
  * 交互规则：
  *   - 右键画布空白处：弹出菜单，节点将创建在鼠标位置（画布坐标）
- *   - 右键图片/节点上：不弹菜单（与现有元素交互不冲突）
+ *   - 右键可忽略元素（提示词/LoRA 节点、画布图片/视频）：弹出
+ *     「忽略/恢复节点」菜单（ComfyUI bypass 语义：贡献剔除、遍历照穿，
+ *     见 ImagePipeline 各收集点的 bypassed 过滤）
+ *   - 右键其余元素（生成节点/占位图/文本节点等）：不弹菜单（与现有元素交互不冲突）
  *   - 点击菜单项：执行对应操作并关闭菜单
  *   - 点击其他区域 / ESC：关闭菜单
  *   - 菜单弹出期间画布不响应框选等鼠标交互
  * ==========================================================================
  */
+
+// 菜单图标：项目统一的白色线稿内联 SVG（Feather 风格：
+// fill=none / stroke=currentColor / 2px 圆角线帽，与顶栏、文件菜单一致）
+function menuSvgIcon(paths) {
+    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+}
 
 class CanvasContextMenu {
     /**
@@ -31,7 +40,8 @@ class CanvasContextMenu {
     bindEvents() {
         const canvasEl = this.canvas.canvas;
 
-        // 右键：空白处弹出菜单，命中图片/节点时抑制
+        // 右键：空白处弹出添加菜单；命中可忽略元素时弹出忽略/恢复菜单，
+        // 其余元素（生成节点/占位图/文本节点）维持抑制
         canvasEl.addEventListener('contextmenu', (e) => {
             e.preventDefault();
 
@@ -41,9 +51,25 @@ class CanvasContextMenu {
                 e.clientY - rect.top
             );
 
-            // 命中任何元素（图片或提示词节点）时不弹菜单
-            if (this.canvas.images.isHit(cp.x, cp.y) || this.hitPromptNode(cp.x, cp.y)) {
-                this.hide();
+            // 命中检测：isHit 覆盖全部对象（矩形命中，含面板节点）
+            const hit = this.canvas.images.isHit(cp.x, cp.y);
+            if (hit) {
+                if (this.isBypassable(hit)) {
+                    this.showBypassMenu(e.clientX, e.clientY, hit);
+                } else {
+                    this.hide();
+                }
+                return;
+            }
+
+            // 兜底：面板节点 contains 命中（isHit 矩形判定之外的保险路径）
+            const panelHit = this.hitPromptNode(cp.x, cp.y);
+            if (panelHit) {
+                if (this.isBypassable(panelHit)) {
+                    this.showBypassMenu(e.clientX, e.clientY, panelHit);
+                } else {
+                    this.hide();
+                }
                 return;
             }
 
@@ -83,6 +109,100 @@ class CanvasContextMenu {
     }
 
     /**
+     * 元素侧右键入口（面板节点 DOM 挂在 document.body 上，事件不会
+     * 冒泡到画布元素，由各节点在自己的 contextmenu 处理器里转交）：
+     * 可忽略元素弹忽略/恢复菜单，其余维持抑制
+     * @param {MouseEvent} e - 节点上的 contextmenu 事件
+     * @param {Object} node - 事件目标节点
+     * @returns {boolean} 是否弹了菜单
+     */
+    handleElementContext(e, node) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.hide();
+        if (!this.isBypassable(node)) return false;
+        this.showBypassMenu(e.clientX, e.clientY, node);
+        return true;
+    }
+
+    /**
+     * 元素是否可忽略（bypass）：提示词/LoRA 节点（链上贡献源）、
+     * 真实画布图片（含串联链中间节点，忽略后链照穿）与视频。
+     * 生成节点无下游消费语义、占位图不可交互、文本节点不参与链路，
+     * 均不可忽略
+     * @param {Object} obj - 画布对象（图片或节点）
+     * @returns {boolean}
+     */
+    isBypassable(obj) {
+        return NodeTypes.isPromptNode(obj.source) ||
+               NodeTypes.isLoraNode(obj.source) ||
+               NodeTypes.isVideo(obj.source) ||
+               NodeTypes.isRealCanvasImage(obj);
+    }
+
+    /**
+     * 显示忽略/恢复菜单（单条目，按目标当前状态切换文案与图标）
+     * @param {number} screenX - 鼠标屏幕 X（菜单定位）
+     * @param {number} screenY - 鼠标屏幕 Y
+     * @param {Object} target - 命中的画布对象
+     */
+    showBypassMenu(screenX, screenY, target) {
+        this.ensureMenuEl();
+
+        const items = [{
+            label: target.bypassed ? '恢复节点' : '忽略节点',
+            // 恢复=逆时针箭头（Feather rotate-ccw）；忽略=圆内叉（Feather x-circle）
+            icon: target.bypassed
+                ? menuSvgIcon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>')
+                : menuSvgIcon('<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'),
+            action: () => this.applyBypass(target, !target.bypassed)
+        }];
+
+        this.menuEl.innerHTML = '';
+        items.forEach(item => {
+            const btn = document.createElement('button');
+            btn.className = 'canvas-context-menu-item';
+            btn.innerHTML = `<span class="canvas-context-menu-icon">${item.icon}</span><span>${item.label}</span>`;
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.hide();
+                item.action();
+            });
+            this.menuEl.appendChild(btn);
+        });
+
+        this.menuEl.style.left = screenX + 'px';
+        this.menuEl.style.top = screenY + 'px';
+        this.menuEl.classList.add('show');
+        this.isVisible = true;
+
+        // 防止菜单超出视口右/下边缘
+        const rect = this.menuEl.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            this.menuEl.style.left = (screenX - rect.width) + 'px';
+        }
+        if (rect.bottom > window.innerHeight) {
+            this.menuEl.style.top = (screenY - rect.height) + 'px';
+        }
+    }
+
+    /**
+     * 应用忽略状态：DOM 节点走各自的 setBypassed（切 DOM 类），
+     * 画布图片/视频是纯数据对象，只翻标记并触发重绘
+     * （半透明视觉由 CanvasRenderer 按 bypassed 标记绘制）
+     * @param {Object} target - 画布对象
+     * @param {boolean} on - true=忽略，false=恢复
+     */
+    applyBypass(target, on) {
+        if (typeof target.setBypassed === 'function') {
+            target.setBypassed(on);
+        } else {
+            target.bypassed = !!on;
+            this.canvas.draw();
+        }
+    }
+
+    /**
      * 显示右键菜单
      * @param {number} screenX - 鼠标屏幕 X（视口坐标，用于菜单定位）
      * @param {number} screenY - 鼠标屏幕 Y
@@ -94,63 +214,66 @@ class CanvasContextMenu {
         this.targetCanvasPos = { x: canvasX, y: canvasY };
 
         // 菜单项定义：将来扩展 API 节点等在这里追加。
-        // 图标用项目统一的白色线稿内联 SVG（Feather 风格：
-        // fill=none / stroke=currentColor / 2px 圆角线帽，与顶栏、文件菜单一致）
-        const svgIcon = (paths) =>
-            `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-
+        // 图标用模块级 menuSvgIcon（Feather 风格线稿）
         const items = [
             {
                 label: '新建组',
                 // 四角括号框（表达"把元素框进一个组"的语义）
-                icon: svgIcon('<path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>'),
+                icon: menuSvgIcon('<path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>'),
                 action: () => this.addGroup(this.targetCanvasPos)
             },
             {
                 label: '提示词节点',
                 // 对话气泡（与顶栏"提示词面板"按钮同图标）
-                icon: svgIcon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
+                icon: menuSvgIcon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
                 action: () => this.addPromptNode(this.targetCanvasPos)
             },
             {
                 label: '生图节点',
                 // 图片（矩形 + 山景 + 太阳，与 LLM 工具栏上传按钮同风格）
-                icon: svgIcon('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>'),
+                icon: menuSvgIcon('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>'),
                 action: () => this.addImageGenNode(this.targetCanvasPos)
             },
             {
                 label: '视频生成节点',
                 // 摄像机（Feather video：机身矩形 + 右侧镜头三角，
                 // 表达"走厂商 API 生成视频"的语义）
-                icon: svgIcon('<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>'),
+                icon: menuSvgIcon('<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>'),
                 action: () => this.addVideoGenNode(this.targetCanvasPos)
             },
             {
                 label: 'Comfy 生图节点',
                 // 芯片（CPU：外框 + 内核 + 四边引脚，与 Feather cpu 图标一致，
                 // 表达"走本地 ComfyUI 工作流"的语义）
-                icon: svgIcon('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>'),
+                icon: menuSvgIcon('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>'),
                 action: () => this.addComfyGenNode(this.targetCanvasPos)
             },
             {
                 label: 'RunningHub 节点',
                 // 云朵（Feather cloud，表达"走云端托管工作流"的语义，
                 // 与本地 Comfy 生图节点的芯片图标区分）
-                icon: svgIcon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>'),
+                icon: menuSvgIcon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>'),
                 action: () => this.addRunHubGenNode(this.targetCanvasPos)
             },
             {
                 label: 'LoRA 节点',
                 // 层叠滑块（三条竖线各带一个调节圆点，Feather sliders 风格，
                 // 表达"多组可调强度堆叠"的 LoRA 组合语义）
-                icon: svgIcon('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
+                icon: menuSvgIcon('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
                 action: () => this.addLoraNode(this.targetCanvasPos)
             },
             {
                 label: '文本节点',
                 // 文档线条（备注/注释语义）
-                icon: svgIcon('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>'),
+                icon: menuSvgIcon('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>'),
                 action: () => this.addTextNode(this.targetCanvasPos)
+            },
+            {
+                label: '书签节点',
+                // 书签折角（Feather bookmark：旗标下端内折，
+                // 表达"标记编组位置快速跳转"的语义）
+                icon: menuSvgIcon('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'),
+                action: () => this.addBookmarkNode(this.targetCanvasPos)
             }
         ];
 
@@ -387,6 +510,25 @@ class CanvasContextMenu {
         this.canvas.images.select(node.id);
         // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
         this.canvas.history?.recordCreate([node], '新建节点');
+        this.canvas.draw();
+    }
+
+    /**
+     * 在指定画布坐标添加一个书签节点（编组快捷跳转目录，
+     * 自动绑定画布全部编组，数字键 1-9/0 快速跳转）
+     * @param {{x: number, y: number}} pos - 画布坐标
+     */
+    addBookmarkNode(pos) {
+        const node = new BookmarkNode(
+            this.canvas,
+            pos.x - BookmarkNode.DEFAULT_WIDTH / 2,
+            pos.y - BookmarkNode.DEFAULT_HEIGHT / 2
+        );
+        this.canvas.images.images.push(node);
+        // 新节点默认选中，便于立即拖动定位
+        this.canvas.images.select(node.id);
+        // 撤销记账：新建节点可回退（undo=摘下销毁、redo=快照重建）
+        this.canvas.history?.recordCreate([node], '新建书签节点');
         this.canvas.draw();
     }
 }

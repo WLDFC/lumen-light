@@ -38,7 +38,7 @@ const CoordinateLayout = (() => {
     const MIN_DIM = 256;
     const MAX_DIM = 4096;
 
-    /** 常用画幅预设（全部为 16 的倍数） */
+    /** 常用画幅预设（全部为 16 的倍数；漫画/坐标编辑器共用） */
     const PRESET_SIZES = [
         { label: '1024 × 1024（方形）', width: 1024, height: 1024 },
         { label: '832 × 1216（竖图）', width: 832, height: 1216 },
@@ -46,6 +46,19 @@ const CoordinateLayout = (() => {
         { label: '1536 × 1024（宽横）', width: 1536, height: 1024 },
         { label: '1024 × 1536（长竖）', width: 1024, height: 1536 }
     ];
+
+    /** Comfy 生图链路追加档（Comfy 面板 + RunningHub 节点专用，2026-11-16）：
+        16 倍数约束不适用——Comfy latent 只需 8 的倍数；不可混入
+        PRESET_SIZES，画幅编辑器（漫画/坐标）编译强制 16 倍数，
+        1920 × 1080 会校验失败/被 clampDim 取整到 1088 */
+    const COMFY_EXTRA_PRESET_SIZES = [
+        { label: '768 × 1344（窄竖）', width: 768, height: 1344 },
+        { label: '1536 × 1536（大方形）', width: 1536, height: 1536 },
+        { label: '1920 × 1080（16:9）', width: 1920, height: 1080 }
+    ];
+
+    /** Comfy 链路完整预设清单 = 共享五档 + Comfy 追加三档（尺寸行预设下拉用） */
+    const COMFY_PRESET_SIZES = PRESET_SIZES.concat(COMFY_EXTRA_PRESET_SIZES);
 
     // ==================== 内部校验工具（Python require 的镜像） ====================
 
@@ -337,7 +350,7 @@ const CoordinateLayout = (() => {
 
     return {
         CANVAS_MODES, ITEM_LABELS,
-        MIN_DIM, MAX_DIM, PRESET_SIZES,
+        MIN_DIM, MAX_DIM, PRESET_SIZES, COMFY_PRESET_SIZES,
         centeredBox, compileDraft, validateDraft,
         createDraft, clampDim, normalizeBox, normalizeDraft, snapValue, axisTargets
     };

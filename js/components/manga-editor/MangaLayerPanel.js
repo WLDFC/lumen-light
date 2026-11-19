@@ -36,9 +36,12 @@ Object.assign(window.MangaEditor.prototype, {
         this._renderLayerPanel();
     },
 
-    /** 图层右键菜单（灯箱 StudioLayerPanel 同款：新建/复制/删除） */
+    /** 图层右键菜单（灯箱 StudioLayerPanel 同款：新建/复制/删除）+
+     *  剪贴蒙版开关（2026-11-11，PS 同语义）+
+     *  添加到编辑（2026-11-10 新增：发图层原图去 Comfy 面板图片槽位） */
     _openLayerMenu(x, y, id) {
         if (!this.layerCtxMenu) return;
+        const layer = this._layerById(id);
         this.layerCtxMenu.open({
             x, y,
             items: [
@@ -47,9 +50,143 @@ Object.assign(window.MangaEditor.prototype, {
                     this._status('已新建笔迹图层');
                 } },
                 { label: '复制图层', onClick: () => this._duplicateLayer(id) },
+                layer && layer.clipped
+                    ? { label: '释放剪贴蒙版', onClick: () => this._toggleClipToBelow(id) }
+                    : { label: '剪贴到下图层', onClick: () => this._toggleClipToBelow(id) },
+                { label: '添加到编辑', onClick: () => this._sendLayerToPanel(id) },
                 { label: '删除图层', danger: true, onClick: () => this._deleteLayer(id) }
             ]
         });
+    },
+
+    /**
+     * 剪贴蒙版开关（2026-11-11，PS Clipping Mask 同语义）：标记 clipped
+     * 后本层内容只在下方最近未剪贴层（基底）的不透明像素内显示；释放
+     * 回归普通层。标记是层属性——历史快照深拷贝天然覆盖，撤销/重做
+     * 自动带剪贴状态；草稿 JSON 宽松校验原样落盘。最底层无基底可剪
+     * （状态栏拒绝）。
+     */
+    _toggleClipToBelow(id) {
+        const layer = this._layerById(id);
+        if (!layer) return;
+        if (!layer.clipped) {
+            const layers = this._ensureDrawLayers();
+            const idx = layers.indexOf(layer);
+            const hasBase = layers.slice(0, idx).some((l) => l && !l.clipped);
+            if (!hasBase) {
+                this._status('下方没有可作基底的图层', true);
+                return;
+            }
+        }
+        const before = this._histSnapshot();
+        if (layer.clipped) delete layer.clipped;
+        else layer.clipped = true;
+        this._commitHistory(before, layer.clipped ? '创建剪贴蒙版' : '释放剪贴蒙版');
+        this._draftTouched = true;
+        this._scheduleSave();
+        this._renderLayerPanel();
+        this._renderStage();
+    },
+
+    /**
+     * 添加到编辑（2026-11-10 新增；2026-11-11 升级所见即所得）：把图片
+     * 图层的**当前内容**发送到右侧 Comfy 面板的图片槽位（编辑/重绘用）
+     * ——有未保存涂抹（或调色预览中）时现场合成「原图+层内笔迹」的
+     * dataURL 快照，纯原图则直发引用不重编码。与画布图片工具栏「添加
+     * 到内容」同链路——addImageToThumbnails 窗口事件由
+     * PanelThumbnailManager 统一消费（进第一个空槽，满则替换第一槽），
+     * 此处只是第二个事件生产方，面板侧零改动。合成只在发送时现场算，
+     * 草稿/src/历史零改动——「不保存画笔就不落地」原样保留（用户拍板：
+     * 涂抹不保存也要能进编辑）。仅图片图层可发。
+     */
+    async _sendLayerToPanel(id) {
+        const layer = this._layerById(id);
+        if (!layer || !layer.image || !layer.image.src) {
+            this._status('仅图片图层可发送', true);
+            return;
+        }
+        const strokes = Array.isArray(layer.strokes) ? layer.strokes : [];
+        const adjPrev = this._adjustPreview && this._adjustPreview.layerId === layer.id
+            ? this._adjustPreview.cv : null;
+        let src;
+        let width;
+        let height;
+        if (!strokes.length && !adjPrev) {
+            // 快路径：无涂抹（也无调色预览）直发原图引用——不重编码，
+            // 保原始格式与画质；宽高取 bbox 放置尺寸（画布工具栏同语义）
+            const [x1, y1, x2, y2] = layer.image.bbox || [0, 0, 0, 0];
+            src = layer.image.src;
+            width = Math.max(1, Math.round(x2 - x1));
+            height = Math.max(1, Math.round(y2 - y1));
+        } else {
+            this._status('正在合成图层内容…');
+            try {
+                const cv = await this._composeLayerContent(layer, strokes, adjPrev);
+                src = cv.toDataURL('image/png');
+                width = cv.width;
+                height = cv.height;
+            } catch (err) {
+                this._status('图层内容合成失败：' + ((err && err.message) || err), true);
+                return;
+            }
+        }
+        window.dispatchEvent(new CustomEvent('addImageToThumbnails', {
+            detail: {
+                image: {
+                    id: `manga-layer-${Date.now()}`,
+                    src,
+                    width,
+                    height
+                }
+            }
+        }));
+        this._status(strokes.length
+            ? '已发送到 Comfy 面板图片槽位（含未保存涂抹）'
+            : '已发送到 Comfy 面板图片槽位');
+    },
+
+    /**
+     * 图片图层所见合成：自然分辨率画布上重现该层当前内容——图片（调色
+     * 预览中取预览画布，与舞台渲染 _drawPageLayers 同口径）+ 层内笔迹
+     * 按序混排（画笔 source-over、橡皮 destination-out，语义同
+     * _drawImageLayerScratch）。笔迹点从草稿坐标经 k=自然宽/bbox宽 换算
+     * 对齐，线宽同乘（_drawStrokePath 的 scale 参数），出界笔迹由画布
+     * 边界自然裁掉。纯笔迹层不并入（独立图层各有生命周期）。
+     * @param {Object} layer - 图片图层（image.src + 可选 strokes）
+     * @param {Array} strokes - 层内笔迹条目（调用方已取出）
+     * @param {HTMLCanvasElement|null} adjPrev - 调色预览画布（未在调色中为 null）
+     * @returns {Promise<HTMLCanvasElement>}
+     */
+    async _composeLayerContent(layer, strokes, adjPrev) {
+        const [x1, y1, x2, y2] = layer.image.bbox;
+        const img = this._ensureLayerImage(layer.image.src);
+        if (img.complete) {
+            if (!img.naturalWidth) throw new Error('图层图片加载失败');
+        } else {
+            await new Promise((res, rej) => {
+                img.addEventListener('load', res, { once: true });
+                img.addEventListener('error', () => rej(new Error('图层图片加载失败')), { once: true });
+            });
+        }
+        const natW = img.naturalWidth || Math.max(1, Math.round(x2 - x1));
+        const natH = img.naturalHeight || Math.max(1, Math.round(y2 - y1));
+        const k = natW / Math.max(1, x2 - x1);
+        const cv = document.createElement('canvas');
+        cv.width = natW;
+        cv.height = natH;
+        const g = cv.getContext('2d');
+        g.lineJoin = 'round';
+        g.lineCap = 'round';
+        g.drawImage(adjPrev || img, 0, 0, natW, natH);
+        const X = (px) => (px - x1) * k;
+        const Y = (py) => (py - y1) * k;
+        for (const st of strokes) {
+            if (!st) continue;
+            g.globalCompositeOperation = st.erase ? 'destination-out' : 'source-over';
+            this._drawStrokePath(g, st, X, Y, k);
+        }
+        g.globalCompositeOperation = 'source-over';
+        return cv;
     },
 
     /**
@@ -88,6 +225,7 @@ Object.assign(window.MangaEditor.prototype, {
                         : '笔迹层：画笔 / 橡皮的落笔处（点行切换）';
             row.innerHTML = `
                 <canvas class="manga-layer-thumb" width="56" height="56" aria-hidden="true"></canvas>
+                ${layer.clipped ? '<span class="manga-layer-clip" title="剪贴蒙版：内容只在下方基底图层的不透明像素内显示">↳</span>' : ''}
                 <span class="manga-layer-name"></span>
                 <button type="button" class="manga-layer-eye" title="显示 / 隐藏"></button>
             `;

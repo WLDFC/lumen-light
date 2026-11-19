@@ -5,12 +5,9 @@
  * 舞台壳与 canvas 定位（touch-action:none 自管指针手势）。注意 style.css
  * 全局 canvas{position:fixed} 是主画布专用，弹窗内自绘 canvas 须逐项覆盖
  * ——页面栏缩略图的同款覆盖在 manga-editor.css 的 .manga-page-thumb canvas。
- * 标题栏工具组（manga-bg-tools，MangaBackground 混入）：背景参考图文字
- * 按钮（2026-11-07 与「文件」同款，自绘菜单复用 manga-file-menu 样式）/
- * 生成图透显开关（自绘勾选方格，
- * comfy-params 叠加区同款）/ 不透明度滑块（有背景才显示，即「已设背景」
- * 的可见指示）；画布选图面板（manga-bg-picker）：覆盖舞台的轻量单选浮层
- * ——缩略图定高不认 aspect-ratio（懒加载图会塌，ADR 013 教训）；
+ * 标题栏工具（MangaTemplates 混入）：分镜模板文字按钮（manga-title-btn
+ * 通用类，2026-11-08 起接替退役的背景按钮位；背景参考图工具组与画布
+ * 选图浮层已随功能整体退役——一切图像皆图层）；
  * 文字工具（manga-text-tools / manga-text-editor，MangaText 混入）：
  * 标题栏字体/字号/横竖排选项条（字体菜单挂 body fixed 定位）+ 舞台上
  * 的透明就地编辑框（几何全由 _syncTextEditor 内联控制）。
@@ -146,7 +143,7 @@
 }
 .manga-font-menu {
     position: fixed;
-    z-index: 1200;   /* LumenDropdown 菜单同层级（弹窗内浮于一切） */
+    z-index: 1200;   /* 漫画弹窗档（LumenDropdown 菜单 1350 浮于其上） */
     min-width: 170px;
     max-height: 320px;
     overflow-y: auto;
@@ -320,6 +317,30 @@
     cursor: pointer;
 }
 
+/* 边宽/圆角数值框（滑杆旁可编辑数字，双向同步——2026-11-11 用户诉求
+   「滑杆不好量化」）：文字字号输入 .manga-text-size 同款壳收窄；隐藏
+   webkit 自旋钮（标题栏空间紧，滚轮/键入即可调） */
+.manga-shape-num {
+    width: 46px;
+    height: 24px;
+    padding: 0 5px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+.manga-shape-num:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+.manga-shape-num::-webkit-outer-spin-button,
+.manga-shape-num::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
 /* 画布区：工具条之下的剩余高度（canvas 的定位基准） */
 .manga-stage-area {
     position: relative;
@@ -351,22 +372,12 @@
     z-index: 2;
 }
 
-/* ---- 标题栏工具组：背景参考图（MangaBackground 混入） ----
-   挂「文件」按钮右侧（2026-11-07 用户拍板两钮对调），30px 大行内放得下
-   ——不占舞台空间，画幅再大也不被遮挡 */
+/* ---- 标题栏文字按钮（挂「文件」按钮右侧，30px 大行内放得下
+   ——不占舞台空间，画幅再大也不被遮挡） ---- */
 
-.manga-bg-tools {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;   /* 提示条收窄时工具组不让位（按钮不可压缩） */
-    min-width: 0;
-    position: relative;   /* 背景自绘菜单的定位基准（菜单锚按钮下方） */
-}
-
-/* 背景按钮（2026-11-07 用户拍板：与「文件」同款文字按钮，去 caret——
-   自绘菜单复用 manga-file-menu 样式类）。裸文字观感，悬浮叠加高亮 */
-.manga-bg-btn {
+/* 标题栏文字按钮通用类（2026-11-08：原 manga-bg-btn 随背景参考图功能
+   退役改名——现由「分镜模板」按钮复用）。裸文字观感，悬浮叠加高亮 */
+.manga-title-btn {
     height: 28px;
     padding: 0 10px;
     background: transparent;
@@ -376,76 +387,12 @@
     color: #fff;
     cursor: pointer;
 }
-.manga-bg-btn:hover {
+.manga-title-btn:hover {
     background: rgba(255, 255, 255, 0.1);
 }
-.manga-bg-menu {
-    min-width: 150px;
-}
-
-
-
-/* ==================== 画布选图面板：覆盖舞台的轻量浮层，单选即关 ==================== */
-
-.manga-bg-picker {
-    position: absolute;
-    inset: 8px;
-    z-index: 6;
-    display: flex;
-    flex-direction: column;
-    background: rgba(18, 19, 24, 0.96);
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 10px;
-    overflow: hidden;
-}
-.manga-bg-picker[hidden] {
-    display: none;
-}
-.manga-bg-picker-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 12px;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.8);
-    flex-shrink: 0;
-}
-.manga-bg-picker-close {
-    background: none;
-    border: none;
-    color: rgba(255, 255, 255, 0.6);
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0 2px;
-}
-.manga-bg-picker-close:hover {
-    color: #fff;
-}
-.manga-bg-picker-grid {
-    flex: 1;
-    overflow: auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-    gap: 8px;
-    padding: 10px 12px;
-    align-content: start;
-}
-/* 缩略图定高不认 aspect-ratio：懒加载图 aspect-ratio 会塌（ADR 013 教训） */
-.manga-bg-picker-grid img {
-    width: 100%;
-    height: 80px;
-    object-fit: cover;
-    border-radius: 6px;
-    border: 1px solid rgba(128, 128, 128, 0.25);
-    cursor: pointer;
-}
-.manga-bg-picker-grid img:hover {
-    border-color: rgba(59, 130, 246, 0.8);
-}
-.manga-bg-picker-empty {
-    padding: 16px;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.45);
-    font-size: 12px;
+/* 激活态（2026-11-12 资产库钮在用）：配色同布局钮激活蓝 */
+.manga-title-btn.is-active {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(59, 130, 246, 0.16);
+    color: #60a5fa;
 }

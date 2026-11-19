@@ -166,6 +166,50 @@
     gap: 8px;
 }
 
+/* 分组区块（子文件夹组）：横跨整行，容纳节头 + 组内网格 */
+.asset-library-section {
+    grid-column: 1 / -1;
+}
+
+/* 子文件夹节头（分组网格）：可点击折叠/展开。
+   caret 展开时朝下，折叠时朝右（-90°） */
+.asset-library-group-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    user-select: none;
+}
+
+.asset-library-group-header:hover {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.asset-library-group-caret {
+    flex-shrink: 0;
+    opacity: 0.7;
+    transition: transform 0.15s ease;
+}
+
+.asset-library-group-header.is-folded .asset-library-group-caret {
+    transform: rotate(-90deg);
+}
+
+.asset-library-group-header svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+/* 组内文件数角标：推到节头右端 */
+.asset-library-group-count {
+    margin-left: auto;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
 .asset-card {
     border-radius: 8px;
     border: 1px solid rgba(128, 128, 128, 0.2);

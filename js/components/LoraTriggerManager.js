@@ -13,7 +13,10 @@
  *      选择按节点 id 隔离（nodeBlocks/nodeTargets），同一提示词节点可
  *      承接多只 LoRA 节点各自的块；写入经 _writePromptNode 同步镜像层
  *   3. 管理弹窗（双模式共用一套 UI）：面板模式由叠加区标题栏「触发词」
- *      按钮唤出（lumen-lora-triggers-open），写入目标=正向框1/2 分段；
+ *      按钮唤出（lumen-lora-triggers-open），写入目标=正向框1/2/专用框
+ *      分段（专用框为无实体虚拟框：触发词不落任何输入框，Comfy 生图时
+ *      经 getVirtualBlock() 注入正向框 1 末尾，空一行分隔——注入点在
+ *      PromptInputManager.getPrompts 的合并链上）；
  *      画布模式由 LoRA 节点标题栏按钮唤出（lumen-lora-node-triggers-open，
  *      detail.node），写入目标=链上提示词节点下拉（默认最近的一个，
  *      用户选择持久化）。逐词开关与权重两模式共用（按归一化 rel 分键，
@@ -102,8 +105,9 @@ class LoraTriggerManager {
         try {
             saved = JSON.parse(localStorage.getItem(LORA_TRIGGER_STATE_KEY) || 'null');
         } catch (e) { saved = null; }
+        const target = saved && saved.target;
         return {
-            target: (saved && saved.target === 2) ? 2 : 1,
+            target: (target === 2 || target === 3) ? target : 1,
             loras: (saved && saved.loras && typeof saved.loras === 'object') ? saved.loras : {},
             lastBlock: (saved && typeof saved.lastBlock === 'string') ? saved.lastBlock : '',
             // 画布模式：书签与目标选择按 LoRA 节点 id 分键（节点 id 随存档
@@ -158,14 +162,17 @@ class LoraTriggerManager {
     /**
      * 生效条目 → 归一化并挂上 Civitai 触发词（无触发词的条目
      * 不进托管块）。同文件多条目去重（同词重复注入无意义）
+     * @param {Array<{file: string}>} [items] - 显式条目源（缺省按当前
+     *        弹窗语境 _sourceItems；生图链路必须显式传叠加区条目，
+     *        避免弹窗遗留的画布模式口径漂移）
      * @returns {Array<{rel: string, words: string[]}>} 栈序
      */
-    _effectiveEntries() {
+    _effectiveEntries(items) {
         const meta = (window.LoraFileSelect && LoraFileSelect._meta) || {};
         const triggers = meta.triggers || {};
         const out = [];
         const seen = new Set();
-        for (const item of this._sourceItems()) {
+        for (const item of (items || this._sourceItems())) {
             const rel = LoraTriggerText.normalizeRel(item.file);
             if (!rel || seen.has(rel)) continue;
             seen.add(rel);
@@ -190,7 +197,9 @@ class LoraTriggerManager {
         }
     }
 
-    /** 重算托管块并写回目标框（书签策略见 LoraTriggerText.applyBlock） */
+    /** 重算托管块并写回目标框（书签策略见 LoraTriggerText.applyBlock）；
+     *  目标=专用框（3）时不落任何实体框，块仅随 lastBlock 记账，生图时
+     *  经 getVirtualBlock() 注入合并链 */
     _syncNow() {
         const block = LoraTriggerText.composeBlock(this._effectiveEntries(), this.state.loras);
         const box = this._targetBox(this.state.target);
@@ -203,11 +212,12 @@ class LoraTriggerManager {
     }
 
     /**
-     * 切换写入目标框：先按书签从旧框摘除托管块，再同步进新框
-     * @param {number} target - 1 | 2
+     * 切换写入目标框：先按书签从旧框摘除托管块，再同步进新框。
+     * 专用框（3）无实体——旧目标为它时无需摘除（块本就不在任何框里）
+     * @param {number} target - 1 | 2 | 3（3 = 专用框）
      */
     setTarget(target) {
-        const next = target === 2 ? 2 : 1;
+        const next = (target === 2 || target === 3) ? target : 1;
         if (this.state.target === next) return;
         const oldBox = this._targetBox(this.state.target);
         if (oldBox && this.state.lastBlock) {
@@ -220,11 +230,12 @@ class LoraTriggerManager {
     }
 
     /**
-     * 取目标正向框元素
-     * @param {number} target - 1 | 2
+     * 取目标正向框元素（专用框 3 无实体，返回 null）
+     * @param {number} target - 1 | 2 | 3
      * @returns {HTMLTextAreaElement|null}
      */
     _targetBox(target) {
+        if (target === 3) return null;
         const pim = this.promptInputManager || {};
         if (target === 2) {
             return pim.posPrompt2 || document.getElementById('posPrompt2');
@@ -236,6 +247,18 @@ class LoraTriggerManager {
     _debouncedSync() {
         clearTimeout(this._syncTimer);
         this._syncTimer = setTimeout(() => this.syncFromStack(), 300);
+    }
+
+    /**
+     * 专用框当前内容（生图注入口，PromptInputManager.getPrompts 调用）：
+     * 仅目标=专用框时返回现算的托管块，其余目标返回空串（块已在实体框里，
+     * 不重复注入）。元数据未就绪时触发词清单为空 → 空块 → 不注入
+     * @returns {string}
+     */
+    getVirtualBlock() {
+        if (this.state.target !== 3) return '';
+        return LoraTriggerText.composeBlock(
+            this._effectiveEntries(this.getStackLoras() || []), this.state.loras);
     }
 
     // ==================== 画布模式：LoRA 节点同步引擎 ====================
@@ -467,10 +490,11 @@ class LoraTriggerManager {
                 <div class="ltd-header">
                     <span class="ltd-title">LoRA 触发词</span>
                     <div class="ltd-target"
-                         title="触发词块写入哪个正面提示词框（末尾，与原提示词空一行）">
+                         title="触发词块写入哪个正面提示词框（末尾，与原提示词空一行）；专用框无实体，Comfy 生图时自动并入正向框 1 末尾">
                         <span class="ltd-target-label">写入</span>
                         <button type="button" class="ltd-target-btn" data-target="1">正向框1</button>
                         <button type="button" class="ltd-target-btn" data-target="2">正向框2</button>
+                        <button type="button" class="ltd-target-btn" data-target="3">专用框</button>
                     </div>
                     <div class="ltd-node-target"
                          title="选择触发词块写入的提示词节点（末尾，与原提示词空一行）">
@@ -483,7 +507,7 @@ class LoraTriggerManager {
                     <span class="ltd-lora-status"></span>
                 </div>
                 <div class="ltd-body"></div>
-                <div class="ltd-footer">开关与权重即时写回目标框末尾的触发词块；权重 ≠1 时以 (词:权重) 语法写入</div>
+                <div class="ltd-footer">开关与权重即时写回目标框末尾的触发词块（专用框为生图时注入）；权重 ≠1 时以 (词:权重) 语法写入</div>
             </div>`;
         document.body.appendChild(overlay);
         this.dialogEl = overlay;
@@ -543,7 +567,7 @@ class LoraTriggerManager {
             isNode ? 'flex' : 'none';
         this.dialogEl.querySelector('.ltd-footer').textContent = isNode
             ? '开关与权重即时写回所选提示词节点末尾的触发词块；权重 ≠1 时以 (词:权重) 语法写入'
-            : '开关与权重即时写回目标框末尾的触发词块；权重 ≠1 时以 (词:权重) 语法写入';
+            : '开关与权重即时写回目标框末尾的触发词块（专用框为生图时注入）；权重 ≠1 时以 (词:权重) 语法写入';
         if (isNode) {
             this._renderNodeTarget();
         } else {
@@ -621,6 +645,8 @@ class LoraTriggerManager {
         if (wordCount > 0) {
             if (this._mode === 'node') {
                 statusEl.textContent = `本节点：${entries.length} 只 / ${wordCount} 词`;
+            } else if (this.state.target === 3) {
+                statusEl.textContent = `专用框（生图并入正向框1）：${entries.length} 只 / ${wordCount} 词`;
             } else {
                 const targetName = this.state.target === 2 ? '正向框2' : '正向框1';
                 statusEl.textContent = `已写入${targetName}：${entries.length} 只 / ${wordCount} 词`;

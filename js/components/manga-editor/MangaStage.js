@@ -113,9 +113,6 @@ Object.assign(window.MangaEditor.prototype, {
         const { scale, ox, oy } = this._view;
         const X = (v) => ox + v * scale, Y = (v) => oy + v * scale;
 
-        // 背景参考图（MangaBackground 混入）：铺满画幅半透明，画在元素框下方
-        this._drawBackground(ctx, X, Y, scale);
-
         // 画幅底与边框
         ctx.fillStyle = 'rgba(255,255,255,0.03)';
         ctx.fillRect(X(0), Y(0), d.width * scale, d.height * scale);
@@ -134,6 +131,38 @@ Object.assign(window.MangaEditor.prototype, {
 
         // 图层栈（笔迹层/图片层，MangaLayers 混入）：画幅底之上、元素框之下
         this._drawPageLayers(ctx, X, Y, scale, d);
+
+        // 钢笔落点会话预览（2026-11-11）：已落顶点折线 + 橡皮筋末段（虚线）
+        // + 起点圆圈（≥3 点时洋红高亮=可闭合提示，与磁吸线同色系）。
+        // 挂 _renderStage 而非 _drawPageLayers：舞台专属编辑态，缩略图/
+        // 导出零泄漏（移除遮罩钩子同理由）
+        if (this._pen && this._pen.pts.length) {
+            const pts = this._pen.pts;
+            ctx.save();
+            ctx.strokeStyle = '#4d9fff';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(X(pts[0][0]), Y(pts[0][1]));
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(X(pts[i][0]), Y(pts[i][1]));
+            if (this._pen.cursor) ctx.lineTo(X(this._pen.cursor[0]), Y(this._pen.cursor[1]));
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#4d9fff';
+            for (const pt of pts) {
+                ctx.beginPath();
+                ctx.arc(X(pt[0]), Y(pt[1]), 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (pts.length >= 3) {
+                ctx.strokeStyle = '#ff4fd8';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(X(pts[0][0]), Y(pts[0][1]), 6, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
 
         // 移除工具遮罩预览（MangaRemoveTool，ADR 076）：该层会话中把遮罩
         // 画布（图片分辨率红涂）按 bbox 半透明罩回——挂在 _renderStage 而
@@ -166,17 +195,21 @@ Object.assign(window.MangaEditor.prototype, {
             ctx.stroke();
         }
 
-        // 元素框（按列表顺序绘制，数组末位画在最上层；眼睛隐藏的框跳过）
+        // 元素框（按列表顺序绘制，数组末位画在最上层；眼睛隐藏的框跳过）。
+        // 描边态三态（2026-11-12）：主选中实线粗描+锚点，多选集合（Shift 点选，
+        // 逐格生成范围）虚线细描无锚点，未选素描
         d.items.forEach((item, i) => {
             if (this._hiddenCids.has(item.cid)) return;
-            this._drawBox(ctx, item, i, X, Y, scale, i === this.selected);
+            const sel = i === this.selected ? 'primary'
+                : (this._multiSelected && this._multiSelected.has(item.cid) ? 'multi' : '');
+            this._drawBox(ctx, item, i, X, Y, scale, sel);
         });
 
-        // 选中框置顶重绘（跳过填充防半透明叠深）：被上层框盖住时，
-        // 选中描边/徽标/锚点仍可见可抓——遮挡编辑的前提
+        // 选中框置顶重绘：被上层框盖住时，选中描边/徽标/锚点仍可见可抓
+        // ——遮挡编辑的前提
         if (this.selected >= 0 && this.selected < d.items.length &&
             !this._hiddenCids.has(d.items[this.selected].cid)) {
-            this._drawBox(ctx, d.items[this.selected], this.selected, X, Y, scale, true, true);
+            this._drawBox(ctx, d.items[this.selected], this.selected, X, Y, scale, 'primary');
         }
 
         // 选中图片层覆盖（虚线框 + 八向锚点，MangaLayers 混入）
@@ -226,14 +259,17 @@ Object.assign(window.MangaEditor.prototype, {
     /** 圈可见性谓词：画笔/橡皮工具 + 指针在舞台内（顶栏/面板上不画）——
      *  灯箱 _brushCursorTool 同语义 */
     _ringVisible() {
-        return (this.activeTool === 'brush' || this.activeTool === 'eraser' || this.activeTool === 'remove') &&
+        return (this.activeTool === 'brush' || this.activeTool === 'eraser' ||
+                this.activeTool === 'remove' || this.activeTool === 'picker') &&
             this._cursorInStage === true &&
             !!this._cursorPos && !!this._view;
     },
 
     /** 光标圈直径 = 笔宽 × 舞台缩放（与笔迹屏幕渲染宽度 1:1，所见即所得）；
-     *  移除工具取会话遮罩笔宽 × SIZE_SCALE（灯箱同款视觉倍率，ADR 076） */
+     *  移除工具取会话遮罩笔宽 × SIZE_SCALE（灯箱同款视觉倍率，ADR 076）；
+     *  吸管定径小圈（采样一个像素，与笔宽无关） */
     _cursorRingD() {
+        if (this.activeTool === 'picker') return 12;
         const w = this.activeTool === 'remove' && this._remove
             ? this._remove.width * window.MangaRemoveTool.SIZE_SCALE : this._brushWidth;
         return Math.max(4, Math.round(w * this._view.scale));
@@ -288,19 +324,27 @@ Object.assign(window.MangaEditor.prototype, {
         this._redrawCursorRing();
     },
 
-    _drawBox(ctx, item, i, X, Y, scale, isSelected, overlayOnly) {
+    /**
+     * 元素框绘制。selState 三态（2026-11-12 自 boolean 扩展）：
+     * 'primary' 主选中（实线粗描+锚点+拖动尺寸标签）、'multi' 多选集合
+     * （虚线细描无锚点——只标逐格生成范围）、'' 未选素描；兼容旧调用
+     * 传 boolean（truthy 按主选中处理）
+     */
+    _drawBox(ctx, item, i, X, Y, scale, selState) {
+        const isSelected = selState === 'primary' || selState === true;
+        const isMulti = selState === 'multi';
         const [x1, y1, x2, y2] = item.bbox;
         const id = Number.isInteger(item.cid) ? item.cid : i;   // 旧数据未回填时退回下标
         const color = this._colorFor(id);
         const px = X(x1), py = Y(y1), pw = (x2 - x1) * scale, ph = (y2 - y1) * scale;
 
-        if (!overlayOnly) {           // 置顶重绘只补描边与控件，不再刷填充
-            ctx.fillStyle = this._hexA(color, 0.13);
-            ctx.fillRect(px, py, pw, ph);
-        }
+        // 只描轮廓不刷填充（2026-11-12 用户拍板）：半透明色底会罩住框下的
+        // 页面图层，编辑期看图发闷
         ctx.strokeStyle = color;
-        ctx.lineWidth = isSelected ? 2 : 1.7;
+        ctx.lineWidth = isSelected ? 2 : (isMulti ? 1.7 : 1.4);
+        ctx.setLineDash(isMulti ? [5, 4] : []);
         ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+        ctx.setLineDash([]);
 
         // 编号徽标（左上角圆点）
         ctx.beginPath();
@@ -375,11 +419,6 @@ Object.assign(window.MangaEditor.prototype, {
             { id: 'se', x: X(x2), y: Y(y2) }, { id: 's', x: X(cx), y: Y(y2) },
             { id: 'sw', x: X(x1), y: Y(y2) }, { id: 'w', x: X(x1), y: Y(cy) }
         ];
-    },
-
-    _hexA(hex, a) {
-        const n = parseInt(hex.slice(1), 16);
-        return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
     },
 
     // ==================== 舞台指针交互 ====================

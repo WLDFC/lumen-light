@@ -119,7 +119,10 @@ class ImagePipeline {
      */
     collectPrompt(nodeId) {
         return PromptMerge.join(
-            this.collectUpstreamPromptNodes(nodeId).map(n => (n.text || ''))
+            // 被忽略（bypassed）的节点遍历照穿但贡献剔除——文本不进合并
+            this.collectUpstreamPromptNodes(nodeId)
+                .filter(n => !n.bypassed)
+                .map(n => (n.text || ''))
         );
     }
 
@@ -133,6 +136,7 @@ class ImagePipeline {
         const loras = [];
         for (const node of this.collectUpstreamPromptNodes(nodeId)) {
             if (!NodeTypes.isLoraNode(node.source)) continue;
+            if (node.bypassed) continue;   // 被忽略的 LoRA 节点：链照穿，堆栈不收
             if (typeof node.getEnabledLoras !== 'function') continue;
             loras.push(...node.getEnabledLoras());
         }
@@ -183,7 +187,8 @@ class ImagePipeline {
         }
         while (queue.length) {
             const img = queue.shift();
-            collected.push(img);
+            // 被忽略的图片：本体不进参考图，但串联链继续向上游照穿遍历
+            if (!img.bypassed) collected.push(img);
             // 图片串联：连入当前图片的上游图片同样作为参考图
             for (const c of this.connections) {
                 if (c.toId !== img.id || seen.has(c.fromId)) continue;
@@ -221,6 +226,7 @@ class ImagePipeline {
             if (!upstreamIds.has(c.toId)) continue;
             const from = this.findById(c.fromId);
             if (!from || !NodeTypes.isVideo(from.source) || seen.has(from.id)) continue;
+            if (from.bypassed) continue;   // 被忽略的视频：不收（视频不做中间节点，无需照穿）
             if (!from.videoUrl) continue;
             seen.add(from.id);
             videos.push(from.videoUrl);

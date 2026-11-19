@@ -11,7 +11,7 @@
  *       连点状态）、打断回滚 _cancelDrag、双击（复位缩放/聚焦描述框）。
  *       工具专属手势实现仍在各自混入（MangaText._textStart、
  *       MangaTools._brushStart、MangaShape._shapeStart），此处只路由；
- *       图层磁吸 _snapLayerMove/_snapLayerEdges 在 MangaLayers。
+ *       图层磁吸 _snapLayerMove/_snapLayerResize 在 MangaLayers。
  * 契约：原型混入（partial-class，ADR 026）——须后于主类加载；坐标换算
  *       _localPoint/_toDraft 与视口 _view 在 MangaStage（渲染时合成）。
  * ==========================================================================
@@ -100,6 +100,17 @@ Object.assign(window.MangaEditor.prototype, {
         if (ae && ae !== document.body && this.dialog?.contains(ae) &&
             (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) ae.blur();
         const { px, py } = this._localPoint(e);
+        // 吸管：点按取色即返回（无拖拽手势，一次点击一取，归 MangaTools）
+        if (this.activeTool === 'picker') {
+            this._pickColorAt(px, py);
+            return;
+        }
+        // 钢笔：点击落顶点（近起点闭合判定在 MangaShape；跨点击周期的
+        // 会话在 this._pen，不走 _drag 通道）
+        if (this.activeTool === 'pen') {
+            this._penStart(px, py);
+            return;
+        }
         // 文字工具：命中文字层重编辑/空白新建就地输入（无拖拽手势，归
         // MangaText 混入）；编辑中点编辑框外=提交（两段式，灯箱同款）
         if (this.activeTool === 'text') {
@@ -144,11 +155,13 @@ Object.assign(window.MangaEditor.prototype, {
             this._drag = {
                 mode: isLayer ? 'layer-resize' : 'resize',
                 layerId: isLayer ? this._selLayerId : null,
-                anchor, histSnap: this._histSnapshot(), orig,
+                anchor, moved: false, histSnap: this._histSnapshot(), orig,
                 origGeom: layer && layer.text
                     ? { x: layer.text.x, y: layer.text.y, scale: layer.text.scale }
                     : layer && layer.shape
-                        ? { x: layer.x, y: layer.y, w: layer.shape.w, h: layer.shape.h } : null
+                        ? { x: layer.x, y: layer.y, w: layer.shape.w, h: layer.shape.h,
+                            pts: Array.isArray(layer.shape.points)
+                                ? layer.shape.points.map((p) => p.slice()) : null } : null
             };
         } else {
             // 已选层优先（与元素「选中优先」同构，元素/层选中互斥故二选一）：
@@ -170,10 +183,13 @@ Object.assign(window.MangaEditor.prototype, {
                 };
             } else {
                 const stack = this._stackAt(px, py);
+                const shiftPick = !!(e && e.shiftKey);   // Shift+点=多选切换（逐格生成范围；拖拽中的 Shift 画正方不冲突——不同阶段）
                 let target = -1;
                 if (this._isClickBurst(px, py, stack)) {
                     // 同位连点（元素专属）：不拖拽，纯选择逐层下探（选中优先让位给穿透）
-                    this._select(this._cycleCandidate(stack));
+                    const cand = this._cycleCandidate(stack);
+                    if (shiftPick) this._toggleMultiSelect(cand);
+                    else this._selectSingle(cand);
                     this._clickBurst = { t: Date.now(), px, py };
                 } else if (stack.includes(this.selected)) {
                     target = this.selected;   // 选中优先：点中已选框直接拖它（哪怕被上层盖住）
@@ -181,7 +197,8 @@ Object.assign(window.MangaEditor.prototype, {
                     target = stack[0];        // 常规：选顶层并拖动（元素优先于图片层）
                 }
                 if (target >= 0) {
-                    this._select(target);
+                    if (shiftPick) this._toggleMultiSelect(target);
+                    else this._selectSingle(target);
                     const p = this._toDraft(px, py);
                     this._drag = { mode: 'move', orig: this.draft.items[target].bbox.slice(), start: p, moved: false, histSnap: this._histSnapshot() };
                 } else {
@@ -231,6 +248,12 @@ Object.assign(window.MangaEditor.prototype, {
             return;
         }
 
+        // 钢笔落点会话中：橡皮筋预览终点实时跟随（跨点击周期，不走拖拽）
+        if (this.activeTool === 'pen' && this._pen) {
+            this._penMove(px, py);
+            return;
+        }
+
         // 画笔运笔中：只喂点不碰选择态
         if (this._stroke) {
             this._brushMove(px, py);
@@ -246,8 +269,11 @@ Object.assign(window.MangaEditor.prototype, {
         }
 
         if (!this._drag) {
-            // 画笔/橡皮悬停：系统光标已隐藏（cursor:none），圈即光标，无命中反馈
-            if (this.activeTool === 'brush' || this.activeTool === 'eraser' || this.activeTool === 'remove') return;
+            // 画笔/橡皮/吸管/钢笔悬停：系统光标已按工具设定（none/crosshair），
+            // 悬停不改（钢笔点中形状也不出 resize 光标——落点模式无命中语义）
+            if (this.activeTool === 'brush' || this.activeTool === 'eraser' ||
+                this.activeTool === 'remove' || this.activeTool === 'picker' ||
+                this.activeTool === 'pen') return;
             // 文字工具：I 形光标由 _setTool/_syncBrushCursor 设定，悬停不改
             if (this.activeTool === 'text') return;
             const anchor = this._hitAnchor(px, py);
@@ -342,19 +368,42 @@ Object.assign(window.MangaEditor.prototype, {
                 this._guides = snapped.guides;
             }
         } else if (this._drag.mode === 'layer-resize') {
-            // 图片层锚点缩放：活动边钳画幅内 + 磁吸画幅目标
+            // 图片层锚点缩放：等比（锁纵横比，2026-11-11 用户拍板——原四边
+            // 独立拉伸会把图片拉变形）。语义与下方文字层分支同构（灯箱图片
+            // 层同款恒等比）：四角取两轴拉伸比较大者（跟手）、四边取被拖轴
+            // 拉伸比，统一乘原 bbox 宽高，对侧角/边锚定不动（拖 w=右缘固定、
+            // n=下缘固定，单轴边拖时未拖轴贴原上/左缘随动）；不钳画幅不出界
+            // （渲染按画幅裁剪，与文字层及出界移动 ADR 070 同口径）
             const layer = this._layerById(this._drag.layerId);
+            if (layer) this._drag.moved = true;   // 拖动中即真实缩放（收尾入账依据，曾漏挂致缩放永不入账）
             if (layer && layer.image) {
                 const { orig, anchor } = this._drag;
-                const box = orig.slice();
-                const edgesX = [], edgesY = [];
-                if (anchor.includes('w')) { box[0] = Math.max(0, Math.min(d.width, p.x)); edgesX.push(0); }
-                if (anchor.includes('e')) { box[2] = Math.max(0, Math.min(d.width, p.x)); edgesX.push(2); }
-                if (anchor.includes('n')) { box[1] = Math.max(0, Math.min(d.height, p.y)); edgesY.push(1); }
-                if (anchor.includes('s')) { box[3] = Math.max(0, Math.min(d.height, p.y)); edgesY.push(3); }
-                const snapped = this._snapLayerEdges(box, edgesX, edgesY);
-                layer.image.bbox = snapped.box;
+                const ow = Math.max(1, orig[2] - orig[0]);
+                const oh = Math.max(1, orig[3] - orig[1]);
+                const hasX = anchor.includes('w') || anchor.includes('e');
+                const hasY = anchor.includes('n') || anchor.includes('s');
+                let factor = 1;
+                if (hasX && hasY) {
+                    const rx = anchor.includes('e') ? (p.x - orig[0]) / ow : (orig[2] - p.x) / ow;
+                    const ry = anchor.includes('s') ? (p.y - orig[1]) / oh : (orig[3] - p.y) / oh;
+                    factor = Math.max(rx, ry);   // 等比锁纵横：主轴（较大拉伸）带动
+                } else if (hasX) {
+                    factor = anchor.includes('e') ? (p.x - orig[0]) / ow : (orig[2] - p.x) / ow;
+                } else if (hasY) {
+                    factor = anchor.includes('s') ? (p.y - orig[1]) / oh : (orig[3] - p.y) / oh;
+                }
+                // 最小边下限（灯箱 minImageSize 同款）：缩到太小抓不回锚点
+                const minEdge = (window.LumenLight?.config?.minImageSize) || 24;
+                factor = Math.max(factor, minEdge / Math.min(ow, oh));
+                // 磁吸：移动中的边/中心换算成倍率吸附画幅边/中心（灯箱
+                // _snapResize 同款——等比下两轴共享倍率，倍率级吸附才自洽）
+                const snapped = this._snapLayerResize(orig, anchor, factor);
+                factor = snapped.factor;
                 this._guides = snapped.guides;
+                const nw = ow * factor, nh = oh * factor;
+                const left = anchor.includes('w') ? orig[2] - nw : orig[0];
+                const top = anchor.includes('n') ? orig[3] - nh : orig[1];
+                layer.image.bbox = [left, top, left + nw, top + nh];
             } else if (layer && layer.text) {
                 // 文字层锚点缩放：等比（锁纵横比）——按被拖边算拉伸比取两轴
                 // 较大者写 text.scale，对侧边锚定不动（t.x/t.y 反向补偿）。
@@ -386,7 +435,9 @@ Object.assign(window.MangaEditor.prototype, {
                 // 形状层锚点拉伸（非等比，图片层同款自由度，用户拍板 ADR 069）：
                 // 直接改 x/y/w/h——向量每次重渲染永远锐利，边宽/圆角保持设定值
                 // 不随缩放（灯箱的 tscale 烘焙是位图管线专属，漫画不需要）；
-                // 磁吸不做（对侧锚定+自由拉伸下吸附语义含糊，文字层同理由）
+                // 磁吸不做（对侧锚定+自由拉伸下吸附语义含糊，文字层同理由）。
+                // 多边形（钢笔）：点集是层内局部坐标，随 w/h 等比缩放——
+                // 每步都从拖拽起点的原始点集换算（增量缩放不累积舍入误差）
                 const { anchor, origGeom } = this._drag;
                 const cx = Math.max(0, Math.min(d.width, p.x));
                 const cy = Math.max(0, Math.min(d.height, p.y));
@@ -400,6 +451,10 @@ Object.assign(window.MangaEditor.prototype, {
                 layer.y = Math.min(top, bottom);
                 layer.shape.w = Math.max(2, Math.round(Math.abs(right - left)));
                 layer.shape.h = Math.max(2, Math.round(Math.abs(bottom - top)));
+                if (layer.shape.type === 'poly' && Array.isArray(origGeom.pts)) {
+                    layer.shape.points = ShapeLayout.polyScalePoints(
+                        origGeom.pts, origGeom.w, origGeom.h, layer.shape.w, layer.shape.h);
+                }
             }
         }
         this._renderStage();

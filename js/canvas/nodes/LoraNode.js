@@ -39,6 +39,7 @@ class LoraNode extends BaseCanvasNode {
     constructor(canvas, x, y, options = {}) {
         super(canvas, x, y);
         this.source = NodeTypes.SOURCE.LORA_NODE;
+        this.bypassed = false;   // 被忽略（绕过）状态：链照穿、堆栈不进收集
 
         this.width = options.width || LoraNode.DEFAULT_WIDTH;
         this.height = options.height || LoraNode.DEFAULT_HEIGHT;
@@ -143,6 +144,12 @@ class LoraNode extends BaseCanvasNode {
         };
         bindPort(this.portInEl, 'in');
         bindPort(this.portOutEl, 'out');
+
+        // 右键在节点上：转交画布右键菜单——本节点可忽略（bypass），
+        // 弹忽略/恢复菜单（节点 DOM 挂在 body 上，事件不会自己冒到画布层）
+        this.el.addEventListener('contextmenu', (e) => {
+            this.canvas.contextMenu.handleElementContext(e, this);
+        });
 
         // 条目事件委托：启用开关 / 文件切换 / 强度修改
         // （文件选空 = 此条不生效；启用开关取消勾选 = 提交时跳过）
@@ -444,6 +451,18 @@ class LoraNode extends BaseCanvasNode {
     // ==================== 存档 ====================
 
     /**
+     * 切换「忽略节点」状态（ComfyUI bypass 语义）：连线不动、遍历照穿，
+     * 但本节点的 LoRA 堆栈在 ImagePipeline.collectLoras 收集时被剔除，
+     * 文本透传语义不受影响（LoRA 节点本就无文本贡献）。
+     * 视觉与工作流编辑器同款：整体半透明 + 标题栏紫色。
+     * @param {boolean} on - true=忽略，false=恢复
+     */
+    setBypassed(on) {
+        this.bypassed = !!on;
+        if (this.el) this.el.classList.toggle('bypassed', this.bypassed);
+    }
+
+    /**
      * 序列化为存档数据（条目全量保存）
      */
     toJSON() {
@@ -455,6 +474,7 @@ class LoraNode extends BaseCanvasNode {
             width: this.width,
             height: this.height,
             entries: this.entries,
+            ...(this.bypassed ? { bypassed: true } : {}),
             ...(this.title ? { title: this.title } : {})
         };
     }

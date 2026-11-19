@@ -114,7 +114,9 @@ button.lumen-dd-trigger:hover {
 
 .lumen-dropdown-menu {
     position: fixed;
-    z-index: 1200;                       /* 压过聊天面板与节点(997)/顶栏(998) */
+    z-index: 1350;                       /* 压过全部弹窗档：聊天面板/节点(997)/顶栏(998)、
+                                            收藏与 LoRA 管理器窗口(1200)、触发词弹窗(1330)
+                                            ——菜单挂 body，必须浮在所有宿主弹窗之上 */
     min-height: 36px;
     max-height: 320px;                   /* 长列表内部滚动（如多厂商模型清单） */
     overflow-y: auto;

@@ -3,11 +3,12 @@
  * 坐标编辑器（CoordinateEditor）——主类
  * ==========================================================================
  * 作用：顶栏「坐标编辑」按钮 + 弹窗（复用收藏页 recipe-dialog 骨架，
- *       与 LoRA 管理器/提示词收藏同款窗口）。宽屏（≥1500px）为并排
- *       形态：右缘留白（--coord-gap，默认 540px，拖拽右缘可调并存
- *       localStorage）露出画布右侧的 Comfy/LLM 面板同屏操作，ESC 仅在
- *       焦点位于弹窗内时关窗；窄屏媒体查询回落全屏模态。为支持坐标
- *       编辑的新模型（MOSS-Image / Flux3 等）可视化制作布局提示词：
+ *       与 LoRA 管理器/提示词收藏同款窗口）。默认全屏模态；标题栏右上
+ *       「布局」钮（2026-11-08 起 LumenLayoutPanel 预制件，原「宽屏恒
+ *       并排」策略退役与三管理器对齐）切并排形态：右缘留白（--coord-gap，
+ *       拖拽右缘可调并存 localStorage）露出画布右侧的 Comfy/LLM 面板
+ *       同屏操作，ESC 仅在焦点位于弹窗内时关窗；窄屏媒体查询回落全屏。
+ *       为支持坐标编辑的新模型（MOSS-Image / Flux3 等）可视化制作布局提示词：
  *
  *   - 中央舞台：bbox 拖拽创建 / 移动 / 八向锚点缩放 / 磁吸参考线
  *     （画幅边与中心，StudioMoveTool 同款粉色粉线）/ Shift 画正方 /
@@ -160,40 +161,17 @@ class CoordinateEditor {
 
     // ==================== 并排窗口宽度（右缘留白给面板） ====================
 
-    /** 留白钳制：至少放下面板（360px）、至多保住编辑器三栏最小宽（900px） */
+    /**
+     * 留白钳制：至少放下面板（360px）、至多保住编辑器三栏最小宽（900px）。
+     * 开关/记忆/置灰在 LumenLayoutPanel 预制件（CoordDom._buildDom 实例化，
+     * 变量 --coord-gap）；留白取值=拖拽记忆优先、无记忆面板实测（预制件
+     * getGap 钩子）；本方法只服务右缘手柄拖拽与记忆值钳制
+     */
     _clampGap(px, innerWidth) {
         const min = 360;
         const max = Math.max(min, innerWidth - 900);
         const n = typeof px === 'number' && Number.isFinite(px) ? px : 540;
         return Math.round(Math.max(min, Math.min(max, n)));
-    }
-
-    /**
-     * 默认留白：右侧面板可见时按其实测左缘对齐 +7px 呼吸（面板宽可拖
-     * 480-700px，写死数字永远差一点）；面板关闭/不可测时回落 552px
-     * （面板默认宽 540 + 右留边 5 + 7）
-     */
-    _defaultGap() {
-        if (typeof document !== 'undefined') {
-            const panel = document.getElementById('promptPanel');
-            if (panel) {
-                const r = panel.getBoundingClientRect();
-                if (typeof window.innerWidth === 'number' &&
-                    r.width > 0 && r.left >= 0 && r.left < window.innerWidth) {
-                    return this._clampGap(window.innerWidth - r.left + 7, window.innerWidth);
-                }
-            }
-        }
-        return this._clampGap(552, window.innerWidth);
-    }
-
-    /** 启动时应用留白宽度：用户拖拽过的值（localStorage）优先，否则按面板实测 */
-    _applyStoredGap() {
-        const raw = Number(localStorage.getItem('lumenLight.coordDialogGap'));
-        const gap = Number.isFinite(raw) && raw > 0
-            ? this._clampGap(raw, window.innerWidth)
-            : this._defaultGap();
-        this.dialog.style.setProperty('--coord-gap', gap + 'px');
     }
 
     /** 右缘拖拽：更新 --coord-gap（窄屏媒体查询强制全屏时拖拽自然无效）、

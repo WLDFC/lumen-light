@@ -238,6 +238,22 @@ class LumenSocket {
             }
         }
 
+        // Comfy 执行期事件（2026-11-08，后端 comfyWsRelay 转发）：按
+        // promptId 定向到占位图（进度条/实时预览/失败态），同时派发 DOM
+        // 事件供面板状态行等消费。无 promptId 或无匹配句柄时静默忽略
+        if (msg.type === 'comfy-progress' && msg.promptId) {
+            window.placeholderManager?.setProgress(
+                msg.promptId, msg.pct,
+                msg.value != null && msg.max != null ? `${msg.value}/${msg.max}` : '');
+            window.dispatchEvent(new CustomEvent('lumen-comfy-progress', { detail: msg }));
+        }
+        if (msg.type === 'comfy-preview' && msg.promptId && msg.image) {
+            window.placeholderManager?.setPreview(msg.promptId, msg.image);
+        }
+        if (msg.type === 'generation-failed' && msg.promptId) {
+            window.placeholderManager?.failGeneration(msg.promptId, msg.message);
+        }
+
         // 处理画布桥接命令（pi 等外部 agent 经 /api/canvas-bridge 下发）
         if (msg.type === 'bridge-command' && msg.id) {
             this.handleBridgeCommand(msg);

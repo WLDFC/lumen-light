@@ -40,6 +40,15 @@ class PlaceholderManager {
         this.image1 = null;     // 动画帧 1
         this.image2 = null;     // 动画帧 2
         this.loaded = false;    // 动画帧是否加载完成
+        // promptId → 句柄注册表（2026-11-08）：Comfy 中继的进度/预览/失败
+        // 事件按 promptId 定向，提交方（ComfyGenNode/面板）在拿到 promptId
+        // 后 bindPromptId 建立映射
+        this.byPromptId = new Map();
+        // 看门狗（2026-11-08）：15 分钟无任何进度/预览活动 → 「疑似卡住」
+        // 态（只上报不取消，与 pi 卡死「只上报不自动杀」同口径——长任务
+        // 不误伤，出图后正常替换）。活动 = comfy-progress / comfy-preview
+        this.STUCK_MS = 15 * 60 * 1000;
+        this._watchdog = setInterval(() => this._scanStuck(), 15000);
         this._loadFrames();
     }
 
@@ -148,6 +157,10 @@ class PlaceholderManager {
             height,
             selected: false,
             source: NodeTypes.SOURCE.GENERATION_PLACEHOLDER,
+            // 进度/预览/失败叠加态（CanvasRenderer.drawPlaceholderOverlay
+            // 消费）：state running|failed|stuck，pct 0~1|null，stepText
+            // 采样步文案，message 失败原因
+            placeholderOverlay: { state: 'running', pct: null, stepText: '', message: '' },
             created: Date.now()
         };
 
@@ -162,9 +175,129 @@ class PlaceholderManager {
 
         this.canvas.draw();
 
-        const handle = { id: imageObj.id, owner, imageObj, intervalId, genInfo: opts.genInfo || null };
+        const handle = {
+            id: imageObj.id, owner, imageObj, intervalId,
+            genInfo: opts.genInfo || null,
+            promptIds: [],          // 绑定的提交 promptId（清理用）
+            lastActive: Date.now()  // 看门狗活动时间戳（进度/预览刷新）
+        };
         this.handles.push(handle);
         return handle;
+    }
+
+    // ==================== Comfy 进度/预览/失败（2026-11-08） ====================
+
+    /**
+     * 绑定句柄与提交 promptId：提交方拿到 /run 响应的 promptId 后调用，
+     * 此后中继事件按 promptId 定向到该句柄。一柄可绑多 id（循环多张提交）
+     */
+    bindPromptId(handle, promptId) {
+        if (!handle || !promptId || !this.handles.includes(handle)) return;
+        handle.promptIds.push(promptId);
+        if (!this.byPromptId.has(promptId)) this.byPromptId.set(promptId, []);
+        this.byPromptId.get(promptId).push(handle);
+    }
+
+    /** 按 promptId 找「最旧的未终态」句柄（多张并发先进先出） */
+    _handleForPrompt(promptId) {
+        const list = this.byPromptId.get(promptId);
+        if (!list) return null;
+        for (const h of list) {
+            if (this.handles.includes(h) &&
+                h.imageObj.placeholderOverlay.state === 'running') {
+                return h;
+            }
+        }
+        return null;
+    }
+
+    /** 采样进度（comfy-progress）：更新进度条叠加态并刷新看门狗活动 */
+    setProgress(promptId, pct, stepText) {
+        const handle = this._handleForPrompt(promptId);
+        if (!handle) return;
+        handle.lastActive = Date.now();
+        const o = handle.imageObj.placeholderOverlay;
+        if (o.state !== 'running') return;
+        if (pct != null && Number.isFinite(pct)) o.pct = Math.max(0, Math.min(1, pct));
+        if (stepText) o.stepText = stepText;
+        // 进度=有进展：通知归属节点重置其无进展看门狗（否则长采样——
+        // 单张超过节点 WATCHDOG_TIMEOUT 且无新图回流——会被节点误杀）
+        if (handle.owner && typeof handle.owner.onGenerationActivity === 'function') {
+            try { handle.owner.onGenerationActivity(); } catch { /* 节点自兜 */ }
+        }
+        this.canvas.draw();
+    }
+
+    /**
+     * KSampler 式实时预览帧（comfy-preview）：停帧动画换成预览图
+     * （预览图持续覆盖，直至真实结果 replace 或失败）。加载失败静默
+     * （下一帧预览会再来，动画照跑不受影响）
+     */
+    setPreview(promptId, dataUrl) {
+        const handle = this._handleForPrompt(promptId);
+        if (!handle) return;
+        handle.lastActive = Date.now();
+        const o = handle.imageObj.placeholderOverlay;
+        if (o.state !== 'running') return;
+        const img = new Image();
+        img.onload = () => {
+            if (!this.handles.includes(handle) ||
+                handle.imageObj.placeholderOverlay.state !== 'running') return;
+            if (handle.intervalId) {
+                clearInterval(handle.intervalId);   // 停帧动画，预览图顶上
+                handle.intervalId = null;
+            }
+            handle.imageObj.img = img;
+            this.canvas.draw();
+        };
+        img.src = dataUrl;
+    }
+
+    /**
+     * 生成失败终态（generation-failed，后端 WS 中继 execution_error /
+     * history 看门狗广播）：占位图进失败态（红框+原因，渲染见
+     * CanvasRenderer），停帧动画，通知归属节点收尾（任务中心/状态复位）。
+     * 幂等——重复广播/看门狗与中继双源只生效一次
+     */
+    failGeneration(promptId, message) {
+        const handle = this._handleForPrompt(promptId);
+        if (!handle) return;
+        const o = handle.imageObj.placeholderOverlay;
+        if (o.state !== 'running') return;   // 幂等
+        o.state = 'failed';
+        o.message = message || '生成失败';
+        if (handle.intervalId) {
+            clearInterval(handle.intervalId);
+            handle.intervalId = null;
+        }
+        // 归属节点收尾（ComfyGenNode：期望数减一/全部落定按 failed 结算；
+        // RunningHub 同名方法为 message 单参签名，对齐之）
+        if (handle.owner && typeof handle.owner.onGenerationFailed === 'function') {
+            try { handle.owner.onGenerationFailed(o.message); } catch { /* 节点自兜 */ }
+        } else {
+            // 无归属节点收尾（面板链路 owner='panel'）：失败占位驻留 8s
+            // 展示原因后自动移除（面板状态行已有失败提示，不留僵尸卡）
+            setTimeout(() => {
+                if (this.handles.includes(handle)) this.remove(handle);
+            }, 8000);
+        }
+        this.canvas.draw();
+    }
+
+    /** 看门狗扫描：running 态且超时无活动 → stuck（amber 提示，不取消） */
+    _scanStuck() {
+        const now = Date.now();
+        let changed = false;
+        for (const handle of this.handles) {
+            const o = handle.imageObj.placeholderOverlay;
+            if (o && o.state === 'running' &&
+                now - (handle.lastActive || handle.imageObj.created) > this.STUCK_MS) {
+                o.state = 'stuck';
+                o.message = `长时间无响应（超过 ${Math.round(this.STUCK_MS / 60000)} 分钟），疑似卡住`;
+                changed = true;
+            }
+        }
+        if (changed) this.canvas.draw();
     }
 
     /**
@@ -185,6 +318,15 @@ class PlaceholderManager {
         const idx = this.handles.indexOf(handle);
         if (idx > -1) this.handles.splice(idx, 1);
         if (handle.intervalId) clearInterval(handle.intervalId);
+        // promptId 注册表清理（该柄绑定的全部 id，防 Map 泄漏）
+        for (const pid of (handle.promptIds || [])) {
+            const list = this.byPromptId.get(pid);
+            if (list) {
+                const i = list.indexOf(handle);
+                if (i > -1) list.splice(i, 1);
+                if (!list.length) this.byPromptId.delete(pid);
+            }
+        }
         const imgIdx = this.canvas.images.images.indexOf(handle.imageObj);
         if (imgIdx > -1) this.canvas.images.images.splice(imgIdx, 1);
         // 清理可能存在的选中状态
@@ -252,9 +394,15 @@ class PlaceholderManager {
                 // 聚集区提示：区内落图且聚集区不在视口内时弹可点击定位提示
                 if (this.canvas.collectZone) this.canvas.collectZone.notifyLanded(imageObj);
                 // 生成图事件：坐标编辑器「生成图透显」等消费方监听（四类
-                // 生成节点与面板链路的占位图替换都经此收口，一处派发全覆盖）
+                // 生成节点与面板链路的占位图替换都经此收口，一处派发全覆盖）。
+                // promptIds=占位图句柄绑定的提交句柄（2026-11-12 漫画逐格
+                // 生成按它对位回流，超时格的迟来图不冒领后续格）
                 window.dispatchEvent(new CustomEvent('lumenGeneratedImage', {
-                    detail: { src: imageUrl, imageObj }
+                    detail: {
+                        src: imageUrl,
+                        imageObj,
+                        promptIds: (handle.promptIds || []).slice()
+                    }
                 }));
                 this.canvas.draw();
                 resolve(imageObj);

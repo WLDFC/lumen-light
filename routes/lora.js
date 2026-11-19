@@ -7,11 +7,21 @@
  *                    写死的路径同源）
  *   - GET  /preview  按 sidecar 惯例取封面图（<同名>.preview.png/.jpg，
  *                    兜底 <同名>.png/.jpg），无图返回 404 由前端显示占位块
- *   - GET /POST /pins 置顶状态读写（data/lora-meta.json，文件相对路径做 key）
- *   - POST /delete  删除 lora（源文件 + sidecar 预览 + 置顶/触发词/备注记录）
- *   - POST /move    移动 lora 到另一文件夹（文件 + sidecar + meta 记录换 key）
+ *   - GET /POST /pins 置顶状态读写；GET /trigger /note POST 文本读写；
+ *                    GET /civitai/info 单条全量 C 站记录——均存 per-LoRA
+ *                    sidecar JSON（lora 旁 <同名>_lumen.json，信息跟文件走）
+ *   - POST /delete  删除 lora（源文件 + sidecar 预览 + sidecar JSON）
+ *   - POST /move    移动 lora 到另一文件夹（文件 + sidecar 全套跟着走）
  *   - POST /reveal  资源管理器打开所在文件夹并选中
- * 只读 Comfy 目录 + 写 data/ 元数据；删除/移动走显式确认（工作流 JSON 里
+ * 元数据存储（2026-11-12 起中央 lora-meta.json 退役）：置顶/触发词/备注/
+ * Civitai 拉取记录全部写在 lora 旁 <同名>_lumen.json sidecar 里——带
+ * _lumen 标识防与本地其他 LoRA 管理器（ComfyUI-Lora-Manager 等）生成的
+ * <同名>.json 冲突；读写 O(1)（几千个 lora 无中央文件写放大）、单条损坏
+ * 爆炸半径 1；后端内存缓存 + mtime 复验扛 /pins 聚合读。旧版中央 meta 在
+ * 首个触点幂等迁出（lora 已不在的孤儿记录丢弃），原文件改名
+ * lora-meta.json.migrated.bak 留档；更早试运行期的无标识 <同名>.json
+ * sidecar 在首个 /list //pins 按 schema 认领改名为 _lumen（别家格式不动）。
+ * 只读 Comfy 目录 + 写 sidecar；删除/移动走显式确认（工作流 JSON 里
  * 路径写死，删/挪都会静默断链，风险由前端弹窗警示）。
  * ==========================================================================
  */
@@ -28,7 +38,7 @@ const LORA_EXTS = new Set(['.safetensors', '.sft', '.pt', '.ckpt', '.bin']);
 const PREVIEW_CANDIDATES = ['.preview.png', '.preview.jpg', '.preview.jpeg', '.png', '.jpg', '.jpeg'];
 /** 封面 Content-Type */
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
-/** 元数据文件（置顶等用户数据，key = lora 相对路径） */
+/** 旧版中央元数据文件（仅作一次性迁移源，迁移后改名 .migrated.bak 留档） */
 const META_FILE = path.join(__dirname, '..', 'data', 'lora-meta.json');
 /** 应用设置文件（自动检测命中后把 comfy.root 写回这里，与其他功能同源） */
 const SETTINGS_FILE = path.join(__dirname, '..', 'data', 'settings.json');
@@ -41,8 +51,8 @@ const SETTINGS_FILE = path.join(__dirname, '..', 'data', 'settings.json');
  * @param {Function} [options.invalidateRootCache] - 写回 comfy.root 后调用，
  *        清掉 server.js 的 5 秒配置缓存，让随后的 /list 立即读到新值
  * @param {string} [options.comfyApiUrl] - ComfyUI API 地址（判断是否在运行）
- * @param {string} [options.metaFile] - 元数据文件路径（测试注入用，缺省
- *        data/lora-meta.json）
+ * @param {string} [options.metaFile] - 旧版中央 meta 路径（迁移源；测试
+ *        注入用，缺省 data/lora-meta.json）
  * @returns {express.Router}
  */
 function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, metaFile } = {}) {
@@ -61,32 +71,172 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
         return p;
     }
 
-    /** 读元数据（置顶 + 触发词 + 备注；文件缺失/损坏按空处理） */
-    async function readMeta() {
-        try {
-            const j = JSON.parse(await fs.readFile(metaPath, 'utf-8'));
-            return {
-                pinned: Array.isArray(j.pinned) ? j.pinned : [],
-                triggers: (j.triggers && typeof j.triggers === 'object')
-                    ? j.triggers : {},
-                notes: (j.notes && typeof j.notes === 'object')
-                    ? j.notes : {},
-                // Civitai 拉取记录（key = lora 相对路径）：
-                // { modelName, versionName, baseModel, creator, pageUrl,
-                //   sha256, coverFetched, fetchedAt }
-                civitai: (j.civitai && typeof j.civitai === 'object')
-                    ? j.civitai : {}
-            };
-        } catch {
-            return { pinned: [], triggers: {}, notes: {}, civitai: {} };
-        }
+    // ==================== per-LoRA sidecar JSON 存储层 ====================
+    // 每个 lora 的全部状态写在 lora 旁 <同名>_lumen.json（_lumen 标识防与
+    // 本地其他 LoRA 管理器的 <同名>.json 冲突）：
+    // { triggers, note, pinned, civitai: {modelName, versionName, baseModel,
+    //   creator, pageUrl, description, sha256, coverFetched, fetchedAt} }
+    // 读走内存缓存（mtime 复验，外部手改可察觉），写走 tmp+rename 原子落盘。
+
+    /** sidecar JSON 绝对路径（lora 旁 <同名>_lumen.json；lora 不在时无意义） */
+    function sidecarPath(abs) {
+        return path.join(path.dirname(abs), path.basename(abs, path.extname(abs)) + '_lumen.json');
     }
 
-    /** 原子写元数据（两个调用方各持整份结构，覆盖前先读避免互相清字段） */
-    async function writeMeta(meta) {
-        const tmp = metaPath + '.tmp';
-        await fs.writeFile(tmp, JSON.stringify(meta, null, 2), 'utf-8');
-        await fs.rename(tmp, metaPath);
+    /** 旧命名 sidecar（无 _lumen 标识的 <同名>.json，试运行期产物）路径 */
+    function sidecarPathLegacy(abs) {
+        return path.join(path.dirname(abs), path.basename(abs, path.extname(abs)) + '.json');
+    }
+
+    /** sidecar 内存缓存（key = lora 绝对路径）：读聚合与批量任务的主通道，
+     *  mtime 不变直接复用，避免几千个文件的反复 stat+read+parse */
+    const sidecarCache = new Map();
+
+    /** 读单个 lora 的 sidecar（带缓存复验；无文件/损坏 → 空结构，不抛错） */
+    async function readSidecar(abs) {
+        let mtime = 0;
+        try { mtime = (await fs.stat(sidecarPath(abs))).mtimeMs; } catch { /* 无 sidecar */ }
+        const hit = sidecarCache.get(abs);
+        if (hit && hit.mtime === mtime) return hit.data;
+        const data = { triggers: undefined, note: undefined, pinned: undefined, civitai: null };
+        if (mtime) {
+            try {
+                const j = JSON.parse(await fs.readFile(sidecarPath(abs), 'utf-8'));
+                data.triggers = typeof j.triggers === 'string' ? j.triggers : undefined;
+                data.note = typeof j.note === 'string' ? j.note : undefined;
+                data.pinned = typeof j.pinned === 'boolean' ? j.pinned : undefined;
+                data.civitai = (j.civitai && typeof j.civitai === 'object') ? j.civitai : null;
+            } catch (err) {
+                console.warn('[lora] sidecar JSON 损坏，按空处理:', sidecarPath(abs), err.message);
+            }
+        }
+        sidecarCache.set(abs, { data, mtime });
+        return data;
+    }
+
+    /** 原子写单个 lora 的 sidecar 并写穿缓存（patch 与缓存结构同形；
+     *  值置 undefined 即删除该字段，JSON.stringify 丢弃 undefined 键） */
+    async function writeSidecar(abs, data) {
+        const sidecar = sidecarPath(abs);
+        const tmp = sidecar + '.tmp';
+        await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8');
+        await fs.rename(tmp, sidecar);
+        const mtime = (await fs.stat(sidecar)).mtimeMs;
+        sidecarCache.set(abs, { data, mtime });
+    }
+
+    /** 旧版中央 meta 是否已迁出（true 后不再检查；lorasDir 未配置时不置位，
+     *  等 root 就绪的首个触点再迁） */
+    let migrated = false;
+
+    /**
+     * 一次性迁移：旧版 data/lora-meta.json（pinned 数组 + triggers/notes/
+     * civitai 三张以相对路径为 key 的表）逐条并入对应 sidecar。只填空字段
+     * 不覆盖现有值（幂等，重跑无害）；lora 文件已不在的孤儿记录丢弃；
+     * 迁完把中央文件改名 .migrated.bak 留档。所有 sidecar 触点先调它。
+     * @param {string} lorasDir - loras 根目录（root 未配置时跳过不置位）
+     */
+    async function ensureMigrated(lorasDir) {
+        if (migrated || !lorasDir) return;
+        migrated = true;   // 先置位：并发请求不重复迁（合并语义幂等，重入无害）
+        let legacy;
+        try {
+            legacy = JSON.parse(await fs.readFile(metaPath, 'utf-8'));
+        } catch { return; }   // 无旧文件：全新安装，直接 sidecar
+        const pinnedSet = new Set(Array.isArray(legacy.pinned) ? legacy.pinned : []);
+        const rels = new Set(pinnedSet);
+        for (const k of ['triggers', 'notes', 'civitai']) {
+            if (legacy[k] && typeof legacy[k] === 'object') {
+                for (const rel of Object.keys(legacy[k])) rels.add(rel);
+            }
+        }
+        let count = 0;
+        for (const rel of rels) {
+            const abs = safeResolve(lorasDir, rel);
+            if (!abs) continue;
+            try { await fs.access(abs); } catch { continue; }   // lora 已删：孤儿记录丢弃
+            const cur = await readSidecar(abs);
+            let dirty = false;
+            if (cur.triggers === undefined && legacy.triggers && legacy.triggers[rel]) {
+                cur.triggers = legacy.triggers[rel]; dirty = true;
+            }
+            if (cur.note === undefined && legacy.notes && legacy.notes[rel]) {
+                cur.note = legacy.notes[rel]; dirty = true;
+            }
+            if (cur.pinned === undefined && pinnedSet.has(rel)) {
+                cur.pinned = true; dirty = true;
+            }
+            if (!cur.civitai && legacy.civitai && legacy.civitai[rel]) {
+                cur.civitai = legacy.civitai[rel]; dirty = true;
+            }
+            if (dirty) { await writeSidecar(abs, cur); count++; }
+        }
+        try { await fs.rename(metaPath, metaPath + '.migrated.bak'); } catch { /* 已不在则跳过 */ }
+        console.log(`[lora] 旧版 lora-meta.json 已迁出为 per-LoRA sidecar JSON（${count} 条），原文件改名 .migrated.bak`);
+    }
+
+    /** 旧命名 <同名>.json 是否已收编（true 后不再扫——收编完后目录里再出现
+     *  的 <同名>.json 是其他管理器新写的，不归本应用管） */
+    let sidecarRenamed = false;
+
+    /**
+     * 一次性收编：试运行期的旧命名 <同名>.json sidecar 改名为
+     * <同名>_lumen.json（加标识防与其他 LoRA 管理器冲突）。只认本应用
+     * schema（triggers 字符串 / pinned 布尔 / note 字符串 / civitai 对象
+     * 任一命中）——别家管理器格式不同，原样不动不误抢。须先于
+     * ensureMigrated 跑（改名后的空字段才轮得到中央 meta 填充）。
+     * @param {string} lorasDir - loras 根目录
+     * @param {Array<{path: string}>} loras - scanLoras 产物（收编以 lora
+     *        实存为准，孤儿 JSON 不碰）
+     */
+    async function ensureSidecarRenamed(lorasDir, loras) {
+        if (sidecarRenamed) return;
+        sidecarRenamed = true;
+        let count = 0;
+        for (const lora of loras) {
+            const abs = path.join(lorasDir, lora.path);
+            const legacy = sidecarPathLegacy(abs);
+            let hasLegacy = false;
+            try { await fs.access(legacy); hasLegacy = true; } catch { /* 无旧文件 */ }
+            if (!hasLegacy) continue;
+            // 只认本应用 schema（triggers 字符串 / pinned 布尔 / note 字符串 /
+            // civitai 对象任一命中）——别家管理器格式不同，原样不动不误抢
+            let legacyData = null;
+            try {
+                const j = JSON.parse(await fs.readFile(legacy, 'utf-8'));
+                const ours = typeof j.triggers === 'string' || typeof j.pinned === 'boolean' ||
+                    typeof j.note === 'string' || (j.civitai && typeof j.civitai === 'object');
+                if (ours) legacyData = j;
+            } catch { /* 损坏 JSON 不动，避免误收别家文件 */ }
+            if (!legacyData) continue;
+            let newExists = false;
+            try { await fs.access(sidecarPath(abs)); newExists = true; } catch { /* 可直接改名 */ }
+            if (!newExists) {
+                await fs.rename(legacy, sidecarPath(abs));
+                count++;
+                continue;
+            }
+            // 双份并存（试运行期迁移已写过新名）：旧文件按填空并进新文件后
+            // 删除——sidecar 现值优先，旧名只补空字段，绝不覆盖
+            const cur = await readSidecar(abs);
+            let dirty = false;
+            if (cur.triggers === undefined && typeof legacyData.triggers === 'string') {
+                cur.triggers = legacyData.triggers; dirty = true;
+            }
+            if (cur.note === undefined && typeof legacyData.note === 'string') {
+                cur.note = legacyData.note; dirty = true;
+            }
+            if (cur.pinned === undefined && typeof legacyData.pinned === 'boolean') {
+                cur.pinned = legacyData.pinned; dirty = true;
+            }
+            if (!cur.civitai && legacyData.civitai && typeof legacyData.civitai === 'object') {
+                cur.civitai = legacyData.civitai; dirty = true;
+            }
+            if (dirty) await writeSidecar(abs, cur);
+            await fs.unlink(legacy);
+            count++;
+        }
+        if (count) console.log(`[lora] 旧命名 sidecar <同名>.json 已收编为 <同名>_lumen.json（${count} 个）`);
     }
 
     // ==================== 自动检测 ComfyUI 目录 ====================
@@ -242,6 +392,8 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
             }
 
             const { folders, loras } = await scanLoras(lorasDir);
+            await ensureSidecarRenamed(lorasDir, loras);   // 旧命名先收编
+            await ensureMigrated(lorasDir);                // 中央 meta 再并入（填收编后的空字段）
             res.json({
                 status: 'ok',
                 lorasDir,
@@ -352,20 +504,11 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
                     removedPreviews++;
                 } catch { /* 候选不存在属正常 */ }
             }
-            // 清置顶/触发词/备注记录
-            const meta = await readMeta();
-            let dirty = false;
-            if (meta.pinned.includes(rel)) {
-                meta.pinned = meta.pinned.filter((p) => p !== rel);
-                dirty = true;
-            }
-            for (const key of ['triggers', 'notes']) {
-                if (meta[key][rel] !== undefined) {
-                    delete meta[key][rel];
-                    dirty = true;
-                }
-            }
-            if (dirty) await writeMeta(meta);
+            // 清 sidecar JSON（置顶/触发词/备注/Civitai 记录都在里面；
+            // 新旧命名都试——旧命名可能是收编前遗留）
+            try { await fs.unlink(sidecarPath(loraPath)); } catch { /* 本就没有 */ }
+            try { await fs.unlink(sidecarPathLegacy(loraPath)); } catch { /* 本就没有 */ }
+            sidecarCache.delete(loraPath);
             console.log('[lora] 已删除:', rel, `(含 ${removedPreviews} 个预览文件)`);
             res.json({ status: 'ok', removedPreviews });
         } catch (err) {
@@ -375,10 +518,10 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
 
     // ==================== POST /move：移动 lora 到另一文件夹 ====================
     // { paths: [rel...], target: ''（根目录）| '子/目录' }。
-    // 移动 lora 文件 + 全部 sidecar 预览候选 + lora-meta 记录换 key
-    // （置顶/触发词/备注/Civitai 记录跟着文件走）。目标已有同名文件时
-    // 该只跳过不覆盖；移动后工作流 JSON 里写死的旧路径会断链，由前端
-    // 确认弹窗警示（与 /delete 同款风险口径）
+    // 移动 lora 文件 + 全部 sidecar 预览候选 + sidecar JSON（置顶/触发词/
+    // 备注/Civitai 记录跟着文件走）。目标已有同名文件时该只跳过不覆盖；
+    // 移动后工作流 JSON 里写死的旧路径会断链，由前端确认弹窗警示
+    // （与 /delete 同款风险口径）
     router.post('/move', async (req, res) => {
         try {
             const root = getComfyRoot();
@@ -403,6 +546,7 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
             const lorasDir = path.join(root, 'models', 'loras');
             const destDir = safeResolve(lorasDir, targetFolder || '.');
             if (!destDir) return res.status(403).json({ status: 'error', message: '目标目录越界' });
+            await ensureMigrated(lorasDir);   // 旧 meta 先落 sidecar，才能跟着文件走
 
             const moved = [];
             const skipped = [];
@@ -438,27 +582,21 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
                             movedPreviews++;
                         } catch { /* 候选不存在属正常 */ }
                     }
-                    // meta 记录换 key（置顶/触发词/备注/Civitai 记录跟着文件走）
-                    const newRel = targetFolder ? `${targetFolder}/${path.basename(src)}` : path.basename(src);
-                    if (newRel !== rel) {
-                        const meta = await readMeta();
-                        let dirty = false;
-                        if (meta.pinned.includes(rel)) {
-                            meta.pinned = meta.pinned.filter((p) => p !== rel);
-                            if (!meta.pinned.includes(newRel)) meta.pinned.push(newRel);
-                            dirty = true;
-                        }
-                        for (const key of ['triggers', 'notes', 'civitai']) {
-                            if (meta[key] && meta[key][rel] !== undefined) {
-                                meta[key][newRel] = meta[key][rel];
-                                delete meta[key][rel];
-                                dirty = true;
-                            }
-                        }
-                        if (dirty) await writeMeta(meta);
+                    // sidecar JSON（置顶/触发词/备注/Civitai 记录）跟着文件走；
+                    // 旧命名（无 _lumen）也一并收编成新命名
+                    let movedMeta = false;
+                    try {
+                        await fs.rename(sidecarPath(src), sidecarPath(dest));
+                        movedMeta = true;
+                    } catch {
+                        try { await fs.rename(sidecarPathLegacy(src), sidecarPath(dest)); movedMeta = true; }
+                        catch { /* 本就没有，属正常 */ }
                     }
-                    moved.push({ from: rel, to: newRel, movedPreviews });
-                    console.log('[lora] 已移动:', rel, '->', newRel);
+                    sidecarCache.delete(src);
+                    sidecarCache.delete(dest);
+                    const newRel = targetFolder ? `${targetFolder}/${path.basename(src)}` : path.basename(src);
+                    moved.push({ from: rel, to: newRel, movedPreviews, movedMeta });
+                    console.log('[lora] 已移动:', rel, '->', newRel, movedMeta ? '（含 sidecar JSON）' : '');
                 } catch (err) {
                     failed.push({ path: rel, reason: err.message });
                 }
@@ -499,18 +637,33 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
         }
     });
 
-    // ==================== GET/POST /pins：置顶状态 ====================
+    // ==================== GET/POST /pins：置顶状态 + 聚合元数据 ====================
+    // GET：全量聚合（扫 loras → 逐个读 sidecar 缓存）。civitai 记录剥离
+    // description 大字段（几千个 lora 时 HTML 正文能把载荷抬到几十 MB；
+    // 全量记录走 GET /civitai/info 单条按需取，信息窗打开时拉）
     router.get('/pins', async (req, res) => {
         try {
-            const meta = await readMeta();
-            res.json({
-                status: 'ok',
-                pinned: meta.pinned,
-                triggers: meta.triggers,
-                notes: meta.notes,
-                // Civitai 拉取记录（含 pageUrl，供信息窗「打开 C 站页面」按钮）
-                civitai: meta.civitai
-            });
+            const root = getComfyRoot();
+            if (!root) {
+                // root 未配置：给空结构让前端降级（LoraFileSelect 纯文件名显示）
+                return res.json({ status: 'ok', pinned: [], triggers: {}, notes: {}, civitai: {} });
+            }
+            const lorasDir = path.join(root, 'models', 'loras');
+            const { loras } = await scanLoras(lorasDir);
+            await ensureSidecarRenamed(lorasDir, loras);   // 旧命名先收编
+            await ensureMigrated(lorasDir);                // 中央 meta 再并入（填收编后的空字段）
+            const pinned = [], triggers = {}, notes = {}, civitai = {};
+            for (const lora of loras) {
+                const d = await readSidecar(path.join(lorasDir, lora.path));
+                if (d.pinned) pinned.push(lora.path);
+                if (d.triggers) triggers[lora.path] = d.triggers;
+                if (d.note) notes[lora.path] = d.note;
+                if (d.civitai) {
+                    const { description, ...small } = d.civitai;   // 大字段不进列表载荷
+                    civitai[lora.path] = small;
+                }
+            }
+            res.json({ status: 'ok', pinned, triggers, notes, civitai });
         } catch (err) {
             fail(res, err);
         }
@@ -518,16 +671,20 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
 
     router.post('/pins', async (req, res) => {
         try {
+            const root = getComfyRoot();
+            if (!root) return res.status(400).json({ status: 'error', message: '尚未配置 ComfyUI 根目录' });
             const { path: rel, pinned } = req.body || {};
             if (typeof rel !== 'string' || !rel) {
                 return res.status(400).json({ status: 'error', message: '缺少 path' });
             }
-            const meta = await readMeta();
-            const set = new Set(meta.pinned);
-            if (pinned) set.add(rel); else set.delete(rel);
-            meta.pinned = [...set];
-            await writeMeta(meta);
-            res.json({ status: 'ok', pinned: meta.pinned });
+            const lorasDir = path.join(root, 'models', 'loras');
+            await ensureMigrated(lorasDir);
+            const abs = safeResolve(lorasDir, rel);
+            if (!abs) return res.status(403).json({ status: 'error', message: '路径越界' });
+            const d = await readSidecar(abs);
+            d.pinned = !!pinned;
+            await writeSidecar(abs, d);
+            res.json({ status: 'ok', pinned: !!pinned });
         } catch (err) {
             fail(res, err);
         }
@@ -535,10 +692,12 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
 
     // ==================== POST /trigger 与 /note：文本元数据读写 ====================
     // { path, text }：text 非空保存、空串删除该条记录。
-    // trigger → meta.triggers（触发词）；note → meta.notes（备注）
-    for (const [route, field] of [['trigger', 'triggers'], ['note', 'notes']]) {
+    // trigger → sidecar.triggers（触发词）；note → sidecar.note（备注）
+    for (const [route, field] of [['trigger', 'triggers'], ['note', 'note']]) {
         router.post('/' + route, async (req, res) => {
             try {
+                const root = getComfyRoot();
+                if (!root) return res.status(400).json({ status: 'error', message: '尚未配置 ComfyUI 根目录' });
                 const { path: rel, text } = req.body || {};
                 if (typeof rel !== 'string' || !rel) {
                     return res.status(400).json({ status: 'error', message: '缺少 path' });
@@ -546,11 +705,15 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
                 if (typeof text !== 'string') {
                     return res.status(400).json({ status: 'error', message: '缺少 text' });
                 }
-                const meta = await readMeta();
+                const lorasDir = path.join(root, 'models', 'loras');
+                await ensureMigrated(lorasDir);
+                const abs = safeResolve(lorasDir, rel);
+                if (!abs) return res.status(403).json({ status: 'error', message: '路径越界' });
+                const d = await readSidecar(abs);
                 const trimmed = text.trim();
-                if (trimmed) meta[field][rel] = trimmed;
-                else delete meta[field][rel];
-                await writeMeta(meta);
+                if (trimmed) d[field] = trimmed;
+                else d[field] = undefined;   // 空串清除该条
+                await writeSidecar(abs, d);
                 res.json({ status: 'ok', text: trimmed });
             } catch (err) {
                 fail(res, err);
@@ -560,9 +723,9 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
 
     // ==================== Civitai 一键获取（封面 + 触发词） ====================
     // 参考 ComfyUI-Lora-Manager 插件：以文件 SHA256 为身份查
-    // civitai.red /model-versions/by-hash 拿版本数据。触发词写
-    // meta.triggers，封面写 sidecar <同名>.preview.<ext>（现有 /preview
-    // 读取链零改动），模型名/底模/作者/Civitai 链接等记 meta.civitai。
+    // civitai.red /model-versions/by-hash 拿版本数据。触发词与拉取记录写
+    // sidecar <同名>.json，封面写 sidecar <同名>.preview.<ext>（现有
+    // /preview 读取链零改动）。
 
     /** lora 是否已有 sidecar 封面（判断「自定义封面」用） */
     async function sidecarCoverExists(loraPath) {
@@ -629,26 +792,27 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
             return { status: 'error', error: 'Civitai 返回数据格式异常' };
         }
 
-        // 3) 触发词（trainedWords 数组 join；冲突按策略处理）
-        const meta = await readMeta();
-        const prev = (meta.civitai && meta.civitai[relPath]) || {};
+        // 3) 触发词（trainedWords 数组 join；冲突按策略处理）——写 sidecar
+        await ensureMigrated(lorasDir);
+        const d = await readSidecar(abs);
+        const prev = d.civitai || {};
         const words = (Array.isArray(version.trainedWords) ? version.trainedWords : [])
             .filter((w) => typeof w === 'string' && w.trim())
             .map((w) => w.trim());
         const fetchedTriggers = words.join(', ');
         let triggersUpdated = false;
         if (fetchedTriggers) {
-            const cur = (meta.triggers[relPath] || '').trim();
+            const cur = (d.triggers || '').trim();
             if (!cur) {
-                meta.triggers[relPath] = fetchedTriggers;
+                d.triggers = fetchedTriggers;
                 triggersUpdated = true;
             } else if (onConflict === 'overwrite') {
-                meta.triggers[relPath] = fetchedTriggers;
+                d.triggers = fetchedTriggers;
                 triggersUpdated = true;
             } else if (onConflict === 'merge') {
                 const merged = mergeTriggerText(cur, fetchedTriggers);
                 if (merged !== cur) {
-                    meta.triggers[relPath] = merged;
+                    d.triggers = merged;
                     triggersUpdated = true;
                 }
             }
@@ -686,8 +850,9 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
             modelDesc = await civitai.fetchModelDescription(version.modelId, { apiKey, dispatcher });
         }
 
-        // 5) 记录拉取结果（元信息备查 + coverFetched 标记供下次判自定义封面）
-        meta.civitai[relPath] = {
+        // 5) 记录拉取结果（元信息备查 + coverFetched 标记供下次判自定义封面），
+        //    写 sidecar JSON 落盘
+        d.civitai = {
             modelName: (version.model && version.model.name) || '',
             versionName: version.name || '',
             baseModel: version.baseModel || '',
@@ -700,17 +865,17 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
             coverFetched: !!(prev.coverFetched || coverUpdated),
             fetchedAt: new Date().toISOString()
         };
-        await writeMeta(meta);
+        await writeSidecar(abs, d);
 
         return {
             status: 'ok',
             sha256: sha,
             triggersUpdated,
-            triggers: meta.triggers[relPath] || '',
+            triggers: d.triggers || '',
             coverUpdated,
             coverSkipped,
             coverError,
-            info: meta.civitai[relPath]
+            info: d.civitai
         };
     }
 
@@ -738,10 +903,11 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
             for (const lora of loras) {
                 if (batchState.cancel) break;
                 batchState.current = lora.name;
-                // 跳过已获取过的（meta.civitai 有 fetchedAt 记录）
+                // 跳过已获取过的（sidecar.civitai 有 fetchedAt 记录）
                 if (options.skipFetched) {
-                    const meta = await readMeta();
-                    if (meta.civitai[lora.path] && meta.civitai[lora.path].fetchedAt) {
+                    const abs = safeResolve(lorasDir, lora.path);
+                    const d = abs ? await readSidecar(abs) : null;
+                    if (d && d.civitai && d.civitai.fetchedAt) {
                         batchState.skipped++;
                         batchState.done++;
                         continue;
@@ -773,8 +939,29 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
         }
     }
 
+    // GET /civitai/info：单条全量 C 站拉取记录（sidecar.civitai，含
+    // description 大字段——/pins 聚合载荷不带它，信息窗打开时按需取）
+    router.get('/civitai/info', async (req, res) => {
+        try {
+            const rel = String(req.query.path || '');
+            const root = getComfyRoot();
+            if (!root || !rel) {
+                return res.status(400).json({ status: 'error', message: '缺少 path 或未配置 ComfyUI 根目录' });
+            }
+            const lorasDir = path.join(root, 'models', 'loras');
+            await ensureMigrated(lorasDir);
+            const abs = safeResolve(lorasDir, rel);
+            if (!abs) return res.status(403).json({ status: 'error', message: '路径越界' });
+            const d = await readSidecar(abs);
+            if (!d.civitai) return res.json({ status: 'empty' });   // 未获取过：信息窗显示占位
+            res.json({ status: 'ok', info: d.civitai });
+        } catch (err) {
+            fail(res, err);
+        }
+    });
+
     // GET /civitai/hash：取单个 lora 的本地 SHA256（带缓存，按需计算）
-    // + C 站记录哈希（meta.civitai 有拉取记录时），match 供前端做比对标记
+    // + C 站记录哈希（sidecar.civitai 有拉取记录时），match 供前端做比对标记
     router.get('/civitai/hash', async (req, res) => {
         try {
             const rel = String(req.query.path || '');
@@ -792,8 +979,9 @@ function createLoraRouter({ getComfyRoot, invalidateRootCache, comfyApiUrl, meta
                 return res.status(404).json({ status: 'error', message: '文件不存在' });
             }
             const sha = await civitai.getSha256(lorasDir, rel, stat);
-            const meta = await readMeta();
-            const recorded = ((meta.civitai[rel] && meta.civitai[rel].sha256) || '').toLowerCase();
+            await ensureMigrated(lorasDir);
+            const d = await readSidecar(abs);
+            const recorded = ((d.civitai && d.civitai.sha256) || '').toLowerCase();
             res.json({
                 status: 'ok',
                 sha256: sha,

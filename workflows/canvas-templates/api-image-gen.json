@@ -1,0 +1,33 @@
+{
+  "kind": "lumen-canvas-template",
+  "name": "API生图工作流",
+  "description": "这个工作流主要使用配置好的API模型生图：提示词节点写好描述，连线到 API 生图节点（当前配置 heyroute中转/nano-banana-2、1:1、2K）直接出图。",
+  "createdAt": "2026-11-15T00:00:00.000Z",
+  "updatedAt": "2026-11-15T00:00:00.000Z",
+  "nodes": [
+    {
+      "type": "prompt-node",
+      "x": 0,
+      "y": 0,
+      "width": 1911.873734829842,
+      "height": 1917.3744569510036,
+      "text": ""
+    },
+    {
+      "type": "image-gen-node",
+      "x": 2858.8015866342196,
+      "y": 20.3074244229443,
+      "width": 2048,
+      "height": 2048,
+      "model": "heyroute中转||nano-banana-2",
+      "ratio": "1:1",
+      "tier": "2K",
+      "quality": "",
+      "count": 1
+    }
+  ],
+  "connections": [
+    { "from": 0, "to": 1, "order": 0 }
+  ],
+  "groups": []
+}

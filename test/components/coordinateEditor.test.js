@@ -616,38 +616,10 @@ describe('CoordinateEditor 并排窗口（右缘留白与 ESC 守卫）', () => 
         expect(inst._shouldCloseOnEscape({ tag: 'llm-input' })).toBe(true);    // 无弹窗兜底关
     });
 
-    describe('_defaultGap 按面板实测宽度对齐', () => {
-        afterEach(() => { delete context.document; delete context.window.innerWidth; });
-
-        const panelRect = (left, width) => ({
-            getElementById: (id) => id === 'promptPanel'
-                ? { getBoundingClientRect: () => ({ left, width }) }
-                : null
-        });
-
-        test('面板默认宽（左缘=innerWidth-545）→ 留白 552', () => {
-            const inst = Object.create(CoordinateEditor.prototype);
-            context.window = { innerWidth: 1920 };
-            context.document = panelRect(1920 - 545, 540);
-            expect(inst._defaultGap()).toBe(552);
-        });
-
-        test('面板拖宽到 700 → 留白跟随到 712', () => {
-            const inst = Object.create(CoordinateEditor.prototype);
-            context.window = { innerWidth: 1920 };
-            context.document = panelRect(1920 - 705, 700);
-            expect(inst._defaultGap()).toBe(712);
-        });
-
-        test('面板隐藏（平移出视口）/取不到 → 回落 552', () => {
-            const inst = Object.create(CoordinateEditor.prototype);
-            context.window = { innerWidth: 1920 };
-            context.document = panelRect(2500, 540);          // translateX 藏到右侧外
-            expect(inst._defaultGap()).toBe(552);
-            context.document = { getElementById: () => null };
-            expect(inst._defaultGap()).toBe(552);
-        });
-    });
+    // 布局开关/默认留白语义已收敛 LumenLayoutPanel 预制件 + SidePanelLayout
+    // 共享层（2026-11-08，坐标编辑器接入预制件、默认全屏、原宽屏恒并排退役）
+    // ——面板实测对齐断言迁 test/utils/sidePanelLayout.test.js、
+    // 开合/记忆/置灰断言迁 test/components/lumenLayoutPanel.test.js
 });
 
 describe('CoordinateEditor 图层：遮挡选层与顺序操作（ADR 017 决策十）', () => {

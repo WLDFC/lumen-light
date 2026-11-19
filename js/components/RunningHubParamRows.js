@@ -13,7 +13,9 @@
  * 复用 .comfy-param-row 行样式（与 Comfy 生图节点观感一致）。
  * 尺寸合并行：登记卡同时登记 width/height 两个文本参数时并排为一行
  * 「尺寸 W × H」（结构与 ComfyParamRows 的尺寸行一致），只登记其一时
- * 回退普通单行。
+ * 回退普通单行；行尾附「预设」下拉（CoordinateLayout.COMFY_PRESET_SIZES
+ * 八档 = 共享五档 + Comfy 追加三档；漫画/坐标编辑器仍读五档共享清单），
+ * 选中即写入宽高两键并回填。
  * 参数值由 values 状态持有并随节点入存档，刷新/恢复后按 key 回填。
  * ==========================================================================
  */
@@ -146,7 +148,8 @@ class RunningHubParamRows {
                 continue;
             }
 
-            // 尺寸合并行：宽 × 高并排（两个输入各自 data-key 独立，提交取值不变）
+            // 尺寸合并行：宽 × 高并排（两个输入各自 data-key 独立，提交取值不变），
+            // 行尾附「预设」下拉（占位不带省略号——按钮定宽只求放下二字）
             if (p === widthParam && heightParam) {
                 rows.push(`
                     <div class="comfy-param-row">
@@ -157,6 +160,11 @@ class RunningHubParamRows {
                             <span class="comfy-size-x">×</span>
                             <input type="text" class="comfy-num-input rh-param-input" data-key="${LumenLight.escapeHtml(heightKey)}"
                                    title="${LumenLight.escapeHtml(heightParam.label || '高度')}">
+                            <select class="comfy-size-preset" title="常用尺寸预设">
+                                <option value="">预设</option>
+                                ${CoordinateLayout.COMFY_PRESET_SIZES.map((ps, i) =>
+                                    `<option value="${i}">${LumenLight.escapeHtml(ps.label)}</option>`).join('')}
+                            </select>
                         </div>
                     </div>
                 `);
@@ -188,6 +196,29 @@ class RunningHubParamRows {
                 this.values[key] = el.value;
             });
         });
+
+        // 尺寸预设下拉：选中即把预设宽高写入行内两个输入（快照同步进 values
+        // 状态，与键入同路径），随后复位「预设」占位（同 MangaDom 预设交互）。
+        // 按钮自身不进 inputs Map（getValues 只收集参数输入）；行内输入次序
+        // 渲染时固定为宽、高，按序对位写入。占位项先短路（Number('') 为 0
+        // 会误套第一档）
+        const presetSel = this.container.querySelector('.comfy-size-preset');
+        if (presetSel) {
+            presetSel.addEventListener('change', () => {
+                if (presetSel.value === '') return;
+                const preset = CoordinateLayout.COMFY_PRESET_SIZES[Number(presetSel.value)];
+                presetSel.value = '';
+                if (!preset) return;
+                const pairInputs =
+                    this.container.querySelectorAll('.comfy-size-row .rh-param-input');
+                const dims = [preset.width, preset.height];
+                pairInputs.forEach((el, i) => {
+                    if (i >= dims.length) return;
+                    el.value = String(dims[i]);
+                    this.values[el.dataset.key] = String(dims[i]);
+                });
+            });
+        }
     }
 }
 

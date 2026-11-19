@@ -49,6 +49,7 @@ class PromptNode extends BaseCanvasNode {
         super(canvas, x, y);
         this.source = NodeTypes.SOURCE.PROMPT_NODE;
         this.text = text;
+        this.bypassed = false;   // 被忽略（绕过）状态：链照穿、文本不进收集
 
         this.width = size.width || PromptNode.DEFAULT_WIDTH;
         this.height = size.height || PromptNode.DEFAULT_HEIGHT;
@@ -217,9 +218,10 @@ class PromptNode extends BaseCanvasNode {
             this.canvas.interaction.handleWheel(e);
         }, { passive: false });
 
-        // 右键在节点上：不弹画布菜单（与图片一致），保持默认或无操作
+        // 右键在节点上：转交画布右键菜单——本节点可忽略（bypass），
+        // 弹忽略/恢复菜单（节点 DOM 挂在 body 上，事件不会自己冒到画布层）
         this.el.addEventListener('contextmenu', (e) => {
-            e.stopPropagation();
+            this.canvas.contextMenu.handleElementContext(e, this);
         });
     }
 
@@ -355,9 +357,20 @@ class PromptNode extends BaseCanvasNode {
     }
 
     /**
+     * 切换「忽略节点」状态（ComfyUI bypass 语义）：连线不动、遍历照穿，
+     * 但本节点的贡献（提示词文本）在 ImagePipeline 收集时被剔除。
+     * 视觉与工作流编辑器同款：整体半透明 + 标题栏紫色。
+     * @param {boolean} on - true=忽略，false=恢复
+     */
+    setBypassed(on) {
+        this.bypassed = !!on;
+        if (this.el) this.el.classList.toggle('bypassed', this.bypassed);
+    }
+
+    /**
      * 序列化为存档数据
      * type 字段供 ProjectSerializer.restoreNodes 分发重建
-     * @returns {Object} {id, type:'prompt-node', x, y, width, height, text}
+     * @returns {Object} {id, type:'prompt-node', x, y, width, height, text, bypassed?}
      */
     toJSON() {
         return {
@@ -368,6 +381,7 @@ class PromptNode extends BaseCanvasNode {
             width: this.width,
             height: this.height,
             text: this.text,
+            ...(this.bypassed ? { bypassed: true } : {}),
             ...(this.title ? { title: this.title } : {})
         };
     }

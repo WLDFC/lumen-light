@@ -262,10 +262,16 @@ class StudioTextTool {
                 g2.drawImage(src, -srcW / 2, -srcH / 2);
             }
         };
-        if (!t.content) { blit(); layer.empty = true; return; }
+        if (!t.content) {
+            blit();
+            layer.empty = true;
+            this.studio._refreshClips();   // 文字作基底/被剪贴时内容变化同步
+            return;
+        }
         layer.empty = false;
         TextLayout.drawTextContent(g, t, layout);
         blit();
+        this.studio._refreshClips();
     }
 }
 

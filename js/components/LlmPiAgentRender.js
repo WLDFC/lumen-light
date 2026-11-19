@@ -15,6 +15,10 @@
  * ==========================================================================
  */
 
+// 代码块复制按钮图标（Feather 风格，同 PiAgentBlocks.THINK_ICON 线条规格）
+const PI_COPY_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const PI_CHECK_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
 const LlmPiAgentRender = {
 
     /**
@@ -315,7 +319,14 @@ const LlmPiAgentRender = {
                 i++;
                 while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
                 i++;   // 跳过收尾围栏（缺失也安全：循环条件兜底）
-                mk('pre', 'pi-md-pre', `<code>${esc(buf.join('\n'))}</code>`);
+                // wrapper 承载右上角复制按钮：pre 自身是横向滚动容器，按钮
+                // 直接塞进去会随内容滚走，挂 wrapper 才钉得住
+                const wrap = document.createElement('div');
+                wrap.className = 'pi-md-pre-wrap';
+                const pre = mk('pre', 'pi-md-pre', `<code>${esc(buf.join('\n'))}</code>`);
+                wrap.appendChild(pre);
+                wrap.appendChild(this._buildCodeCopyBtn(pre));
+                frag.appendChild(wrap);
                 continue;
             }
             // ---- 表格：首行 |…| + 次行 |---|---| 分隔（GFM 管道表）----
@@ -386,6 +397,46 @@ const LlmPiAgentRender = {
         block.srcText = text;
         block.content.innerHTML = '';
         block.content.appendChild(this._renderMarkdown(text));
+    },
+
+    /** 代码块右上角复制按钮（常显图标钮）：点按复制块内纯文本，图标换
+     *  对勾 1.2s 反馈后还原。剪贴板走 navigator.clipboard，非安全上下文
+     *  降级 execCommand（项目既有兜底模式，同 LoraInfoModal / GenInfoPopup） */
+    _buildCodeCopyBtn(pre) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pi-md-copy-btn';
+        btn.title = '复制内容';
+        btn.innerHTML = PI_COPY_ICON;
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const text = (pre.querySelector('code') || pre).textContent || '';
+            let ok = false;
+            try {
+                await navigator.clipboard.writeText(text);
+                ok = true;
+            } catch (err) {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    ok = document.execCommand('copy');
+                    ta.remove();
+                } catch (e2) { /* 兜底失败静默 */ }
+            }
+            if (!ok) return;
+            btn.innerHTML = PI_CHECK_ICON;
+            btn.classList.add('is-done');
+            clearTimeout(btn._resetTimer);
+            btn._resetTimer = setTimeout(() => {
+                btn.innerHTML = PI_COPY_ICON;
+                btn.classList.remove('is-done');
+            }, 1200);
+        });
+        return btn;
     }
 };
 

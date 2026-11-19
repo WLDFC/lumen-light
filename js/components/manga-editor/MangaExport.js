@@ -3,7 +3,8 @@
  * MangaEditor 子模块：导出（2026-11-08 新增，ADR 079）
  * 作用：标题栏右上「导出」按钮 + 自绘菜单（复用 manga-file-menu 样式类，
  *       「文件」同款交互）——三个入口：
- *         1. 导出本页到画布：主类 _exportPageToCanvas（原有行为不变）；
+ *         1. 导出本页到画布：_exportPageToCanvas（2026-11-09 自主类迁入，
+ *            ADR 071 的画布交付口；连同落图助手 _placeCompositeAsNewImage）；
  *         2. 导出本页到本地：整页所见即所得合成 PNG（白页底 + 图层栈，
  *            与舞台同一渲染口径 _drawPageLayers）→ 浏览器下载；
  *         3. 导出本项目到本地：全部页面逐页合成 PNG（用户拍板口径：
@@ -50,10 +51,62 @@ Object.assign(window.MangaEditor.prototype, {
         }
     },
 
+    // ==================== 导出本页到画布（显式交付，ADR 071，自主类迁入） ====================
+
+    /**
+     * 整页所见即所得合成一张 PNG 落画布视口中心（唯一保留的画布交付口
+     * ——逐层写回已退役）：白页底 + 当前页图层栈（笔迹/图片/文字/形状，
+     * 与舞台同一渲染口径 _drawPageLayers，恒等变换草稿像素 1:1）。元素
+     * 景别框是结构化标注不属页面视觉，不入合成。命名 manga_page_<ts>.png
+     */
+    async _exportPageToCanvas() {
+        const app = window.canvas;
+        if (!app || !app.images || !app.viewport) {
+            this._status('画布未就绪，无法导出', true);
+            return;
+        }
+        // 整页合成收口在 _composePageCanvas（本混入；本页到画布 / 本页到
+        // 本地 / 本项目 zip 三口共用同一渲染口径）
+        const cv = await this._composePageCanvas(this.draft);
+        try {
+            await this._placeCompositeAsNewImage(app, cv.toDataURL('image/png'), `manga_page_${Date.now()}.png`);
+            this._status('已导出当前页到画布（整页合成图）');
+        } catch (err) {
+            this._status('导出失败：' + ((err && err.message) || err), true);
+        }
+    },
+
+    /**
+     * 无画布对应图的新建落图（导出本页交付出口，ADR 071）：页面合成图以
+     * 草稿像素原生分辨率落画布视口中心（LlmImageDrag.dropToCanvas 同款落
+     * 点语义），返回新建的画布图对象；name 可指定画布图文件名
+     */
+    async _placeCompositeAsNewImage(app, url, name) {
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = () => reject(new Error('写回图加载失败'));
+            img.src = url;
+        });
+        const rect = app.canvas.getBoundingClientRect();
+        const cp = app.viewport.screenToCanvas(
+            rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return app.images.addImage({
+            img,
+            x: cp.x - img.width / 2,
+            y: cp.y - img.height / 2,
+            width: img.width,
+            height: img.height,
+            isPlaceholder: false,
+            source: 'manga',
+            name: name || `manga_layer_${Date.now()}.png`
+        });
+    },
+
     // ==================== 整页合成（画布交付/本地图/项目 zip 三口共用） ====================
 
     /**
-     * 等齐某页图层引用的图片加载（_awaitLayerImages 的按页变体——那个绑
+     * 等齐某页图层引用的图片加载（按页变体——渲染非活动页时该页不是
      * this.draft）。加载完成或出错都放行（出错=该层暂缺图，合成时按层
      * 计缺口）；3s 超时兜底不挂死导出
      */

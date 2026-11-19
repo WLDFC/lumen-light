@@ -78,12 +78,6 @@ Object.assign(window.CoordinateEditor.prototype, {
                 <input type="text" class="coord-item-title" placeholder="标题（可选，显示在框的标签上）">
                 <textarea class="coord-item-caption" rows="4" placeholder="这块区域是什么：主体/动作/外观，或排印风格（AI 可代写）"></textarea>
                 <input type="text" class="coord-item-text" placeholder="文字内容（逐字可见，支持 \\n 换行）"${item.label === 'text' ? '' : ' hidden'}>
-                <div class="coord-item-bbox" title="bbox：x1, y1, x2, y2（左上角原点，像素）">
-                    <input type="number" class="coord-bbox-n" data-k="0">
-                    <input type="number" class="coord-bbox-n" data-k="1">
-                    <input type="number" class="coord-bbox-n" data-k="2">
-                    <input type="number" class="coord-bbox-n" data-k="3">
-                </div>
             `;
             this.itemsEl.appendChild(card);
 
@@ -92,11 +86,9 @@ Object.assign(window.CoordinateEditor.prototype, {
             const textInput = card.querySelector('.coord-item-text');
             const labelSel = card.querySelector('.coord-item-label');
             const shotSel = card.querySelector('.coord-item-shot');
-            const bboxInputs = card.querySelectorAll('.coord-bbox-n');
             captionTa.value = item.caption;
             titleInput.value = item.title || '';
             textInput.value = item.text || '';
-            bboxInputs.forEach((inp) => { inp.value = item.bbox[Number(inp.dataset.k)]; });
 
             // 字段直写草稿（不重建列表，避免打断输入；文本合并成一步历史）
             // 标题：编辑器侧元数据（舞台标签显示，编译前剥离），空值删字段
@@ -131,17 +123,6 @@ Object.assign(window.CoordinateEditor.prototype, {
                 this._renderStage();
             });
             shotSel.addEventListener('change', () => this._onShotChange(i, shotSel.value, captionTa));
-            bboxInputs.forEach((inp) => inp.addEventListener('change', () => {
-                const before = this._histSnapshot();
-                const k = Number(inp.dataset.k);
-                const box = item.bbox.slice();
-                box[k] = Number(inp.value);
-                item.bbox = CoordinateLayout.normalizeBox(box, this.draft.width, this.draft.height);
-                bboxInputs.forEach((x) => { x.value = item.bbox[Number(x.dataset.k)]; });
-                this._commitHistory(before, '改坐标');
-                this._invalidateCompiled();
-                this._renderStage();
-            }));
 
             // 标题框可点选元素（折叠卡片唯一常驻的字段——点它也应选中，
             // 与点卡片空白处选中一致；不拦默认行为，输入不受影响）

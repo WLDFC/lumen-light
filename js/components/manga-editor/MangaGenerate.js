@@ -16,6 +16,15 @@
  *   - API：POST /api/llm/generate-image（画布 API 生图节点同端点），同步
  *     返回 imageUrl 直接收进参考层；尺寸按页面画幅经 LlmResolution 归一
  *     （长边 2K、模型约束钳制）。
+ * 逐格生成（2026-11-12，「逐格」按钮，仅 Comfy 模式）：元素框逐格独立出图，
+ *   范围=当前选中态（多选集合 Shift 点选优先 → 主选中单格 → 空则全页）——
+ *   提示词=景别词织入+元素描述（写面板框 2，口径同整页委托），
+ *   尺寸=框等比放大到≈1MP 钳 64 倍数（经 run({latentSize}) 一次性覆写
+ *   sizeTargets，不动面板行状态），出图按提交时 bbox 快照精确落框成图层。
+ *   串行队列：上一格回流落层后才提交下一格；回流按 promptId 对位
+ *   （PlaceholderManager 派发 detail 携带 handle.promptIds），超时/失败由
+ *   看门狗兜底计败续投、残图迟来仍按 _batchByPromptId 对位落框。
+ *   跳过：文字类型/空描述/眼睛隐藏。
  *   - 提示词编译可选（2026-11-04）：编译成功用 MOSS 坐标产物；失败不拦
  *     生成，回落右栏输出框现文当普通提示词，两处皆空才拦下。
  * 状态：模式与 API 模型选择持久化 localStorage——lumenLight.mangaGenMode /
@@ -60,6 +69,16 @@ Object.assign(window.MangaEditor.prototype, {
             if (this.genRunning) this._stopGenerate();
             else this._runGenerate();
         });
+        // 逐格生成（2026-11-12）：运行中再点=停止（与「生成」钮同款互切）
+        this.batchBtn = this.dialog.querySelector('.manga-gen-batch-btn');
+        if (this.batchBtn) {
+            this.batchBtn.addEventListener('click', () => {
+                if (this._batchActive) this._stopPerElementGenerate();
+                else this._runPerElementGenerate();
+            });
+        }
+        this.editBtn = this.dialog.querySelector('.manga-edit-btn');
+        this.editBtn.addEventListener('click', () => this._runPanelEdit());
 
         this._syncGenModeUi();
     },
@@ -94,6 +113,8 @@ Object.assign(window.MangaEditor.prototype, {
         }
         const api = mode === 'api';
         if (this.genModelSelectBtn) this.genModelSelectBtn.disabled = !api;
+        // 逐格仅 Comfy 模式（API 逐格二期——尺寸归一链路相同，先落 Comfy）
+        if (this.batchBtn) this.batchBtn.disabled = api;
         if (api) {
             this.genModelDropdown.setOptions(
                 this._apiModelOptions || [], this._genModelChoice('api'));
@@ -286,12 +307,37 @@ Object.assign(window.MangaEditor.prototype, {
             this._status('提示词面板未初始化，无法委托 Comfy 生成', true);
             return;
         }
+        // 工作流守卫须在写框之前——未选工作流拦截时不得覆写框 2（vm 测
+        // 试钉住的契约：拦截=完全不碰面板状态）
         if (!panel.workflowManager.getCurrentWorkflowId()) {
             this._status('请先在右侧 Comfy 面板选择工作流', true);
             return;
         }
         if (pim.posPrompt2) pim.posPrompt2.value = prompt;
         else if (pim.posPrompt) pim.posPrompt.value = prompt;
+        this._status('已委托右侧面板提交 Comfy，出图自动落当前页参考…');
+        await this._armAndRunComfy();
+    },
+
+    /**
+     * 武装一次性捕获 + 抑制落画布 + 触发面板提交——「生成」委托与
+     * 「编辑」直跑（_runPanelEdit）共用的收口（2026-11-10 自
+     * _delegateComfyGenerate 尾段抽出；含面板/工作流守卫，写框一方须在
+     * 写框前先自检，守卫在此是第二道防）。不进运行态——面板按钮三态/
+     * 任务中心行/停止全是面板自理，调用方立即恢复可点（再次点击=再委托
+     * 一轮，与连点面板发送同义）；回流经 lumenGeneratedImage 由捕获收进
+     * 提交时刻的页
+     */
+    async _armAndRunComfy() {
+        const panel = window.promptPanel;
+        if (!panel || !panel.comfyRunner) {
+            this._status('提示词面板未初始化，无法委托 Comfy 生成', true);
+            return;
+        }
+        if (!panel.workflowManager.getCurrentWorkflowId()) {
+            this._status('请先在右侧 Comfy 面板选择工作流', true);
+            return;
+        }
         this._genCaptureArmed = true;
         this._genCapturePage = this.activePage;
         // 落画布抑制（ADR 071 交付独立）：标记随本次委托武装、消费即清
@@ -301,7 +347,6 @@ Object.assign(window.MangaEditor.prototype, {
         window.__mangaGenSuppress = true;
         clearTimeout(this._genSuppressTimer);
         this._genSuppressTimer = setTimeout(() => { window.__mangaGenSuppress = false; }, 60 * 60 * 1000);
-        this._status('已委托右侧面板提交 Comfy，出图自动落当前页参考…');
         try {
             await panel.comfyRunner.run();
         } catch {
@@ -312,6 +357,314 @@ Object.assign(window.MangaEditor.prototype, {
             window.__mangaGenSuppress = false;
             this._status('面板提交异常，本轮生成未发起', true);
         }
+    },
+
+    /**
+     * 「编辑」（2026-11-10 新增）：面板提示词原样直跑——不注入、不清框，
+     * 框 1→框 2 合并提交语义完全归属面板（框内内容用户自理）。捕获/
+     * 抑制/落页与「生成」委托共用 _armAndRunComfy 收口。定位=图生图
+     * 旁路：先把图层原图经右键「添加到编辑」送进面板槽位，在此一键跑
+     * 编辑工作流，产物落当前页图层，全程不经元素框编译。仅 Comfy 面板
+     * 模式——API 直连无槽位概念（参考图走另一通道），明示不支持而非半跑
+     */
+    async _runPanelEdit() {
+        const mode = document.getElementById('promptMode');
+        if (!mode || mode.value !== 'comfy') {
+            this._status('「编辑」当前仅支持 Comfy 面板模式（API 直连暂不支持）', true);
+            return;
+        }
+        const panel = window.promptPanel;
+        if (!panel || !panel.comfyRunner) {
+            this._status('提示词面板未初始化，无法委托 Comfy 生成', true);
+            return;
+        }
+        if (!panel.workflowManager.getCurrentWorkflowId()) {
+            this._status('请先在右侧 Comfy 面板选择工作流', true);
+            return;
+        }
+        this._status('已委托右侧面板提交 Comfy（面板提示词直跑），出图自动落当前页…');
+        await this._armAndRunComfy();
+    },
+
+    // ==================== 逐格生成（元素框 → Comfy，2026-11-12） ====================
+    // 当前页每个元素框独立出图：提示词=景别词织入+元素描述（写面板框 2，
+    // 口径同整页委托），尺寸=框等比放大到≈1MP 钳 64 倍数（latent 一次性
+    // 覆写随 run({latentSize}) 注入，不动面板行状态），出图缩回落进各自
+    // 的框 bbox（提交时快照——回流按快照落，不追框现值）。串行队列：
+    // 上一格回流落层后才提交下一格，回流按 promptId 对位（占位图句柄
+    // 绑定，PlaceholderManager 派发 detail 携带），超时/失败由看门狗
+    // 兜底续投。跳过：文字类型/空描述/眼睛隐藏。
+
+    /** 元素框尺寸 → 生成尺寸：等比缩放到面积≈1MP、钳 64 倍数（画质优先：
+     *  生成后缩回落框，等比无变形——64 取整只余亚像素级比例差）。纯函数 */
+    _boxGenSize(w, h) {
+        const MP = 1024 * 1024;
+        const scale = Math.sqrt(MP / Math.max(1, w * h));
+        const round64 = (v) => Math.max(64, Math.round((v * scale) / 64) * 64);
+        return { width: round64(w), height: round64(h) };
+    },
+
+    /** 逐格批量入口（底栏「逐格」按钮，仅 Comfy 模式；运行中再点=停止） */
+    async _runPerElementGenerate() {
+        const panel = window.promptPanel;
+        const pim = window.promptInputManager;
+        if (this._batchActive) return;
+        if (this.genRunning) {
+            this._status('整页生成进行中，请先停止再逐格生成', true);
+            return;
+        }
+        if (!panel || !pim || !panel.comfyRunner) {
+            this._status('提示词面板未初始化，无法逐格生成', true);
+            return;
+        }
+        if (!panel.workflowManager.getCurrentWorkflowId()) {
+            this._status('请先在右侧 Comfy 面板选择工作流', true);
+            return;
+        }
+        if (this._genMode() !== 'comfy') {
+            this._status('逐格生成当前仅支持 Comfy 模式', true);
+            return;
+        }
+
+        // 收集可生成元素（提交时刻快照）。范围（2026-11-12）：多选集合
+        // （Shift 点选，存 cid）优先 → 主选中单格 → 空则全页；集合里的
+        // 失效 cid（框已删）自然滤掉
+        const scopeIdxs = [];
+        if (this._multiSelected && this._multiSelected.size) {
+            this.draft.items.forEach((item, i) => {
+                if (this._multiSelected.has(item.cid)) scopeIdxs.push(i);
+            });
+        } else if (this.selected >= 0 && this.selected < this.draft.items.length) {
+            scopeIdxs.push(this.selected);
+        }
+        const wholePage = scopeIdxs.length === 0;
+        const items = [];
+        for (const i of (wholePage ? this.draft.items.keys() : scopeIdxs)) {
+            const item = this.draft.items[i];
+            if (this._hiddenCids.has(item.cid)) continue;      // 眼睛隐藏跳过
+            if (item.label === 'text') continue;               // 文字框=文案占位不生成
+            let caption = (item.caption || '').trim();
+            if (!caption) continue;                            // 空描述跳过（不打断批次）
+            const shot = (item.shot || '').trim();
+            if (shot && !caption.includes(shot)) caption = shot + '，' + caption;   // 织入口径同卡片切换
+            const [x1, y1, x2, y2] = item.bbox;
+            const bw = Math.max(1, x2 - x1), bh = Math.max(1, y2 - y1);
+            items.push({
+                prompt: caption,
+                bbox: item.bbox.slice(),                       // 提交时刻快照
+                pageIdx: this.activePage,                      // 提交时刻的页
+                genSize: this._boxGenSize(bw, bh),
+                name: (item.title || '').trim() || caption.slice(0, 12)
+            });
+        }
+        if (!items.length) {
+            // 显式选中却无一可用：不静默扩成全页（用户点的范围就是范围）
+            this._status(wholePage
+                ? '当前页没有可生成的元素框（文字类型/空描述/隐藏框已跳过）'
+                : '选中的框没有可生成的（文字类型/空描述/隐藏框自动跳过）', true);
+            return;
+        }
+        // 工作流未探测到 latent 尺寸节点：覆写无处可注入，按模板现值出图
+        // 落框会拉伸——明示后继续（用户可能恰好设了匹配尺寸）
+        const detected = panel.comfyParams && panel.comfyParams.detected;
+        if (!detected || !detected.sizeTargets || !detected.sizeTargets.length) {
+            this._status('当前工作流未探测到尺寸节点（latent），将按工作流现值尺寸生成', true);
+        }
+
+        this._batchQueue = items;
+        this._batchTotal = items.length;
+        this._batchDone = 0;
+        this._batchFailed = 0;
+        this._batchInflight = null;
+        this._batchByPromptId = new Map();   // promptId → item（超时残图对位落框用）
+        this._batchActive = true;
+        this._setBatchRunning(true);
+        // 落画布抑制整批武装（与整页委托同标——防免节点路径把图落画布；
+        // 60 分钟兜底清，批结束/停止即清）
+        window.__mangaGenSuppress = true;
+        clearTimeout(this._genSuppressTimer);
+        this._genSuppressTimer = setTimeout(() => { window.__mangaGenSuppress = false; }, 60 * 60 * 1000);
+        this._batchTaskRef = window.taskRegistry ? window.taskRegistry.register({
+            kind: 'comfy',
+            label: wholePage
+                ? `逐格生成 ${items.length} 格`
+                : (items.length === 1 ? `单格生成「${items[0].name}」` : `逐格生成（选中）${items.length} 格`),
+            total: items.length,
+            onStop: () => this._stopPerElementGenerate()
+        }) : null;
+        this._submitNextBatchItem();
+    },
+
+    /** 提交下一格：写框 2 → run({latentSize, count:1}) → 记 promptId 挂看门狗 */
+    async _submitNextBatchItem() {
+        if (!this._batchActive) return;
+        const item = this._batchQueue.shift();
+        if (!item) { this._finishBatch('done'); return; }
+        const pim = window.promptInputManager;
+        const runner = window.promptPanel && window.promptPanel.comfyRunner;
+        // 面板/输入管理器批中途消失（异常形态）：该格计败续投，批次不断
+        if (!pim || !runner || typeof runner.run !== 'function') {
+            this._batchFailed++;
+            this._status('提示词面板不可用，逐格生成中止剩余排队', true);
+            this._finishBatch('failed',
+                `完成 ${this._batchDone}/${this._batchTotal}` +
+                (this._batchFailed ? `，失败 ${this._batchFailed}` : ''));
+            return;
+        }
+        this._batchInflight = item;
+        if (pim.posPrompt2) pim.posPrompt2.value = item.prompt;
+        else if (pim.posPrompt) pim.posPrompt.value = item.prompt;
+        const seq = this._batchDone + this._batchFailed + 1;
+        this._status(`逐格生成 ${seq}/${this._batchTotal}：「${item.name}」` +
+            `（生成 ${item.genSize.width}×${item.genSize.height} → 框）…`);
+        try {
+            await runner.run({ latentSize: item.genSize, count: 1 });
+        } catch { /* run() 自吞提交异常；_activePromptIds 空即失败信号 */ }
+        const pid = (runner._activePromptIds || [])[0] || null;
+        if (!pid) {
+            // 提交未发生（工作流缺失等——run() 内部已反馈）：该格计败续投
+            this._batchInflight = null;
+            this._batchFailed++;
+            this._status(`「${item.name}」提交失败，跳过`, true);
+            this._advanceBatch();
+            return;
+        }
+        item.promptId = pid;
+        item._submittedAt = Date.now();
+        item._lastProgress = Date.now();
+        item._lastSig = '';
+        this._batchByPromptId.set(pid, item);
+        // 看门狗：失败终态即断；10 分钟无进度（队列阻塞/挂死）计败续投——
+        // ComfyUI 串行队列里排在别任务后面时进度长期不动，10 分钟是
+        // 排队容忍上限，误判的残图仍会按 promptId 对位落框（不丢）
+        this._clearBatchWatchdog();
+        this._batchWatchdog = setInterval(() => this._batchWatchdogTick(item), 5000);
+    },
+
+    /** 看门狗 tick：失败终态即断；进度签名（pct/步骤文本）变化重置停摆计时 */
+    _batchWatchdogTick(item) {
+        if (!this._batchActive || this._batchInflight !== item) {
+            this._clearBatchWatchdog();
+            return;
+        }
+        const pm = window.placeholderManager;
+        const h = (pm && typeof pm.getByOwner === 'function')
+            ? pm.getByOwner('panel').find((x) => (x.promptIds || []).includes(item.promptId))
+            : null;
+        if (h) {
+            const o = h.imageObj && h.imageObj.placeholderOverlay;
+            if (o && o.state === 'failed') {
+                this._batchItemFail(item, o.message || '生成失败');
+                return;
+            }
+            const sig = o ? `${o.pct}|${o.stepText || ''}` : '';
+            if (sig !== item._lastSig) {
+                item._lastSig = sig;
+                item._lastProgress = Date.now();
+            }
+        }
+        if (Date.now() - (item._lastProgress || item._submittedAt) > 10 * 60 * 1000) {
+            this._batchItemFail(item, '10 分钟无进度（可能队列阻塞或已挂死）');
+        }
+    },
+
+    _clearBatchWatchdog() {
+        if (this._batchWatchdog) {
+            clearInterval(this._batchWatchdog);
+            this._batchWatchdog = null;
+        }
+    },
+
+    /** 单格计败（看门狗路径）：继续下一格，批次不断 */
+    _batchItemFail(item, reason) {
+        this._batchInflight = null;
+        this._batchFailed++;
+        this._status(`「${item.name}」生成失败：${reason}，继续下一格`, true);
+        this._advanceBatch();
+    },
+
+    /** 批次推进：任务中心进度 + 续投/收尾 */
+    _advanceBatch() {
+        if (this._batchTaskRef) {
+            this._batchTaskRef.update({ done: this._batchDone + this._batchFailed });
+        }
+        if (!this._batchActive) return;   // 停止后不再续投（残图走对位分支）
+        if (this._batchQueue.length) this._submitNextBatchItem();
+        else this._finishBatch('done');
+    },
+
+    /** 批内回流消费：落框 + 进度推进 + 续投 */
+    _consumeBatchItem(src, canvasImg, promptId) {
+        const item = this._batchInflight;
+        this._batchInflight = null;
+        this._clearBatchWatchdog();
+        if (promptId && this._batchByPromptId) this._batchByPromptId.delete(promptId);
+        this._batchDone++;
+        this._adoptBatchResult(item, src, canvasImg).catch(() => { /* 落层失败已反馈 */ });
+        this._advanceBatch();
+    },
+
+    /** 逐格结果落层：转存/入库同整页口径，bbox=提交时快照的元素框精确填满 */
+    async _adoptBatchResult(item, src, canvasImg) {
+        const page = this.pages && this.pages[item.pageIdx];
+        if (!page) { this._status('逐格结果无处安放（页面已不存在）', true); return; }
+        src = await this._transferGenImage(src);   // 有项目：转存项目夹（ADR 071）
+        let url = src;
+        if (!src.startsWith('/api/assets/') && !src.startsWith('/api/manga-projects/')) {
+            const dataUrl = await window.ImageExport.toDataUrl(null, src);
+            url = await this._uploadToAssets(dataUrl, `manga-grid-${Date.now()}.png`);
+        }
+        const name = `生成·${item.name}`;
+        let layer = null;
+        if (item.pageIdx === this.activePage) {
+            layer = this._addImageLayerBBox(url, item.bbox, name);
+        } else {
+            layer = this._addImageLayerBBoxToPage(page, url, item.bbox, name);
+        }
+        if (layer && layer.image && canvasImg && canvasImg.id) {
+            layer.image.canvasImgId = canvasImg.id;   // 溯源（保存写回定位）
+        }
+        this._status(`「${item.name}」已落框（${this._batchDone}/${this._batchTotal}）`);
+    },
+
+    /** 停止逐格：清队列/看门狗/抑制；已入队的 inflight 照常回流——
+     *  停止后走面板常规落画布路径（转存画布不丢） */
+    _stopPerElementGenerate() {
+        if (!this._batchActive) return;
+        this._batchActive = false;
+        this._batchQueue = [];
+        this._clearBatchWatchdog();
+        const hadInflight = !!this._batchInflight;
+        const note = `完成 ${this._batchDone}/${this._batchTotal}` +
+            (this._batchFailed ? `，失败 ${this._batchFailed}` : '');
+        this._finishBatch('stopped', note);
+        this._status('已停止逐格生成' + (hadInflight ? '（已提交的一格照常出图落画布）' : ''));
+    },
+
+    /** 批次收尾：按钮态/抑制/任务结算 */
+    _finishBatch(outcome, note) {
+        this._batchActive = false;
+        this._clearBatchWatchdog();
+        this._batchInflight = null;
+        if (this._batchByPromptId) this._batchByPromptId.clear();
+        window.__mangaGenSuppress = false;
+        clearTimeout(this._genSuppressTimer);
+        if (this._batchTaskRef) {
+            this._batchTaskRef.end(outcome, note || '');
+            this._batchTaskRef = null;
+        }
+        this._setBatchRunning(false);
+        if (outcome === 'done') {
+            this._status(`逐格生成完成：成功 ${this._batchDone}/${this._batchTotal}` +
+                (this._batchFailed ? `，失败 ${this._batchFailed}` : ''));
+        }
+    },
+
+    _setBatchRunning(running) {
+        if (!this.batchBtn) return;
+        this.batchBtn.classList.toggle('running', running);
+        this.batchBtn.textContent = running ? '■ 停止' : '逐格';
+        if (!running) this._syncGenModeUi();   // 恢复模式相关的禁用态
     },
 
     /** 停止（仅 API 直连路径会进运行态）：中止请求，提交路径收尾。
@@ -350,7 +703,7 @@ Object.assign(window.MangaEditor.prototype, {
     // ==================== 结果落参考层 ====================
 
     /**
-     * 一次性回流捕获（MangaBackground._onGeneratedImage 优先询问）：
+     * 一次性回流捕获（_onGeneratedImage 优先询问）：
      * 运行中收到下一张生成图即为本轮结果——收进提交时刻的页并结算任务。
      * canvasImg = 回流事件携带的画布图对象（PlaceholderManager 派发时带，
      * LumenSocket 免节点路径没有）——记到层上供保存写回定位画布对应图。
@@ -398,7 +751,7 @@ Object.assign(window.MangaEditor.prototype, {
      * 提交时刻的页与当前活动页可能已不同——活动页走 _addImageLayer 完整
      * 路径（入历史/自动选中/面板跟随）；异页直写该页层栈（不入页级历史，
      * 与旧直写背景行为一致）+ 存档 + 刷新缩略图。非稳定引用先入资产库
-     * 换 URL（复用 MangaBackground 的上传通道）
+     * 换 URL（主类共享小工具 _uploadToAssets）
      */
     async _adoptGenerateResult(pageIdx, src, canvasImg) {
         const page = this.pages && this.pages[pageIdx];
@@ -432,5 +785,67 @@ Object.assign(window.MangaEditor.prototype, {
         } catch (err) {
             this._status('生成图落图层失败：' + (err && err.message ? err.message : err), true);
         }
+    },
+
+    // ==================== 生成图回流事件（自 MangaBackground 迁入，2026-11-08） ====================
+
+    /**
+     * 生成图事件监听：构造器即挂（不等首次 show）——页面刷新后先出图、
+     * 后开编辑器的窗口期也能接住。幂等，重复调用不重复挂。
+     * 事件源 lumenGeneratedImage（detail.src）：PlaceholderManager
+     * .replace（四类生成节点+面板链路的占位图替换收口）与 LumenSocket
+     * new-image 默认落图分支（免节点回流/桥接回流）两处派发
+     */
+    _attachGeneratedImageListener() {
+        if (this._genListenerAttached) return;
+        this._genListenerAttached = true;
+        window.addEventListener('lumenGeneratedImage', (e) => this._onGeneratedImage(e));
+    },
+
+    /**
+     * 生成图 src 归一：WS new-image 的 image 字段是裸 base64
+     * （addImageToCanvas 同款契约，那边同样自己补前缀）——其余形态
+     * （data URL / /api/assets/ 引用 / http(s) 地址 / 同源路径）原样放行。
+     * 纯函数，Jest 可单测
+     */
+    _normalizeGenSrc(src) {
+        if (typeof src !== 'string' || !src) return '';
+        if (src.startsWith('data:') || src.startsWith('/') ||
+            /^(https?:)?\/\//i.test(src)) return src;
+        return 'data:image/png;base64,' + src;
+    },
+
+    /** lumenGeneratedImage 分发：逐格批处理优先（promptId 对位 inflight、
+     *  残图对位落框），余量交给「生成」按钮定点捕获 */
+    _onGeneratedImage(e) {
+        const raw = e && e.detail && e.detail.src;
+        const src = this._normalizeGenSrc(raw);
+        if (!src) return;
+        // 画布图对象随事件透传（PlaceholderManager 派发带 imageObj，免节点
+        // 路径无）——生成捕获记到层上，保存写回时据此定位画布对应图
+        const canvasImg = e && e.detail && e.detail.imageObj;
+        // 逐格批处理分支：serial 队列同时只有一个 inflight，回流按
+        // promptId 对位（detail.promptIds 首个=本张图的提交句柄）；
+        // 无 promptId 的回流（免节点路径）在 inflight 存在时按 FIFO
+        // 消费——串行提交下序即对位；带 promptId 但既非 inflight 也非
+        // 历史残图的（画布上别的来源）不抢，落回单次捕获路径
+        if (this._batchActive) {
+            const inflight = this._batchInflight;
+            const pid = ((e && e.detail && e.detail.promptIds) || [])[0] || null;
+            if (inflight && (!pid || pid === inflight.promptId)) {
+                this._consumeBatchItem(src, canvasImg, pid);
+                return;
+            }
+            if (pid && this._batchByPromptId && this._batchByPromptId.has(pid)) {
+                // 早前超时/失败格的迟来出图：仍落它自己的框（已付费不浪费）
+                const item = this._batchByPromptId.get(pid);
+                this._batchByPromptId.delete(pid);
+                this._adoptBatchResult(item, src, canvasImg).catch(() => { });
+                this._status(`迟到的出图已落「${item.name}」的框`);
+                return;
+            }
+            // 批活跃但 inflight 为空（间隙期）或带未知 promptId：放行
+        }
+        if (this._consumeGenCapture && this._consumeGenCapture(src, canvasImg)) return;
     },
 });

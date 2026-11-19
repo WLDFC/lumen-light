@@ -16,6 +16,8 @@
  *
  * 模式：持有宿主（LoraManager 实例）引用读写其状态（_sendPopup/
  * _sendPopupOutside），与 image-studio/ 子模块同款契约。
+ * 静态口（2026-11-08）：deliverToPanel 一键投面板叠加区 + reportResults
+ * 结果轻提示——弹窗面板钮与管理器「布局」模式纸飞机直投共用。
  * ==========================================================================
  */
 
@@ -61,6 +63,61 @@ class LoraSendPopup {
     }
 
     /**
+     * 汇总一轮投递的归一结果（弹窗与布局模式直投共用，2026-11-08）：
+     * 最多两条通知（换名 / 未匹配）不刷屏，未匹配细节进 console 供诊断
+     */
+    static reportResults(results) {
+        const renamed = results.filter((r) => r.renamed).length;
+        const failed = results.filter((r) => !r.resolved);
+        if (renamed > 0) {
+            LoraSendPopup._notify(`${renamed} 只 LoRA 已按 ComfyUI 清单换名投递（路径基准不同，按文件名匹配）`);
+        }
+        if (failed.length > 0) {
+            const f = failed[0];
+            console.warn('[LoRA投递] 未匹配 ComfyUI 清单:', f.reason, f.candidates || '');
+            LoraSendPopup._notify(
+                `${failed.length} 只未匹配 ComfyUI 清单（${f.reason}），已按原路径投递：${f.path.split('/').pop()}`);
+        }
+    }
+
+    /**
+     * 一键投递到右侧 Comfy 面板 LoRA 叠加区（2026-11-08 抽取共享：弹窗
+     * 「右侧 Comfy 面板」钮与管理器布局模式纸飞机直投同走此口）。
+     * 清单为空先补拉自愈（loadModelLists 只在面板初始化跑一次，页面先开、
+     * ComfyUI 后启动的时机差不留给用户）→ resolveForTarget 换名归一 →
+     * 逐只入栈 → 自动展开叠加区（折叠态下直投看不到落点）→ render。
+     * @param {Object[]} list - lora 数据数组（单只也包成数组传入）
+     * @returns {Promise<{ok: boolean, results?: Array}>}
+     *   ok=false 仅当面板未初始化（调用方回落投递弹窗）
+     */
+    static async deliverToPanel(list) {
+        const cp = window.promptPanel?.comfyParams;
+        if (!cp) return { ok: false };
+        if (!((cp.modelLists && cp.modelLists.loras) || []).length &&
+            typeof cp.loadModelLists === 'function') {
+            await cp.loadModelLists();
+        }
+        const files = (cp.modelLists && cp.modelLists.loras) || [];
+        const results = list.map((lora) => {
+            const r = LoraSendPopup.resolveForTarget(files, lora.path);
+            cp.loras.push({
+                id: LumenLight.generateId(),
+                file: r.path,
+                strengthModel: 1,
+                strengthClip: 1
+            });
+            return r;
+        });
+        if (cp.loraStackCollapsed) {
+            cp.loraStackCollapsed = false;
+            localStorage.setItem('comfyLoraStackCollapsed', 'false');
+        }
+        cp._persistLoraStack?.();   // 直投条目落盘（F5 后保留，2026-11-08）
+        cp.render();
+        return { ok: true, results };
+    }
+
+    /**
      * 历史条目自动补归一（ADR 028 决策四）：ComfyUI 未就绪期间投递的条目
      * 按原路径入栈（当时清单不可用、无法换名），清单到位后回扫未命中条目，
      * 能按文件名唯一匹配的就地更正为 ComfyUI 认识的路径——页面刷新/清单
@@ -101,19 +158,7 @@ class LoraSendPopup {
         pop.appendChild(head);
 
         /** 汇总一轮投递的归一结果，最多两条通知（换名 / 未匹配）不刷屏 */
-        const report = (results) => {
-            const renamed = results.filter((r) => r.renamed).length;
-            const failed = results.filter((r) => !r.resolved);
-            if (renamed > 0) {
-                LoraSendPopup._notify(`${renamed} 只 LoRA 已按 ComfyUI 清单换名投递（路径基准不同，按文件名匹配）`);
-            }
-            if (failed.length > 0) {
-                const f = failed[0];
-                console.warn('[LoRA投递] 未匹配 ComfyUI 清单:', f.reason, f.candidates || '');
-                LoraSendPopup._notify(
-                    `${failed.length} 只未匹配 ComfyUI 清单（${f.reason}），已按原路径投递：${f.path.split('/').pop()}`);
-            }
-        };
+        const report = (results) => LoraSendPopup.reportResults(results);
 
         let hasNode = false;
         const canvas = window.canvas;
@@ -153,29 +198,8 @@ class LoraSendPopup {
         panelBtn.className = 'lora-send-target';
         panelBtn.textContent = '右侧 Comfy 面板';
         panelBtn.addEventListener('click', async () => {
-            const cp = window.promptPanel?.comfyParams;
-            if (cp) {
-                // 清单为空先补拉一次：loadModelLists 只在面板初始化时跑一次，
-                // 页面加载那一刻 ComfyUI 未就绪的话清单会一直空着——投递时
-                // 自愈，不再把「页面先开、ComfyUI 后启动」的时机差留给用户
-                if (!((cp.modelLists && cp.modelLists.loras) || []).length &&
-                    typeof cp.loadModelLists === 'function') {
-                    await cp.loadModelLists();
-                }
-                const files = (cp.modelLists && cp.modelLists.loras) || [];
-                const results = list.map((lora) => {
-                    const r = LoraSendPopup.resolveForTarget(files, lora.path);
-                    cp.loras.push({
-                        id: LumenLight.generateId(),
-                        file: r.path,
-                        strengthModel: 1,
-                        strengthClip: 1
-                    });
-                    return r;
-                });
-                cp.render();
-                report(results);
-            }
+            const r = await LoraSendPopup.deliverToPanel(list);
+            if (r.ok) report(r.results);
             this.close();
         });
         pop.appendChild(panelBtn);

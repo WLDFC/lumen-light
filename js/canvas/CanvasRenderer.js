@@ -73,6 +73,11 @@ class CanvasRenderer {
                               img.y + img.height < viewTop || img.y > viewBottom;
             if (offscreen) return;
 
+            // 忽略态（ComfyUI bypass 语义）：整体半透明绘制（与工作流
+            // 编辑器 .bypassed 的 opacity 0.72 同值）。占位图不可忽略，
+            // 半透明不会与其叠加态互斥；选中边框在循环尾恢复 alpha 后绘制
+            ctx.globalAlpha = img.bypassed ? 0.72 : 1;
+
             // 绘制图片：低分辨率档位下缩小/常规视角画显示代理（异步构建，
             // 未就绪或原生档/放大查看时画原图），原始对象不被修改
             // 视频对象始终绘制封面图（播放时由 DOM 播放器覆盖层接管）
@@ -116,6 +121,17 @@ class CanvasRenderer {
             // 视频对象：绘制播放图标覆盖层（提示双击可播放）
             if (NodeTypes.isVideo(img.source)) {
                 this.drawVideoOverlay(img, viewport.scale);
+            }
+
+            ctx.globalAlpha = 1;   // 恢复不透明（选中边框/占位叠加不受影响）
+
+            // 占位图叠加态（2026-11-08）：采样进度条 / 失败红框 / 卡住黄条
+            // （预览帧不走此路——setPreview 直接换 imageObj.img 由上面主
+            // 绘制画出；running 且无进度数据时无叠加，保持原动画观感）
+            if (NodeTypes.isPlaceholder(img.source) && img.placeholderOverlay &&
+                (img.placeholderOverlay.state !== 'running' ||
+                 img.placeholderOverlay.pct != null)) {
+                this.drawPlaceholderOverlay(ctx, img);
             }
 
             // 如果图片被选中且不是生成反馈占位图，绘制选中边框
@@ -507,6 +523,99 @@ class CanvasRenderer {
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+    }
+
+    /**
+     * 占位图叠加态绘制（2026-11-08，尺寸等比——与 drawVideoOverlay 同口径，
+     * 不做屏幕像素补偿）：
+     *   - running + pct：中央环形进度圈（采样中转圈圈）+ 圈内步数文案
+     *   - failed：红色描边 + 半透明压暗 + 居中失败原因（幂等态，停帧后驻留
+     *     至用户删除/刷新）
+     *   - stuck：琥珀描边 + 居中提示（动画照跑——只上报不取消）
+     */
+    drawPlaceholderOverlay(ctx, img) {
+        const o = img.placeholderOverlay;
+        const inset = Math.min(img.width, img.height) * 0.04;
+        ctx.save();
+
+        if (o.state === 'failed') {
+            // 红描边 + 压暗 + 原因文案
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = Math.max(2, Math.min(img.width, img.height) * 0.006);
+            ctx.strokeRect(img.x, img.y, img.width, img.height);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+            ctx.fillRect(img.x, img.y, img.width, img.height);
+            ctx.fillStyle = '#fecaca';
+            ctx.font = `${Math.max(12, img.width * 0.035)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            this._drawWrappedText(ctx, `✕ ${o.message || '生成失败'}`,
+                img.x + img.width / 2, img.y + img.height / 2, img.width - inset * 2);
+        } else if (o.state === 'stuck') {
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = Math.max(2, Math.min(img.width, img.height) * 0.006);
+            ctx.strokeRect(img.x, img.y, img.width, img.height);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+            ctx.fillRect(img.x, img.y, img.width, img.height);
+            ctx.fillStyle = '#fde68a';
+            ctx.font = `${Math.max(12, img.width * 0.035)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            this._drawWrappedText(ctx, '⚠ 疑似卡住：长时间无响应（不自动取消）',
+                img.x + img.width / 2, img.y + img.height / 2, img.width - inset * 2);
+        } else if (o.pct != null) {
+            // 中央环形进度圈（2026-11-09 用户拍板：替代底部进度条）——
+            // 深色圆底 + 蓝色弧线按 pct 扫过 + 圈内步数（如 12/20）
+            this._drawSpinner(ctx, img, o.pct, o.stepText || '');
+        }
+        ctx.restore();
+    }
+
+    /** 占位图中央环形进度圈：深色圆底 + 进度弧 + 圈内步数文案 */
+    _drawSpinner(ctx, img, pct, text) {
+        const cx = img.x + img.width / 2;
+        const cy = img.y + img.height / 2;
+        const r = Math.min(img.width, img.height) * 0.14;
+        const p = Math.max(0, Math.min(1, pct));
+
+        // 深色圆底（衬白底动画帧上的可读性）
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 进度弧：12 点方向起顺时针扫 pct 圈，圆头端帽
+        ctx.strokeStyle = '#60a5fa';
+        ctx.lineWidth = r * 0.18;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.82, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2);
+        ctx.stroke();
+
+        // 圈内步数（如 12/20；字号按圆径收——五字符要塞进内径）
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.max(11, r * 0.5)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, cx, cy + r * 0.02);
+    }
+
+    /** 简易换行文案（占位图失败原因可能较长，按宽度折行居中） */
+    _drawWrappedText(ctx, text, cx, cy, maxWidth) {
+        const lines = [];
+        let line = '';
+        for (const ch of String(text)) {
+            if (ctx.measureText(line + ch).width > maxWidth && line) {
+                lines.push(line);
+                line = ch;
+            } else {
+                line += ch;
+            }
+        }
+        if (line) lines.push(line);
+        const lineH = parseFloat(ctx.font) * 1.3;
+        const startY = cy - ((lines.length - 1) * lineH) / 2;
+        lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineH));
     }
 
     /**

@@ -12,8 +12,10 @@
  *            （来自 /api/comfy-node/models 的 object_info 代理）。
  *         3. 持有参数状态并暴露 getState()/setState()（节点存档恢复用）
  *            与 getOverrides()（编译成 /api/comfy-node/run 的覆盖表）。
- *         4. loraStack 选项（面板专属）：在模型行下方渲染可折叠的 LoRA
- *            叠加区，getLoras() 导出生效条目，作为独立 loras 参数随
+ *         4. loraStack 选项（面板专属）：LoRA 叠加区（UI/事件/持久化/
+ *            生效导出/封面选择器挂载）拆至 comfy-param-rows/ComfyLoraStack.js
+ *            原型混入（ADR 083，本文件之后加载），本文件保留 options.loraStack
+ *            开关与调用点；getLoras() 导出生效条目作为独立 loras 参数随
  *            /api/comfy-node/run 提交（后端 injectLoraChain 追加在模板
  *            lora 之后）；不随工作流切换重置
  *
@@ -37,7 +39,16 @@ class ComfyParamRows {
      *                                        自管数量 UI 时传 false）
      * @param {boolean} [options.loraStack] - 是否渲染可折叠的 LoRA 叠加区
      *                                        （面板专属；画布节点走独立的
-     *                                        LoRA 节点，不传此项）
+     *                                        LoRA 节点，不传此项；实现在
+     *                                        comfy-param-rows/ComfyLoraStack.js
+     *                                        混入）
+     * @param {boolean} [options.sizePresets] - 尺寸行右侧是否附「预设」下拉
+     *                                        （面板专属；画布节点不开启）。
+     *                                        选项来自 CoordinateLayout
+     *                                        .COMFY_PRESET_SIZES 八档
+     *                                        （共享五档 + Comfy 追加三档；
+     *                                        漫画/坐标编辑器仍读五档
+     *                                        PRESET_SIZES，不受追加影响）
      * @param {Function} [options.onRendered] - 参数行重建/清空/占位后的回调
      *                                        （宿主借此同步行外 UI，如
      *                                        数量步进器的显隐与数值）
@@ -48,6 +59,7 @@ class ComfyParamRows {
         this.maxCount = options.maxCount || 8;
         this.countRow = options.countRow !== false;
         this.loraStack = options.loraStack === true;
+        this.sizePresets = options.sizePresets === true;
         this.onRendered = options.onRendered || null;
 
         // 参数状态（字段与画布节点存档字段一一对应）
@@ -56,22 +68,10 @@ class ComfyParamRows {
         this.modelLists = null;        // { checkpoints, unets, loras, samplers }
         this.modelsConnected = false;  // ComfyUI 模型清单是否读取成功
 
-        // LoRA 叠加堆栈（loraStack=true 时可用）。独立于 this.state：
-        // 不随工作流切换重置（resetOnWorkflowChange 不影响它），也不进入
-        // 画布节点的存档字段——它是面板侧的用户附加选择，跨工作流保留。
-        // 条目结构与画布 LoraNode 一致：{id, file, strengthModel, strengthClip}，
-        // file 为空 = 此条不生效（提交时过滤）
-        this.loras = [];
-
-        // 工作流模板内嵌 lora 的删除记录（loraStack 模式）：条目随工作流
-        // 探测生成，删除 = 提交时 bypass 剔除节点（bypassLoras 参数，后端
-        // applyBypass 直通重连）。仅内存记录——重新加载工作流（切换/刷新
-        // 后恢复选中）即自动恢复内嵌 lora，无持久化
-        this.workflowId = null;
-        this.deletedLoraIds = new Set();
-
-        // 叠加区折叠状态（与提示词框同机制，记忆在 localStorage，默认折叠）
-        this.loraStackCollapsed = localStorage.getItem('comfyLoraStackCollapsed') !== 'false';
+        // LoRA 叠加域状态（loras / workflowId / deletedLoraIds /
+        // loraStackCollapsed）：初始化在 comfy-param-rows/ComfyLoraStack.js
+        // 混入的 _initLoraStackState()（无条件调用，画布节点实例同样走一遍）
+        this._initLoraStackState();
     }
 
     /**
@@ -165,14 +165,8 @@ class ComfyParamRows {
     setModelLists(lists, connected) {
         this.modelLists = lists || { checkpoints: [], unets: [], loras: [], samplers: [] };
         this.modelsConnected = !!connected;
-        // 清单就绪后自动补归一（ADR 028 决策四）：离线期间投递的条目按原
-        // 路径入栈，清单到位后回扫唯一文件名匹配的条目就地更正，避免
-        // 「先投递后开 ComfyUI」的时机差残留成永远的不在清单
-        const healed = window.LoraSendPopup?.healEntries?.(this.loras, this.modelLists.loras);
-        if (healed > 0) {
-            console.info(`[LoRA叠加区] ${healed} 只历史条目已按 ComfyUI 清单自动更正路径`);
-            window.socket?.showNotification?.(`${healed} 只历史 LoRA 已自动更正为 ComfyUI 清单路径`, 4000);
-        }
+        // 叠加区历史条目补归一（ADR 028 决策四，LoRA 域混入）
+        this._healLoraStackEntries();
         if (this.detected) this.render();
     }
 
@@ -332,7 +326,7 @@ class ComfyParamRows {
         // 面板 LoRA 叠加区（options.loraStack）：可堆叠条目独立于工作流模板，
         // 提交时作为独立 loras 参数注入（追加在模板 lora 之后）。位置在
         // 模型/LoRA 行之后、步数行之前——常规工作流（无模板 lora）里
-        // 即"主模型下面"
+        // 即"主模型下面"（渲染在 comfy-param-rows/ComfyLoraStack.js 混入）
         if (this.loraStack) rows.push(this._renderLoraStack());
 
         // 合并行辅助：两个参数都有探测值时并排一行（comfy-param-pair，
@@ -397,10 +391,19 @@ class ComfyParamRows {
             pushRow('降噪', denoiseControl(s.denoise !== null ? s.denoise : denoiseTargets[0].current));
         }
 
-        // 尺寸（宽 × 高同行）
+        // 尺寸（宽 × 高同行；sizePresets 开启时右侧附按钮样式的「预设」下拉，
+        // 占位不带省略号——按钮定宽只求放下二字，交互同漫画编辑器画幅预设。
+        // 八档清单 = 共享五档 + Comfy 追加三档（见 CoordinateLayout 注释）
         if (sizeTargets.length > 0) {
             const w = s.sizeW !== null ? s.sizeW : sizeTargets[0].width;
             const h = s.sizeH !== null ? s.sizeH : sizeTargets[0].height;
+            const presetSel = this.sizePresets
+                ? `<select class="comfy-size-preset" title="常用尺寸预设">` +
+                  `<option value="">预设</option>` +
+                  CoordinateLayout.COMFY_PRESET_SIZES.map((p, i) =>
+                      `<option value="${i}">${LumenLight.escapeHtml(p.label)}</option>`).join('') +
+                  `</select>`
+                : '';
             rows.push(`
                 <div class="comfy-param-row">
                     <div class="comfy-param-label">尺寸</div>
@@ -410,6 +413,7 @@ class ComfyParamRows {
                         <span class="comfy-size-x">×</span>
                         <input type="number" class="comfy-num-input comfy-height-input" min="64" max="8192" step="8"
                                value="${h}" title="高度">
+                        ${presetSel}
                     </div>
                 </div>
             `);
@@ -444,35 +448,6 @@ class ComfyParamRows {
         this.onRendered?.();
         // 叠加区内容可能随工作流切换/内嵌删除/清单回填变化 → 通知触发词管理器
         this._emitLoraStackChanged();
-    }
-
-    /**
-     * 初始化 LoRA 封面选择器挂载点（.lfs-host）：
-     * - 内嵌条目（data-node-id）：组件先建空壳，随后 _bindDynamicRows →
-     *   _fillModelSelect 经 el._lfs.setFiles 灌清单与选中值
-     * - 用户自加条目（data-entry-id）：此处直接喂清单与当前值
-     */
-    _initLoraFileSelects() {
-        const hosts = this.container.querySelectorAll('.lfs-host');
-        if (hosts.length === 0) return;
-        const files = (this.modelLists && this.modelLists.loras) || [];
-        hosts.forEach((el) => {
-            if (el.dataset.nodeId) {
-                new LoraFileSelect(el, {
-                    files,
-                    value: this.state.models[el.dataset.nodeId] || '',
-                    allowEmpty: false
-                });
-            } else if (el.dataset.entryId) {
-                const entry = this.loras.find((en) => en.id === el.dataset.entryId);
-                new LoraFileSelect(el, {
-                    files,
-                    value: entry ? entry.file : '',
-                    allowEmpty: true,
-                    emptyLabel: '-- 选择 LoRA 文件 --'
-                });
-            }
-        });
     }
 
     /**
@@ -577,6 +552,23 @@ class ComfyParamRows {
             });
         }
 
+        // 预设下拉（sizePresets 选项，面板专属）：闭态恒显「预设」占位——
+        // 选中即写入宽高状态并回填输入框，随后复位占位（同 MangaDom 预设交互）。
+        // 占位项先短路：Number('') 为 0 会误套第一档（选预设后回选占位时触发）
+        const presetSelect = root.querySelector('.comfy-size-preset');
+        if (presetSelect) {
+            presetSelect.addEventListener('change', () => {
+                if (presetSelect.value === '') return;
+                const p = CoordinateLayout.COMFY_PRESET_SIZES[Number(presetSelect.value)];
+                presetSelect.value = '';
+                if (!p) return;
+                s.sizeW = clampSize(p.width);
+                s.sizeH = clampSize(p.height);
+                if (widthInput) widthInput.value = s.sizeW;
+                if (heightInput) heightInput.value = s.sizeH;
+            });
+        }
+
         const denoiseInput = root.querySelector('.comfy-denoise-input');
         if (denoiseInput) {
             denoiseInput.addEventListener('change', () => {
@@ -597,341 +589,6 @@ class ComfyParamRows {
         }
 
         this._bindLoraStack();
-    }
-
-    // ==================== LoRA 叠加区（面板 loraStack 模式） ====================
-
-    /**
-     * 叠加区当前生效条数：内嵌条目（未删除且未取消勾选）+ 用户条目
-     * （选了文件且未取消勾选）。标题栏徽标用
-     * @returns {number}
-     */
-    _loraStackActiveCount() {
-        let n = 0;
-        if (this.detected) {
-            for (const loader of this.detected.loaders) {
-                if (loader.kind === 'lora' && !this.deletedLoraIds.has(loader.nodeId) &&
-                    this.state.loraEnabled[loader.nodeId] !== false) {
-                    n++;
-                }
-            }
-        }
-        n += this.loras.filter((e) => e.file && e.enabled !== false).length;
-        return n;
-    }
-
-    /**
-     * 渲染 LoRA 叠加区 HTML：折叠标题栏（含生效条数徽标）+ 条目列表 + 添加按钮。
-     * 条目两类：
-     *   - 内嵌条目（is-embedded，带「模板」标签）：来自工作流模板扫描出的
-     *     lora 加载节点——文件下拉/启用勾选复用动态行绑定（data-node-id，
-     *     写 state.models / state.loraEnabled 经 overrides 注入），强度输入
-     *     写 state.loraStrengths；X = 删除（提交时 bypass 剔除节点，可恢复）；
-     *   - 用户条目：点「+ 添加 LoRA」追加的独立叠加项，经 getLoras() 随
-     *     提交交给后端 injectLoraChain 追加在模板 lora 之后。
-     * 样式复用面板参数行规格
-     * @returns {string} HTML 片段
-     */
-    _renderLoraStack() {
-        const s = this.state;
-
-        // 内嵌条目（已删除的不渲染）
-        const embeddedLoaders = this.detected
-            ? this.detected.loaders.filter((l) => l.kind === 'lora' && !this.deletedLoraIds.has(l.nodeId))
-            : [];
-        const embeddedHtml = embeddedLoaders.map((loader) => {
-            const nodeId = LumenLight.escapeHtml(loader.nodeId);
-            const off = s.loraEnabled[loader.nodeId] === false;
-            const st = s.loraStrengths[loader.nodeId] || {};
-            const hasM = loader.strengthFields.includes('strength_model');
-            const hasC = loader.strengthFields.includes('strength_clip');
-            const mVal = st.strengthModel !== undefined ? st.strengthModel : loader.strengths.strength_model;
-            const cVal = st.strengthClip !== undefined ? st.strengthClip : loader.strengths.strength_clip;
-            // 强度区：两个都有 → 并排行；只有其一时单行；无字面强度 → 不渲染
-            // （强度是连线输入的模板 lora 只能换文件/删除，强度走工作流原值）
-            let strengthHtml = '';
-            if (hasM && hasC) {
-                strengthHtml = `
-                    <div class="comfy-param-pair">
-                        <div class="comfy-param-row">
-                            <div class="comfy-param-label">模型强度</div>
-                            <input type="number" class="comfy-num-input comfy-lorastack-strength-model"
-                                   min="-5" max="5" step="0.05" value="${mVal}"
-                                   title="模型强度（strength_model）">
-                        </div>
-                        <div class="comfy-param-row">
-                            <div class="comfy-param-label">CLIP强度</div>
-                            <input type="number" class="comfy-num-input comfy-lorastack-strength-clip"
-                                   min="-5" max="5" step="0.05" value="${cVal}"
-                                   title="CLIP 强度（strength_clip）">
-                        </div>
-                    </div>`;
-            } else if (hasM || hasC) {
-                strengthHtml = `
-                    <div class="comfy-param-row">
-                        <div class="comfy-param-label">${hasM ? '模型强度' : 'CLIP强度'}</div>
-                        <input type="number" class="comfy-num-input ${hasM ? 'comfy-lorastack-strength-model' : 'comfy-lorastack-strength-clip'}"
-                               min="-5" max="5" step="0.05" value="${hasM ? mVal : cVal}"
-                               title="${hasM ? '模型强度（strength_model）' : 'CLIP 强度（strength_clip）'}">
-                    </div>`;
-            }
-            // 无字面强度字段时无法软关闭，不出启用勾选（删除仍可用）
-            const checkboxHtml = loader.strengthFields.length > 0
-                ? `<input type="checkbox" class="comfy-lora-enable-input comfy-lorastack-enable"
-                          data-node-id="${nodeId}"
-                          title="勾选后此条 LoRA 生效；取消勾选则注入强度 0 关闭（不影响已填的强度值）"${off ? '' : ' checked'}>`
-                : '';
-            return `
-                <div class="comfy-lorastack-entry is-embedded${off ? ' is-off' : ''}" data-node-id="${nodeId}">
-                    <div class="comfy-param-row">
-                        <div class="comfy-param-label">lora<span class="comfy-lorastack-tag">模板</span></div>
-                        <div class="comfy-lorastack-head">
-                            <div class="llm-model-select comfy-model-select comfy-lorastack-file lfs-host" data-node-id="${nodeId}" title="模板内嵌 LoRA 文件（工作流自带，可更换，点开看封面）"></div>
-                            ${checkboxHtml}
-                            <button type="button" class="comfy-lorastack-remove" title="删除此模板 LoRA（提交时从工作流剔除；重新加载工作流后恢复）">✕</button>
-                        </div>
-                    </div>
-                    ${strengthHtml}
-                </div>
-            `;
-        }).join('');
-
-        const userEntriesHtml = this.loras.map((entry) => `
-            <div class="comfy-lorastack-entry${entry.enabled === false ? ' is-off' : ''}" data-entry-id="${LumenLight.escapeHtml(entry.id)}">
-                <div class="comfy-param-row">
-                    <div class="comfy-param-label">lora</div>
-                        <div class="comfy-lorastack-head">
-                            <div class="llm-model-select comfy-model-select comfy-lorastack-file lfs-host" data-entry-id="${LumenLight.escapeHtml(entry.id)}" title="LoRA 文件（选空则此条不生效，点开看封面）"></div>
-                            <input type="checkbox" class="comfy-lorastack-enable"
-                                   title="勾选后此条 LoRA 生效；取消勾选则提交时跳过（不影响已填的强度值）"${entry.enabled === false ? '' : ' checked'}>
-                            <button type="button" class="comfy-lorastack-remove" title="删除此 LoRA">✕</button>
-                        </div>
-                </div>
-                <div class="comfy-param-pair">
-                    <div class="comfy-param-row">
-                        <div class="comfy-param-label">模型强度</div>
-                        <input type="number" class="comfy-num-input comfy-lorastack-strength-model"
-                               min="-5" max="5" step="0.05" value="${entry.strengthModel}"
-                               title="模型强度（strength_model）">
-                    </div>
-                    <div class="comfy-param-row">
-                        <div class="comfy-param-label">CLIP强度</div>
-                        <input type="number" class="comfy-num-input comfy-lorastack-strength-clip"
-                               min="-5" max="5" step="0.05" value="${entry.strengthClip}"
-                               title="CLIP 强度（strength_clip）">
-                    </div>
-                </div>
-            </div>
-        `).join('');
-
-        // 空态：无内嵌条目且无用户条目
-        const emptyHtml = (embeddedLoaders.length === 0 && this.loras.length === 0)
-            ? `<div class="comfy-lorastack-empty">暂无 LoRA，点下方按钮添加；叠加的 LoRA 会作用于当前工作流的生成结果</div>`
-            : '';
-
-        return `
-            <div class="comfy-lorastack collapsible${this.loraStackCollapsed ? ' collapsed' : ''}">
-                <div class="comfy-lorastack-topbar">
-                    <div class="collapsible-header comfy-lorastack-header" title="点击展开/收起 LoRA 叠加列表">
-                        <span class="comfy-param-label">LoRA 叠加${this._loraStackActiveCount() > 0 ? `（${this._loraStackActiveCount()}）` : ''}</span>
-                        <button type="button" class="collapse-toggle" aria-label="展开/收起 LoRA 叠加">▶</button>
-                    </div>
-                    <button type="button" class="comfy-lorastack-triggers"
-                            title="管理 LoRA 触发词（按 Civitai 触发词开关与权重，自动写入正面提示词框末尾）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7.01"/></svg>触发词</button>
-                </div>
-                <div class="collapsible-body comfy-lorastack-body">
-                    ${embeddedHtml}
-                    ${userEntriesHtml}
-                    ${emptyHtml}
-                    <button type="button" class="comfy-lorastack-add" title="添加一条 LoRA">+ 添加 LoRA</button>
-                </div>
-            </div>
-        `;
-    }
-
-    /**
-     * 绑定叠加区事件（每次 render 重建 DOM 后调用，绑定在新建的区块元素上，
-     * 不挂在 container 上避免重渲染累积监听器）：
-     *   - 标题栏点击：折叠/展开（▶/▼ 箭头 + localStorage 记忆，同提示词框）
-     *   - change 委托：文件选择（选空 = 不生效，同步徽标计数）/ 强度修改
-     *   - click 委托：删除条目 / 添加条目（重建列表）
-     */
-    _bindLoraStack() {
-        if (!this.loraStack) return;
-        const section = this.container.querySelector('.comfy-lorastack');
-        if (!section) return;
-
-        // 折叠切换：与提示词框一致——整条标题栏可点，箭头随状态翻转
-        const header = section.querySelector('.comfy-lorastack-header');
-        header.addEventListener('click', () => {
-            this.loraStackCollapsed = !section.classList.contains('collapsed');
-            section.classList.toggle('collapsed', this.loraStackCollapsed);
-            const toggle = header.querySelector('.collapse-toggle');
-            toggle.textContent = this.loraStackCollapsed ? '▶' : '▼';
-            localStorage.setItem('comfyLoraStackCollapsed', String(this.loraStackCollapsed));
-        });
-        // 渲染后同步一次箭头方向（默认折叠态）
-        header.querySelector('.collapse-toggle').textContent =
-            this.loraStackCollapsed ? '▶' : '▼';
-
-        // 「触发词」按钮：唤出触发词管理器弹窗（监听方为 LoraTriggerManager）。
-        // 按钮在 topbar 上、折叠标题栏之外（独立按钮不叠在 lora 栏里），
-        // 不会触发标题栏的折叠点击，无需再挡冒泡
-        const triggersBtn = section.querySelector('.comfy-lorastack-triggers');
-        if (triggersBtn) {
-            triggersBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                document.dispatchEvent(new CustomEvent('lumen-lora-triggers-open'));
-            });
-        }
-
-        // 条目修改（事件委托，直接改状态不重建 DOM，保持输入焦点）。
-        // 内嵌条目（data-node-id）与用户条目（data-entry-id）分流：
-        // 内嵌条目的文件/勾选由动态行绑定处理，这里只接强度输入
-        section.addEventListener('change', (e) => {
-            const entryEl = e.target.closest('.comfy-lorastack-entry');
-            if (!entryEl) return;
-
-            if (entryEl.dataset.nodeId) {
-                // 内嵌条目：强度改值写 state.loraStrengths（overrides 注入）
-                const nodeId = entryEl.dataset.nodeId;
-                const loader = this.detected?.loaders.find((l) => l.nodeId === nodeId);
-                if (e.target.classList.contains('comfy-lorastack-strength-model')) {
-                    const st = this.state.loraStrengths[nodeId] = this.state.loraStrengths[nodeId] || {};
-                    st.strengthModel = ComfyParamRows._clampStrength(
-                        e.target.value, st.strengthModel ?? loader?.strengths?.strength_model ?? 1);
-                    e.target.value = st.strengthModel;
-                } else if (e.target.classList.contains('comfy-lorastack-strength-clip')) {
-                    const st = this.state.loraStrengths[nodeId] = this.state.loraStrengths[nodeId] || {};
-                    st.strengthClip = ComfyParamRows._clampStrength(
-                        e.target.value, st.strengthClip ?? loader?.strengths?.strength_clip ?? 1);
-                    e.target.value = st.strengthClip;
-                }
-                return;
-            }
-
-            const entry = this.loras.find((en) => en.id === entryEl.dataset.entryId);
-            if (!entry) return;
-
-            if (e.target.classList.contains('comfy-lorastack-file')) {
-                entry.file = e.target.value;
-                this._updateLoraStackCount();
-                this._emitLoraStackChanged();
-            } else if (e.target.classList.contains('comfy-lorastack-enable')) {
-                // 启用勾选：就地改状态与置灰态，不重建 DOM（保持焦点/滚动）
-                entry.enabled = e.target.checked;
-                entryEl.classList.toggle('is-off', !entry.enabled);
-                this._updateLoraStackCount();
-                this._emitLoraStackChanged();
-            } else if (e.target.classList.contains('comfy-lorastack-strength-model')) {
-                entry.strengthModel = ComfyParamRows._clampStrength(e.target.value, entry.strengthModel);
-                e.target.value = entry.strengthModel;
-            } else if (e.target.classList.contains('comfy-lorastack-strength-clip')) {
-                entry.strengthClip = ComfyParamRows._clampStrength(e.target.value, entry.strengthClip);
-                e.target.value = entry.strengthClip;
-            }
-        });
-
-        // 删除 / 添加 / 恢复（重建列表，与画布 LoraNode.renderEntries 同策略）
-        section.addEventListener('click', (e) => {
-            const removeBtn = e.target.closest('.comfy-lorastack-remove');
-            if (removeBtn) {
-                const entryEl = removeBtn.closest('.comfy-lorastack-entry');
-                if (entryEl && entryEl.dataset.nodeId) {
-                    // 内嵌条目删除：记录节点 id（提交时后端 bypass 剔除），
-                    // 重建列表；重新加载工作流后自动恢复
-                    this._deleteEmbeddedLora(entryEl.dataset.nodeId);
-                    this.render();
-                    return;
-                }
-                this.loras = this.loras.filter((en) => en.id !== entryEl.dataset.entryId);
-                this.render();
-                return;
-            }
-            if (e.target.closest('.comfy-lorastack-add')) {
-                this.loras.push({
-                    id: LumenLight.generateId(),
-                    file: '',
-                    strengthModel: 1,
-                    strengthClip: 1,
-                    enabled: true
-                });
-                // 添加时自动展开，方便立即选择文件
-                this._setLoraStackCollapsed(section, false);
-                this.render();
-            }
-        });
-    }
-
-    /**
-     * 切换叠加区折叠状态并同步箭头与 localStorage（渲染期间的就地切换，
-     * 不经过 render）
-     */
-    _setLoraStackCollapsed(section, collapsed) {
-        this.loraStackCollapsed = collapsed;
-        section.classList.toggle('collapsed', collapsed);
-        const toggle = section.querySelector('.collapse-toggle');
-        if (toggle) toggle.textContent = collapsed ? '▶' : '▼';
-        localStorage.setItem('comfyLoraStackCollapsed', String(collapsed));
-    }
-
-    /**
-     * 就地更新标题栏的生效条数徽标（文件选择/勾选变更时调用，不重建 DOM）
-     */
-    _updateLoraStackCount() {
-        const label = this.container.querySelector('.comfy-lorastack-header .comfy-param-label');
-        if (!label) return;
-        const n = this._loraStackActiveCount();
-        label.textContent = `LoRA 叠加${n > 0 ? `（${n}）` : ''}`;
-    }
-
-    /**
-     * 导出生效中的叠加 LoRA 条目（面板提交用）。文件为空或勾选框取消启用
-     * 的条目不生效，提交时过滤（enabled 缺省视为启用，兼容未写该字段的
-     * 旧条目；与画布 LoraNode.getEnabledLoras 同语义）。
-     * 返回值直接作为 /api/comfy-node/run 的 loras 参数——后端
-     * injectLoraChain 动态拼链并追加在模板 lora 之后
-     * @returns {Array<{file: string, strengthModel: number, strengthClip: number}>}
-     */
-    getLoras() {
-        if (!this.loraStack) return [];
-        return this.loras
-            .filter((e) => e.file && e.enabled !== false)
-            .map((e) => ({ file: e.file, strengthModel: e.strengthModel, strengthClip: e.strengthClip }));
-    }
-
-    /**
-     * 叠加区生效内容变化通知（LoraTriggerManager 监听）：内嵌/用户条目的
-     * 文件选择、启停、增删与整体重渲染后派发。监听方做幂等重算，
-     * 重复派发无害。仅 loraStack 模式派发（画布节点无叠加区）
-     */
-    _emitLoraStackChanged() {
-        if (!this.loraStack) return;
-        document.dispatchEvent(new CustomEvent('lumen-lorastack-changed'));
-    }
-
-    /**
-     * 导出叠加区生效条目（触发词管理器用）：内嵌条目（未删除、勾选启用、
-     * 文件非空）+ 用户条目（文件非空、启用），栈序输出。file 保持
-     * ComfyUI 原生形态（可能反斜杠，ADR 028）——归一由管理器侧
-     * LoraTriggerText.normalizeRel 统一处理
-     * @returns {Array<{file: string}>}
-     */
-    getStackTriggerLoras() {
-        if (!this.loraStack) return [];
-        const out = [];
-        if (this.detected) {
-            for (const loader of this.detected.loaders) {
-                if (loader.kind !== 'lora' || this.deletedLoraIds.has(loader.nodeId)) continue;
-                if (this.state.loraEnabled[loader.nodeId] === false) continue;
-                const file = this.state.models[loader.nodeId];
-                if (file) out.push({ file });
-            }
-        }
-        for (const entry of this.loras) {
-            if (entry.file && entry.enabled !== false) out.push({ file: entry.file });
-        }
-        return out;
     }
 
     /**
@@ -991,7 +648,7 @@ class ComfyParamRows {
 
     /**
      * 强度值清洗：非法/缺省回落默认值，钳制到 [-5, 5]
-     * （与画布 LoraNode._clampStrength 同语义）
+     * （与画布 LoraNode._clampStrength 同语义；LoRA 域混入亦经全局类引用复用）
      * @param {*} v - 输入值
      * @param {number} fallback - 回落值
      * @returns {number}

@@ -78,6 +78,7 @@ Object.assign(window.MangaEditor.prototype, {
             const hidden = this._hiddenCids.has(item.cid);
             const card = document.createElement('div');
             card.className = 'manga-item' + (i === this.selected ? ' selected' : '') +
+                (this._multiSelected && this._multiSelected.has(item.cid) ? ' multi-selected' : '') +
                 (collapsed ? ' collapsed' : '') + (hidden ? ' is-hidden' : '');
             card.dataset.index = i;
             card.innerHTML = `
@@ -107,12 +108,6 @@ Object.assign(window.MangaEditor.prototype, {
                 <input type="text" class="manga-item-title" placeholder="标题（可选，显示在框的标签上）">
                 <textarea class="manga-item-caption" rows="4" placeholder="这块区域是什么：主体/动作/外观，或排印风格（AI 可代写）"></textarea>
                 <input type="text" class="manga-item-text" placeholder="文字内容（逐字可见，支持 \\n 换行）"${item.label === 'text' ? '' : ' hidden'}>
-                <div class="manga-item-bbox" title="bbox：x1, y1, x2, y2（左上角原点，像素）">
-                    <input type="number" class="manga-bbox-n" data-k="0">
-                    <input type="number" class="manga-bbox-n" data-k="1">
-                    <input type="number" class="manga-bbox-n" data-k="2">
-                    <input type="number" class="manga-bbox-n" data-k="3">
-                </div>
             `;
             this.itemsEl.appendChild(card);
 
@@ -121,11 +116,9 @@ Object.assign(window.MangaEditor.prototype, {
             const textInput = card.querySelector('.manga-item-text');
             const labelSel = card.querySelector('.manga-item-label');
             const shotSel = card.querySelector('.manga-item-shot');
-            const bboxInputs = card.querySelectorAll('.manga-bbox-n');
             captionTa.value = item.caption;
             titleInput.value = item.title || '';
             textInput.value = item.text || '';
-            bboxInputs.forEach((inp) => { inp.value = item.bbox[Number(inp.dataset.k)]; });
 
             // 字段直写草稿（不重建列表，避免打断输入；文本合并成一步历史）
             // 标题：编辑器侧元数据（舞台标签显示，编译前剥离），空值删字段
@@ -160,30 +153,21 @@ Object.assign(window.MangaEditor.prototype, {
                 this._renderStage();
             });
             shotSel.addEventListener('change', () => this._onShotChange(i, shotSel.value, captionTa));
-            bboxInputs.forEach((inp) => inp.addEventListener('change', () => {
-                const before = this._histSnapshot();
-                const k = Number(inp.dataset.k);
-                const box = item.bbox.slice();
-                box[k] = Number(inp.value);
-                item.bbox = CoordinateLayout.normalizeBox(box, this.draft.width, this.draft.height);
-                bboxInputs.forEach((x) => { x.value = item.bbox[Number(x.dataset.k)]; });
-                this._commitHistory(before, '改坐标');
-                this._invalidateCompiled();
-                this._renderStage();
-            }));
 
             // 标题框可点选元素（折叠卡片唯一常驻的字段——点它也应选中，
             // 与点卡片空白处选中一致；不拦默认行为，输入不受影响）
             titleInput.addEventListener('pointerdown', () => {
                 this._clickBurst = null;
-                this._select(i);
+                this._selectSingle(i);
             });
 
-            // 点卡片（非控件区域）选中对应舞台框
+            // 点卡片（非控件区域）选中对应舞台框；Shift+点=切换多选
+            // （逐格生成范围，2026-11-12）
             card.addEventListener('pointerdown', (e) => {
                 if (e.target.closest('input, textarea, select, button')) return;
                 this._clickBurst = null;   // 换选择途径，连点链作废
-                this._select(i);
+                if (e.shiftKey) this._toggleMultiSelect(i);
+                else this._selectSingle(i);
             });
             card.querySelector('.manga-item-del').addEventListener('click', () => this._deleteItem(i));
 
@@ -253,11 +237,62 @@ Object.assign(window.MangaEditor.prototype, {
         this._renderStage();
     },
 
+    /**
+     * 单选（普通点击路径，2026-11-12）：先清多选集合再常规选中——
+     * 多选集合只服务逐格生成范围，普通选择语义不变
+     */
+    _selectSingle(i) {
+        if (this._multiSelected && this._multiSelected.size) {
+            this._multiSelected.clear();
+            this._syncMultiSelectUi();
+        }
+        this._select(i);
+    },
+
+    /**
+     * Shift+点击切换多选（逐格生成范围用）：cid 入集/出集。主选中跟随
+     * 新入集的框（出集的恰好是主选中时清掉）；存 cid——删框/重排的
+     * 下标漂移不腐蚀集合，失效 cid 收集时自然滤掉
+     */
+    _toggleMultiSelect(i) {
+        if (!this._multiSelected) this._multiSelected = new Set();
+        const item = this.draft.items[i];
+        if (!item) return;
+        if (this._multiSelected.has(item.cid)) {
+            this._multiSelected.delete(item.cid);
+            if (this.selected === i) {
+                this.selected = -1;
+                if (this.itemsEl) {
+                    this.itemsEl.querySelectorAll('.manga-item.selected')
+                        .forEach((c) => c.classList.remove('selected'));
+                }
+            }
+        } else {
+            this._multiSelected.add(item.cid);
+            this._select(i);   // 主选中跟随（层选中互斥等走常规路径）
+        }
+        this._syncMultiSelectUi();
+    },
+
+    /** 多选集合 UI 同步：卡片 multi-selected 类 + 舞台重绘（描边随集合） */
+    _syncMultiSelectUi() {
+        if (this.itemsEl) {
+            const cids = this._multiSelected || new Set();
+            this.itemsEl.querySelectorAll('.manga-item').forEach((c) => {
+                const item = this.draft.items[Number(c.dataset.index)];
+                c.classList.toggle('multi-selected', !!(item && cids.has(item.cid)));
+            });
+        }
+        this._renderStage();
+    },
+
     _deleteItem(i) {
         const before = this._histSnapshot();
+        const item = this.draft.items[i];
         this.draft.items.splice(i, 1);
         if (this.selected === i) this.selected = -1;
         else if (this.selected > i) this.selected--;
+        if (item && this._multiSelected) this._multiSelected.delete(item.cid);   // 多选集合存 cid：删框同步摘除
         this._clickBurst = null;
         this._commitHistory(before, '删除元素');
         this._invalidateCompiled();

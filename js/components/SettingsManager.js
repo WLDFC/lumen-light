@@ -32,6 +32,9 @@ const IMAGE_QUALITY_KEY = 'lumenlight_canvas_image_quality';
 /** 提示词自动补全开关在 localStorage 中的键名 */
 const PROMPT_AUTOCOMPLETE_KEY = 'lumenlight_prompt_autocomplete';
 
+/** LoRA 封面悬停预览开关在 localStorage 中的键名 */
+const LORA_HOVER_PREVIEW_KEY = 'lumenlight_lora_hover_preview';
+
 class SettingsManager {
     /**
      * 读取当前选用的抠图模型 ID
@@ -74,12 +77,14 @@ class SettingsManager {
     /**
      * 读取画布显示质量档位
      * 供 ImageProxyCache 在绘制时获取代理长边上限，未设置过时默认
-     * 'native'（原生质量，不降采样）。档位只影响画布显示性能，
-     * 灯箱查看 / 高清放大 / 抠图 / 保存始终使用原始图片数据。
+     * 'balanced'（平衡档，代理长边 1024px——2026-11-12 用户拍板：发布版
+     * 默认原生档，画布图一多就卡顿，而新用户不知道有这个设置可调，
+     * 干脆默认平衡；需要原生清晰度可在 设置 → 通用 改回）。档位只影响
+     * 画布显示性能，灯箱查看 / 高清放大 / 抠图 / 保存始终使用原始图片数据。
      * @returns {string} 'native' | 'balanced' | 'performance'
      */
     static getImageQuality() {
-        return localStorage.getItem(IMAGE_QUALITY_KEY) || 'native';
+        return localStorage.getItem(IMAGE_QUALITY_KEY) || 'balanced';
     }
 
     /**
@@ -112,6 +117,24 @@ class SettingsManager {
         window.dispatchEvent(new CustomEvent('promptAutocompleteSettingChanged', {
             detail: { enabled }
         }));
+    }
+
+    /**
+     * 读取 LoRA 封面悬停预览开关
+     * 供 LoraFileSelect 在 hover 调度时读取（每次 hover 现查，改开关即时生效）
+     * @returns {boolean} 是否启用预览
+     */
+    static getLoraHoverPreviewEnabled() {
+        // 只有显式存过 'false' 才关闭，其余情况（含未设置）均开启
+        return localStorage.getItem(LORA_HOVER_PREVIEW_KEY) !== 'false';
+    }
+
+    /**
+     * 写入 LoRA 封面悬停预览开关（无需广播——预览每次 hover 现查此值）
+     * @param {boolean} enabled - 是否启用
+     */
+    static setLoraHoverPreviewEnabled(enabled) {
+        localStorage.setItem(LORA_HOVER_PREVIEW_KEY, enabled ? 'true' : 'false');
     }
 
     /**

@@ -138,7 +138,6 @@ describe('漫画编辑器 CSS 拆分契约（manga-editor 三件套）', () => {
             ['manga-panel.css', '.manga-item-shot', '左栏：景别下拉'],
             ['manga-panel.css', '.manga-item-fold', '左栏：折叠开关'],
             ['manga-panel.css', '.manga-item-eye', '左栏：眼睛钮'],
-            ['manga-panel.css', '.manga-bbox-n', '左栏：四坐标输入'],
             ['manga-panel.css', '.manga-out-side', '右栏：输出面板壳'],
             ['manga-panel.css', '.manga-palette-grid', '右栏：色板分区网格'],
             ['manga-panel.css', '.manga-swatch', '右栏：色板色块'],
@@ -147,15 +146,14 @@ describe('漫画编辑器 CSS 拆分契约（manga-editor 三件套）', () => {
             ['manga-panel.css', '.manga-compile-btn', '右栏：编译/复制钮'],
             ['manga-stage.css', '.manga-stage-wrap', '舞台：壳'],
             ['manga-stage.css', '.manga-stage', '舞台：canvas'],
-            ['manga-stage.css', '.manga-bg-tools', '标题栏：背景工具组'],
+            ['manga-stage.css', '.manga-title-btn', '标题栏：文字按钮通用类（分镜模板等复用）'],
             ['manga-stage.css', '.manga-brush-tools', '标题栏：画笔选项条（色板+粗细）'],
             ['manga-stage.css', '.manga-text-tools', '标题栏：文字选项条（字体/字号/横竖排/色板）'],
             ['manga-stage.css', '.manga-shape-tools', '标题栏：形状选项条（类型/填充/边框/边宽/圆角）'],
             ['manga-stage.css', '.manga-shape-type-btn', '形状选项条：类型四钮'],
             ['manga-stage.css', '.manga-shape-none-btn', '形状选项条：红斜杠去除钮'],
             ['manga-stage.css', '.manga-font-menu', '标题栏：字体下拉菜单（挂 body fixed 定位）'],
-            ['manga-stage.css', '.manga-text-editor', '文字工具：就地编辑框（透明 textarea 壳）'],
-            ['manga-stage.css', '.manga-bg-picker', '浮层：画布选图面板']
+            ['manga-stage.css', '.manga-text-editor', '文字工具：就地编辑框（透明 textarea 壳）']
         ];
         for (const [file, sel, why] of cases) {
             expect(parseSelectors(read(file))).toContain(sel);   // 在

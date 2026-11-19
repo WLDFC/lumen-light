@@ -54,10 +54,13 @@ class PromptPanel {
         // 数量下拉不在参数行内渲染（countRow=false），由运行按钮旁的
         // 步进器接管，上限四位数（面板独有，画布节点仍为 1-8 下拉）。
         // loraStack=true：在主模型行下方渲染可折叠的 LoRA 叠加区（面板独有，
-        // 画布侧的 LoRA 堆栈走独立的 LoRA 节点），堆栈跨工作流保留
+        // 画布侧的 LoRA 堆栈走独立的 LoRA 节点），堆栈跨工作流保留。
+        // sizePresets=true：尺寸行右侧附「预设」下拉（面板独有，画布节点不开
+        // 启），五档清单与漫画/坐标编辑器同源（CoordinateLayout.PRESET_SIZES）
         this.comfyParams = new ComfyParamRows(
             document.getElementById('comfyParams'),
-            { resetOnWorkflowChange: true, countRow: false, maxCount: 9999, loraStack: true }
+            { resetOnWorkflowChange: true, countRow: false, maxCount: 9999, loraStack: true,
+              sizePresets: true }
         );
         // 工作流管理器，工作流切换时更新当前工作流引用并刷新参数行，
         // 同时让内容槽位（图片/视频混合）跟随工作流的内容节点清单
@@ -83,6 +86,10 @@ class PromptPanel {
             getPrompts: () => this.promptInputManager.getPrompts(),
             getWorkflowId: () => this.workflowManager.getCurrentWorkflowId(),
             getOverrides: (batchCount) => this.comfyParams.getOverrides(batchCount),
+            // 探测到的 latent 尺寸节点（漫画逐格生成 run({latentSize})
+            // 一次性覆写目标；未探测到时为空数组）
+            getLatentSizeTargets: () =>
+                (this.comfyParams.detected && this.comfyParams.detected.sizeTargets) || [],
             getLoras: () => this.comfyParams.getLoras(),
             getDeletedLoraIds: () => this.comfyParams.getDeletedLoraIds(),
             getBatchCount: () =>

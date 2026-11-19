@@ -16,19 +16,27 @@
  *     （<同名>.preview.png/.jpg 等，无图显示名称首字占位块）；筛选排序下拉
  *     为 LumenDropdown 图标按钮模式（置顶优先/添加时间 新→旧/旧→新/
  *     仅看置顶，选择存 localStorage，时间口径用 /list 返回的 mtime 近似）；
+ *   - 布局模式（2026-11-08，工具行「布局」钮）：右缘留白收窄（--lora-
+ *     layout-gap，按 #promptPanel 实测左缘对齐+7px，坐标编辑器并排壳同款
+ *     口径——弹窗自身即遮罩，收右缘即露出下层，无需透明/穿透处理），右侧
+ *     露出并可直接操作 Comfy 面板；此模式下纸飞机/批量投递一键直投面板
+ *     LoRA 叠加区（LoraSendPopup.deliverToPanel，换名归一+清单自愈+自动
+ *     展开），面板未初始化回落弹窗；状态记忆 localStorage lumen.loraLayout，
+ *     视口 <1500px 按钮置灰不可切（css 媒体查询兜底回落全屏模态）；
  *   - 批量管理（LumenBatchManager 预制件）：批量按钮进入多选模式（封面
  *     右上角绿✓选择圈，星星/投递钮左移让位），配套批量条；卡片右键
  *     菜单（LumenContextMenu 预制件）提供投递/置顶/移动到文件夹/打开
  *     所在文件夹/删除——非批量对单只生效，批量对全部所选生效，删除/
  *     移动经 LumenConfirmDialog 确认（路径写死的工作流引用会断链）。
  *   - 封面右上角星星：点击置顶/取消置顶，置顶项排最前且星星变金色；
- *     状态持久化在后端 data/lora-meta.json（按 lora 相对路径记）。
+ *     状态持久化在后端 per-LoRA sidecar JSON（lora 旁 <同名>.json）。
  *
  * 子模块（js/components/lora-manager/，与 image-studio/ 同款拆分契约：
  * 子模块持有宿主实例读写状态，本类留同名薄代理，调用点零改动）：
  *   LoraInfoModal      信息窗（元信息/封面预览/触发词备注就地编辑/状态行）
  *   LoraCoverPicker    封面更换（画布选图浮层 + 本地图片 + 上传/缓存击穿）
- *   LoraSendPopup      纸飞机投递弹窗（投递到画布 LoRA 节点/Comfy 面板）
+ *   LoraSendPopup      纸飞机投递弹窗（投递到画布 LoRA 节点/Comfy 面板；
+ *                      deliverToPanel/reportResults 静态口供布局直投共用）
  *   LoraConfirmDelete  删除确认弹窗（含删后本地清单同步）
  * ESC 关闭优先级链在本类键盘监听里收口：确认框 > 信息窗 > 投递弹窗 > 主窗。
  *
@@ -81,6 +89,11 @@ class LoraManager {
         this._refreshing = false;    // 清单扫描防重入（show/按钮/删除移动共用）
         this._refreshBtn = null;     // 工具行刷新按钮（_buildDom 建好存引用）
         this._diffNoteTimer = null;  // 刷新 diff 轻提示自动消退定时器
+
+        // 布局模式（2026-11-08）：窄化窗口露出右侧 Comfy 面板，纸飞机一键
+        // 直投叠加区。开关/记忆/置灰/留白全在 LumenLayoutPanel 预制件
+        // （_buildDom 实例化），本类只读 .active 分流直投
+        this._layout = null;
 
         // ===== 批量管理 / 右键菜单 / 确认弹窗 / 文件夹树（Lumen 预制件，
         // _buildDom 建好 DOM 后实例化接线） =====
@@ -140,7 +153,30 @@ class LoraManager {
     _openCanvasPicker(lora) { this._coverPicker.open(lora); }
     _readLocalCover(file) { this._coverPicker.readLocal(file); }
     _uploadCover(dataUrl) { this._coverPicker.upload(dataUrl); }
-    _openSendPopup(lora, anchor) { this.sendPopupCtl.open(lora, anchor); }
+    _openSendPopup(lora, anchor) {
+        // 布局模式（2026-11-08）：面板就在旁边——纸飞机/批量投递一键直投
+        // LoRA 叠加区，跳过弹窗；面板未初始化回落弹窗（那里还有画布节点
+        // 可选）。普通模式维持弹窗不变
+        if (this._layout && this._layout.active) {
+            this._deliverToPanelDirect(Array.isArray(lora) ? lora : [lora], anchor);
+            return;
+        }
+        this.sendPopupCtl.open(lora, anchor);
+    }
+
+    /**
+     * 布局模式直投：deliverToPanel 共享口（换名归一+清单自愈+自动展开
+     * 叠加区），成功走与弹窗同口径的轻提示；面板未初始化（ok=false）
+     * 回落投递弹窗——批量入口的 anchor 仍在手，单只/批量都能落回
+     */
+    async _deliverToPanelDirect(list, anchor) {
+        const r = await LoraSendPopup.deliverToPanel(list);
+        if (!r.ok) {
+            this.sendPopupCtl.open(list, anchor);
+            return;
+        }
+        LoraSendPopup.reportResults(r.results);
+    }
     _closeSendPopup() { this.sendPopupCtl.close(); }
     _confirmDelete(lora) { this._deleteConfirm.confirm(lora); }
 
@@ -153,6 +189,8 @@ class LoraManager {
         this.dialog.classList.add('is-open');      // 复用 recipe-dialog 显隐
         this.visible = true;
         if (this.btn) this.btn.setAttribute('aria-expanded', 'true');
+        // 开窗应用记忆布局（视口放不下则回落普通模式并置灰按钮，见常量注）
+        this._layout.applyStored();
         // 每次打开都重扫：/list 是实时扫盘（毫秒级），外部增删 LoRA 文件
         // 后重开窗口即同步（旧逻辑 if (!this.data) 只首开拉一次，之后
         // 一直吃内存缓存——过期清单的主因）
@@ -205,6 +243,10 @@ class LoraManager {
                         <div class="recipe-toolbar">
                             <h2 class="recipe-current-model lora-current-folder">全部</h2>
                             <div class="lora-toolbar-right">
+                                <button class="lora-layout-btn" type="button" title="布局：窄化本窗口露出右侧 Comfy 面板，点纸飞机直投 LoRA 叠加区" aria-label="切换布局模式">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+                                    <span>布局</span>
+                                </button>
                                 <button class="lora-refresh-btn" type="button" title="刷新清单：重新扫描本地 LoRA 目录（外部增删文件后同步）" aria-label="刷新 LoRA 清单">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                                     <span>刷新</span>
@@ -246,6 +288,11 @@ class LoraManager {
         el.querySelector('.recipe-dialog-close').addEventListener('click', () => this.hide());
         this._refreshBtn = el.querySelector('.lora-refresh-btn');
         this._refreshBtn.addEventListener('click', () => this.refresh());
+        this._layout = new LumenLayoutPanel({
+            button: el.querySelector('.lora-layout-btn'),
+            dialog: () => this.dialog,
+            storageKey: 'lumen.loraLayout'
+        });
         el.querySelector('.lora-fetch-btn').addEventListener('click', () => this._openFetchAllDialog());
         this.searchInput.addEventListener('input', () => {
             this.searchText = this.searchInput.value.trim().toLowerCase();
@@ -413,7 +460,10 @@ class LoraManager {
                 this.pinned = new Set(r.pinned);
                 this.triggers = r.triggers || {};
                 this.notes = r.notes || {};
-                this.civitai = r.civitai || {};   // 含 pageUrl，信息窗「C 站页面」按钮用
+                // C 站记录小字段聚合（ modelName 供面板下拉友好名、pageUrl 供
+                // 「C 站页面」按钮）；description 大字段不在其中——信息窗打开
+                // 时经 /civitai/info 按需补全（LoraInfoModal.open）
+                this.civitai = r.civitai || {};
             }
             this._pinsLoaded = true;
         } catch { /* 置顶/触发词状态加载失败不阻塞窗口 */ }

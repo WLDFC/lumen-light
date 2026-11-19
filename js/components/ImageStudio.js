@@ -264,6 +264,7 @@ class ImageStudio {
                     imgLayer.ty = Number(spec.y) || 0;
                     imgLayer.tscale = Number(spec.scale) > 0 ? Number(spec.scale) : 1;
                     imgLayer.flipX = !!spec.flipX;
+                    imgLayer.clipped = !!spec.clipped;   // 图片层也可挂剪贴（挂背景层）
                     // 图片层内容以持久化 paint 为准（img.src 已是含背景的合成底片）；
                     // pristine 快照必须等异步加载完成后再拍，否则会拍到空画布
                     if (spec.paint) {
@@ -287,6 +288,7 @@ class ImageStudio {
                     layer.ty = Number(spec.y) || 0;
                     layer.tscale = Number(spec.scale) > 0 ? Number(spec.scale) : 1;
                     layer.flipX = !!spec.flipX;
+                    layer.clipped = !!spec.clipped;   // 剪贴蒙版标记随栈恢复
                     layer.empty = !spec.paint;
                     const paintJob = this._loadInto(layer.paintCv, spec.paint);
                     loadJobs.push(paintJob);
@@ -411,25 +413,31 @@ class ImageStudio {
         this.tool = tool;
         this.moveBtn.classList.toggle('active', tool === 'move');
         this.brushBtn.classList.toggle('active', tool === 'brush');
+        this.pickerBtn.classList.toggle('active', tool === 'picker');
         this.eraserBtn.classList.toggle('active', tool === 'eraser');
         this.textBtn.classList.toggle('active', tool === 'text');
         this.shapeBtn.classList.toggle('active', tool === 'shape');
+        this.penBtn.classList.toggle('active', tool === 'pen');
         this.fxBtn.classList.toggle('active', tool === 'fx');
         this.cropBtn.classList.toggle('active', tool === 'crop');
         // 离开文字工具先提交未完成的文字编辑（点保存/关闭也经此处收尾）
         if (tool !== 'text') this._text.commitEdit();
+        // 钢笔会话不跨工具：切走即静默丢弃（漫画编辑器同语义）
+        if (tool !== 'pen' && this._pen) this._penCancel();
         // 模糊笔刷是像素效果工具，与遮罩语义无关——切入即退遮罩；
-        // 形状工具 v1 只落像素图层，遮罩矩形留待后续（同语义退遮罩）
-        if ((tool === 'fx' || tool === 'shape') && this._maskMode) this.setMaskMode(false);
+        // 形状/钢笔工具同为属性层创建，遮罩矩形留待后续（同语义退遮罩）
+        if ((tool === 'fx' || tool === 'shape' || tool === 'pen') && this._maskMode) {
+            this.setMaskMode(false);
+        }
         // 顶栏选项栏切换：文字工具显示字体/字号/横竖排，模糊笔刷显示
-        // 强度，形状工具显示形状属性，其余显示笔刷粗细
+        // 强度，形状/钢笔工具显示形状属性，其余显示笔刷粗细
         if (this.sizeRowEl) this.sizeRowEl.style.display =
-            (tool === 'text' || tool === 'shape') ? 'none' : '';
+            (tool === 'text' || tool === 'shape' || tool === 'pen') ? 'none' : '';
         if (this.textRowEl) this.textRowEl.style.display = tool === 'text' ? '' : 'none';
         if (this.fxRowEl) this.fxRowEl.style.display = tool === 'fx' ? '' : 'none';
         if (this.shapeRowEl) {
-            this.shapeRowEl.style.display = tool === 'shape' ? '' : 'none';
-            if (tool === 'shape') this._syncShapeOptsDom?.();
+            this.shapeRowEl.style.display = (tool === 'shape' || tool === 'pen') ? '' : 'none';
+            if (tool === 'shape' || tool === 'pen') this._syncShapeOptsDom?.();
         }
         // 切换到非画笔工具即退出移除模式（setRemoveMode 里先 setTool
         // 再置 _autoRemove，顺序不受影响）
@@ -457,16 +465,17 @@ class ImageStudio {
         } else {
             // 文字工具须显式给绘制面 I 形光标——.is-paint-surface 基础样式
             // 是 cursor:none（画笔自定义光标的前提），不覆盖则白底上无光标；
-            // 形状工具用十字光标（拖拽画框）
+            // 形状/钢笔工具用十字光标（拖拽画框 / 落点连线）
             this.paintSurface.style.cursor =
-                tool === 'text' ? 'text' : (tool === 'shape' ? 'crosshair' : '');
+                tool === 'text' ? 'text'
+                    : (tool === 'shape' || tool === 'pen' ? 'crosshair' : '');
         }
         // 画笔/橡皮/模糊：整个舞台（含空白区）隐藏系统鼠标，改用自定义光标圈；
         // 移动/裁剪恢复系统鼠标（各自由绘制面悬停/裁剪锚点给出形态）；
-        // 文字工具用文本 I 形光标，形状工具用十字光标
+        // 文字工具用文本 I 形光标，形状/钢笔工具用十字光标
         this.stageEl.style.cursor = this._brushCursorTool ? 'none'
             : (tool === 'text' ? 'text'
-                : (tool === 'shape' ? 'crosshair' : ''));
+                : (tool === 'shape' || tool === 'pen' ? 'crosshair' : ''));
         this._updateCursor();
         this._drawSelOverlay();
     }
@@ -523,6 +532,9 @@ class ImageStudio {
             this._text.applyColor(value);
             return;
         }
+        // 吸管连取中：只入色不切工具（吸管保持激活可连取——PS 同语义；
+        // 「选色即回画笔」是色板/色块点击的语义，不适用于吸管）
+        if (this._picking) return;
         // 选色即回到普通画笔（遮罩/橡皮/裁剪下选色没有意义）
         if (this.tool !== 'brush' || this._maskMode) {
             this.setMaskMode(false);
@@ -817,6 +829,14 @@ class ImageStudio {
         if (this.tool === 'move') return this._onMoveDown(e);
         if (this.tool === 'text') return this._onTextDown(e);
         if (this.tool === 'shape') return this._onShapeDown(e);
+        if (this.tool === 'pen') return this._onPenDown(e);
+        // 吸管：点按取色即返回（无拖拽手势；_picking 守卫下 setColor
+        // 只入色不切工具，吸管保持激活可连取）
+        if (this.tool === 'picker') {
+            e.preventDefault();
+            this._pickColorAt(this._toImagePos(e));
+            return;
+        }
         if (this.tool === 'crop') return;
         if (!this._readyDone) return;
         const layer = this._activeLayer();
@@ -844,6 +864,8 @@ class ImageStudio {
         if (this._maskMode) this.dirty.mask = true;
         else if (this._bakesIntoBase(layer)) this.dirty.base = true;
         else this.dirty.strokes = true;
+        // 落笔改变了 paintCv alpha：剪贴显示同步（无剪贴层时零开销早退）
+        this._refreshClips();
     }
 
     _onPaintMove(e) {
@@ -851,6 +873,8 @@ class ImageStudio {
         if (this.tool === 'move') { this._onMoveHover(e); return; }
         // 形状工具拖拽创建中：更新宽高重渲染（不经 drawing 管线）
         if (this.tool === 'shape' && this._shape.drag) { this._shape.dragMove(e); return; }
+        // 钢笔运笔：橡皮筋预览终点实时更新（不经 drawing 管线）
+        if (this.tool === 'pen' && this._pen) { this._shape._penMove(e); return; }
         if (!this.drawing) return;
         // 合并高事件速率下的插值点，长笔画更顺滑
         const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -860,6 +884,7 @@ class ImageStudio {
             else this._strokeSegment(this.last, pos);
             this.last = pos;
         }
+        this._refreshClips();   // 段点级同步（涂画/模糊都改 paintCv alpha）
     }
 
     _onPaintUp() {
@@ -915,6 +940,32 @@ class ImageStudio {
             x: (e.clientX - rect.left) / this.zoom,
             y: (e.clientY - rect.top) / this.zoom
         };
+    }
+
+    /** 吸管取色（2026-11-10 新增，漫画编辑器同款工具）：点按处所有可见
+     *  层按叠放序合成（与保存拍平同源，含底片层）后读像素转 hex，走
+     *  setColor 入色——_picking 守卫拦下其「选色即回画笔」，吸管保持
+     *  激活可连取（PS 同语义），回画笔由用户手动切换 */
+    _pickColorAt(pos) {
+        const x = Math.round(pos.x), y = Math.round(pos.y);
+        if (x < 0 || y < 0 || x >= this.iw || y >= this.ih) return;
+        const cv = document.createElement('canvas');
+        cv.width = this.iw;
+        cv.height = this.ih;
+        const g = cv.getContext('2d', { willReadFrequently: true });
+        for (const layer of this.layers) {
+            if (!layer.visible) continue;
+            g.globalAlpha = layer.opacity;
+            this._save._blitLayer(g, layer, layer.paintCv);
+        }
+        g.globalAlpha = 1;
+        const d = g.getImageData(x, y, 1, 1).data;
+        if (d[3] === 0) { this._flashMsg('透明处无色可取'); return; }
+        const hex = '#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+        this._picking = true;   // 连取中：setColor 只入色不切工具
+        try { this.setColor(hex); } finally { this._picking = false; }
+        this.pushRecentColor(hex);
+        this._flashMsg(`已吸取 ${hex}`);
     }
 
     /** 在激活图层画一段笔迹：普通模式叠加当前色到笔迹画布，
@@ -1102,7 +1153,33 @@ class ImageStudio {
         };
         style(layer.paintCv);
         style(layer.maskCv);
+        // 剪贴显示画布（2026-11-11）：文档尺寸画布钉在文档原点——
+        // 层变换/翻转已烘焙进合成内容，不再走 tx/ty/tscale/CSS 镜像
+        if (layer.clipCv) {
+            layer.clipCv.style.left = ((0 - this.frame.fx) * this.zoom) + 'px';
+            layer.clipCv.style.top = ((0 - this.frame.fy) * this.zoom) + 'px';
+            layer.clipCv.style.width = (this.iw * this.zoom) + 'px';
+            layer.clipCv.style.height = (this.ih * this.zoom) + 'px';
+        }
         if (this.tool === 'move') this._drawSelOverlay();
+    }
+
+    /**
+     * 剪贴层的显示画布（惰性创建，文档尺寸）：paintCv 保持内容源身份
+     * 不动（涂画管线照常写它），合成结果画在 clipCv 上顶替显示——
+     * 插在 paintCv 之前（遮罩画布之下，z 序与原显示一致）
+     */
+    _ensureClipCanvas(layer) {
+        if (layer.clipCv) return layer.clipCv;
+        const cv = document.createElement('canvas');
+        cv.className = 'ie-strokes';
+        cv.width = Math.max(1, this.iw);
+        cv.height = Math.max(1, this.ih);
+        layer.clipCv = cv;
+        if (layer.paintCv.parentNode) {
+            layer.paintCv.parentNode.insertBefore(cv, layer.paintCv);
+        }
+        return cv;
     }
 
     isOpen() {
@@ -1125,6 +1202,7 @@ class ImageStudio {
         this._history.closePanel();
         this._text.abortEdit();   // 只清编辑框与状态（图层栈随即清空，无需提交）
         this._shape.drag = null;  // 形状拖拽态一并丢弃（图层栈随即清空）
+        this._penCancel();        // 钢笔未闭合会话一并丢弃（漫画同语义）
         this._hideCursor();
     }
 
@@ -1146,7 +1224,8 @@ class ImageStudio {
      *  三处共用本谓词，防止新增工具时名单漂移（fx 曾因此漏出复活名单，
      *  调完强度光标圈一去不回） */
     get _brushCursorTool() {
-        return this.tool === 'brush' || this.tool === 'eraser' || this.tool === 'fx';
+        return this.tool === 'brush' || this.tool === 'eraser' || this.tool === 'fx' ||
+            this.tool === 'picker';
     }
 
     /** 光标圆圈直径 = 笔刷屏幕实际宽度（粗细 × 缩放比，与画出的笔迹
@@ -1164,8 +1243,9 @@ class ImageStudio {
             this._hideCursor();
             return;
         }
-        this._cursorD = Math.max(4,
-            this.sizes[this._maskMode ? 'mask' : 'strokes'] * this.zoom * ImageStudio.SIZE_SCALE);
+        this._cursorD = this.tool === 'picker' ? 12   // 吸管定径小圈（采一个像素，与笔宽无关）
+            : Math.max(4,
+                this.sizes[this._maskMode ? 'mask' : 'strokes'] * this.zoom * ImageStudio.SIZE_SCALE);
         this._redrawCursorOverlay();   // 尺寸/工具/粗细变化：原位重画
     }
 
@@ -1382,13 +1462,28 @@ class ImageStudio {
     // ---- 形状工具（StudioShapeTool） ----
     _onShapeDown(e) { return this._shape._onShapeDown(e); }
     _renderShapeLayer(layer) { return this._shape._render(layer); }
+    // ---- 钢笔工具（2026-11-11 自漫画编辑器移植，会话态在 studio._pen）----
+    _onPenDown(e) { return this._shape._penDown(e); }
+    _penClose() { return this._shape._penClose(); }
+    _penCancel() { return this._shape._penCancel(); }
+    // ---- 剪贴蒙版（2026-11-11 自漫画编辑器移植，合成在 StudioSave）----
+    _refreshClips() { return this._save._refreshClipDisplays(); }
+    _clipBaseFor(layer) { return this._save._clipBaseFor(layer); }
+    _toggleClipToBelow(id) { return this._layers._toggleClipToBelow(id); }
     /** 形状层缩放提交：倍率烘焙回形状属性重渲染（tscale 归一，永远锐利） */
     _bakeShapeScale(layer) {
         const k = layer.tscale;
         if (!Number.isFinite(k) || k <= 0 || Math.abs(k - 1) < 1e-9) return;
         const s = layer.shape;
+        // 多边形（钢笔）：点集是层内局部坐标——宽高烘焙前按原包围盒
+        // 等比换算点集（增量不累积误差），与漫画编辑器八向拉伸同构
+        const origPts = s.type === 'poly' && Array.isArray(s.points)
+            ? s.points.map((p) => p.slice()) : null;
+        const origW = s.w;
+        const origH = s.h;
         s.w = Math.max(2, Math.round(s.w * k));
         s.h = Math.max(2, Math.round(s.h * k));
+        if (origPts) s.points = ShapeLayout.polyScalePoints(origPts, origW, origH, s.w, s.h);
         s.strokeWidth = Math.max(0, s.strokeWidth * k);
         s.radius = Math.max(0, (s.radius || 0) * k);
         layer.tscale = 1;
@@ -1402,7 +1497,14 @@ class ImageStudio {
     pushRecentColor(value) { return this._dom._pushRecentColor(value); }
 
     // ---- 历史记录（StudioHistory） ----
-    _pushHistory(label) { return this._history.push(label); }
+    /** 历史入账总口（各操作完成点调用）：入账后同步剪贴显示——删除/
+     *  排序/显隐/翻转/透明度确认/新建等提交型变更都经此处，剪贴合成
+     *  随之刷新，无需各点单发 */
+    _pushHistory(label) {
+        const r = this._history.push(label);
+        this._refreshClips();
+        return r;
+    }
 
     // ---- 调色工具（StudioAdjustTool） ----
     openAdjust() { return this._adjust.open(); }

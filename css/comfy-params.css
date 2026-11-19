@@ -43,6 +43,7 @@
 #comfyContent .comfy-model-select,
 #comfyContent .comfy-sampler-select,
 #comfyContent .comfy-count-select,
+#comfyContent .comfy-size-preset,
 #comfyContent .comfy-num-input {
     width: 100%;
     height: 32px;
@@ -80,7 +81,8 @@
 
 #comfyContent .comfy-model-select option,
 #comfyContent .comfy-sampler-select option,
-#comfyContent .comfy-count-select option {
+#comfyContent .comfy-count-select option,
+#comfyContent .comfy-size-preset option {
     background: #0f0f12;
     color: #ffffff;
 }
@@ -107,6 +109,17 @@
 #comfyContent .comfy-size-x {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
+}
+
+/* 尺寸预设下拉（sizePresets 选项，面板独有）：按钮样式定宽不伸缩，闭态
+   恒显「预设」占位（选中即复位，见 ComfyParamRows._bindDynamicRows）。
+   不能不设宽——原生 select 闭态宽度默认吸最宽选项（'1024 × 1024（方形）'）
+   会爆行；width 覆盖上方共享规则的 100%（同特异性，后置者生效） */
+#comfyContent .comfy-size-preset {
+    flex: none;
+    width: 60px;
+    padding: 0 4px 0 8px;
+    color: rgba(255, 255, 255, 0.75);
 }
 
 /* ==================== LoRA 行与叠加区 ==================== */

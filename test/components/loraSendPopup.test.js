@@ -144,3 +144,137 @@ describe('LoraSendPopup.healEntries 历史条目自动补归一（ADR 028 决策
         expect(LoraSendPopup.healEntries([{ file: 'x.safetensors' }], undefined)).toBe(0);
     });
 });
+
+// ==================== 布局模式直投共享口（2026-11-08） ====================
+
+describe('LoraSendPopup.deliverToPanel 一键投面板（弹窗面板钮/布局直投共用）', () => {
+    afterEach(() => {
+        context.window.promptPanel = undefined;
+        context.LumenLight = undefined;
+        context.localStorage = undefined;
+    });
+
+    /** 现成面板桩（每次深拷贝，防用例间串状态） */
+    const makePanel = (overrides = {}) => ({
+        comfyParams: {
+            modelLists: { loras: ['Moss/2f2qx.safetensors'] },
+            loras: [],
+            loraStackCollapsed: true,
+            render() { this.rendered = (this.rendered || 0) + 1; },
+            ...overrides
+        }
+    });
+
+    test('面板未初始化：ok=false（调用方回落投递弹窗），不做任何事', async () => {
+        const r = await LoraSendPopup.deliverToPanel([{ path: 'a/x.safetensors', name: 'x' }]);
+        expect(r).toEqual({ ok: false });
+        expect(context.window.promptPanel).toBeUndefined();
+    });
+
+    test('成功：换名归一入栈、自动展开叠加区、render 收尾', async () => {
+        context.window.promptPanel = makePanel();
+        context.LumenLight = { generateId: () => 'id-1' };
+        const store = {};
+        context.localStorage = {
+            getItem: (k) => (k in store ? store[k] : null),
+            setItem: (k, v) => { store[k] = String(v); }
+        };
+        const r = await LoraSendPopup.deliverToPanel(
+            [{ path: '外部收藏/Moss/2f2qx.safetensors', name: 'x' }]);
+        expect(r.ok).toBe(true);
+        expect(r.results[0].renamed).toBe(true);   // 目录基准不同 → 按文件名换名
+        const cp = context.window.promptPanel.comfyParams;
+        expect(cp.loras).toEqual([
+            { id: 'id-1', file: 'Moss/2f2qx.safetensors', strengthModel: 1, strengthClip: 1 }
+        ]);
+        expect(cp.loraStackCollapsed).toBe(false);          // 折叠态自动展开
+        expect(store.comfyLoraStackCollapsed).toBe('false'); // 展开记忆同步
+        expect(cp.rendered).toBe(1);
+    });
+
+    test('清单为空且有 loadModelLists：先补拉再投（时机差自愈）', async () => {
+        let pulled = 0;
+        context.window.promptPanel = makePanel({
+            modelLists: { loras: [] },
+            loraStackCollapsed: false,
+            async loadModelLists() {
+                pulled++;
+                this.modelLists.loras = ['a/b.safetensors'];
+            }
+        });
+        context.LumenLight = { generateId: () => 'id-2' };
+        context.localStorage = { getItem: () => null, setItem: () => {} };
+        const r = await LoraSendPopup.deliverToPanel([{ path: 'a/b.safetensors', name: 'b' }]);
+        expect(pulled).toBe(1);
+        expect(r.ok).toBe(true);
+        expect(r.results[0].resolved).toBe(true);
+    });
+});
+
+describe('LoraManager 布局模式（预制件开合与直投拦截）', () => {
+    // 留白计算在 SidePanelLayout 共享层、开关在 LumenLayoutPanel 预制件
+    // ——均先于 LoraManager 载入
+    vm.runInContext(
+        fs.readFileSync(path.join(__dirname, '../../js/utils/SidePanelLayout.js'), 'utf-8'),
+        context, { filename: 'SidePanelLayout.js' });
+    vm.runInContext(
+        fs.readFileSync(path.join(__dirname, '../../js/components/LumenLayoutPanel.js'), 'utf-8'),
+        context, { filename: 'LumenLayoutPanel.js' });
+    vm.runInContext(
+        fs.readFileSync(path.join(__dirname, '../../js/components/LoraManager.js'), 'utf-8'),
+        context, { filename: 'LoraManager.js' });
+    const LoraManager = context.window.LoraManager;
+
+    /** 可测实例：真实预制件 + 闭包桩按钮/窗口根（vm 跨界不依赖方法内 this） */
+    function makeLayoutInst() {
+        const mkClassList = () => {
+            const set = new Set();
+            return {
+                set,
+                toggle(c, on) { if (on) set.add(c); else set.delete(c); },
+                has: (c) => set.has(c)
+            };
+        };
+        const inst = Object.create(LoraManager.prototype);
+        const button = {
+            classList: mkClassList(), disabled: false, title: '', handlers: {},
+            addEventListener(t, fn) { this.handlers[t] = fn; }
+        };
+        const dialog = { classList: mkClassList(), style: { setProperty() {}, removeProperty() {} } };
+        const store = {};
+        inst._layout = new context.window.LumenLayoutPanel({
+            button,
+            dialog: () => dialog,
+            storageKey: 'lumen.loraLayout'
+        });
+        context.localStorage = {
+            getItem: (k) => (k in store ? store[k] : null),
+            setItem: (k, v) => { store[k] = String(v); }
+        };
+        return { inst, button, dialog, store };
+    }
+
+    test('_openSendPopup：普通模式走弹窗不拦截', () => {
+        const { inst } = makeLayoutInst();
+        const opens = [];
+        inst.sendPopupCtl = { open: (...a) => opens.push(a) };
+        inst._openSendPopup({ path: 'a' }, 'anchor');
+        expect(opens).toHaveLength(1);
+    });
+
+    test('_openSendPopup：布局模式直投；面板未初始化回落弹窗', async () => {
+        const { inst } = makeLayoutInst();
+        inst._layout.set(true);   // 预制件真身：类名/高亮/记忆一并到位
+        const opens = [];
+        inst.sendPopupCtl = { open: (...a) => opens.push(a) };
+        context.window.promptPanel = undefined;   // deliverToPanel → ok:false
+        await inst._openSendPopup({ path: 'a' }, 'anchor');
+        await new Promise((r) => setImmediate(r));   // async 链路放行
+        expect(opens).toHaveLength(1);            // 回落到弹窗
+        expect(opens[0][1]).toBe('anchor');       // anchor 原样透传
+    });
+});
+
+// 布局开关/留白实测的断言随实现收敛分别迁往：
+//   test/components/lumenLayoutPanel.test.js（预制件开合/记忆/置灰/留白）
+//   test/utils/sidePanelLayout.test.js（面板实测对齐口径）

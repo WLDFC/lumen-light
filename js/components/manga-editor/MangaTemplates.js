@@ -1,7 +1,7 @@
 /**
  * ==========================================================================
  * MangaEditor 子模块：分镜模板（2026-11-07 新增，ADR 078）
- * 作用：标题栏「分镜模板」按钮（「背景」右边，同款文字按钮）+ 模板弹窗
+ * 作用：标题栏「分镜模板」按钮（「文件」右边，同款文字按钮）+ 模板弹窗
  *       ——两 tab（预设模板 / 我的模板）卡片网格，缩略图由格子数据现画
  *       （canvas 线稿，不存图片文件）。点卡片 = 把模板格子换算成元素框
  *       **替换当前页全部元素框**（页上已有元素先确认，一步撤销；
@@ -16,8 +16,9 @@
  *       user/ 两目录，一个模板一个 JSON）。
  * 契约：原型混入（partial-class，ADR 026）——方法 Object.assign 进
  *       MangaEditor.prototype，this 即编辑器实例；须后于主类加载。
- * 对应：css/manga-editor.css（manga-tpl-* 区段）；按钮复用 manga-bg-btn
- *       样式类（同「背景」文字按钮观感）。
+ * 对应：css/manga-editor.css（manga-tpl-* 区段）；按钮复用 manga-title-btn
+ *       样式类（同「文件」文字按钮观感；原 manga-bg-btn 类随背景功能
+ *       退役改名，2026-11-08）。
  * ==========================================================================
  */
 
@@ -31,20 +32,24 @@ Object.assign(window.MangaEditor.prototype, {
 
     _buildTemplateTools() {
         const header = this.dialog.querySelector('.recipe-dialog-header');
-        if (!header || !this.bgBtn) return;
+        if (!header) return;
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'manga-bg-btn';
+        btn.className = 'manga-title-btn';
         btn.title = '分镜模板：套用预设布局替换当前页元素框，或把当前页存为自己的模板';
         btn.textContent = '分镜模板';
         btn.addEventListener('click', () => this._openTemplatePopup());
-        this.bgBtn.after(btn);   // 插在「背景」右边
+        // 插在「文件」按钮右侧（背景工具组退役后接替其位置，2026-11-08）
+        const fileWrap = header.querySelector('.manga-file-wrap');
+        if (fileWrap && fileWrap.nextSibling) header.insertBefore(btn, fileWrap.nextSibling);
+        else header.appendChild(btn);
         this._tplBtnEl = btn;
     },
 
     // ==================== 模板弹窗（懒建于首次打开） ====================
 
     _openTemplatePopup() {
+        window.assetLibrary?.hide();   // 与资产库锚定窗互斥：同占左栏，开一个收另一个（2026-11-12）
         if (!this._tplMaskEl) this._buildTemplatePopup();
         this._positionTemplatePanel();
         this._tplMaskEl.hidden = false;
@@ -89,6 +94,16 @@ Object.assign(window.MangaEditor.prototype, {
             <div class="manga-tpl-panel">
                 <div class="manga-tpl-head">
                     <span>分镜模板</span>
+                    <span class="manga-file-wrap manga-tpl-detect-wrap">
+                        <button type="button" class="manga-title-btn manga-tpl-detect-btn"
+                            title="从图片识别：上传或选画布漫画图，AI 识别分镜格子做成模板（需多模态对话模型）">从图片识别</button>
+                        <div class="manga-file-menu manga-detect-menu" hidden>
+                            <button type="button" class="manga-file-item manga-detect-item" data-act="local">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>从本地图片识别…</button>
+                            <button type="button" class="manga-file-item manga-detect-item" data-act="canvas">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>从画布图片识别…</button>
+                        </div>
+                    </span>
                     <button type="button" class="manga-tpl-close" title="关闭">✕</button>
                 </div>
                 <div class="manga-tpl-tabs">
@@ -134,6 +149,8 @@ Object.assign(window.MangaEditor.prototype, {
                 this._saveCurrentAsTemplate();
             }
         });
+        // 「从图片识别」按钮与来源菜单（MangaTemplateDetect 混入）
+        this._buildDetectTools();
         this._renderTemplatePopup();
     },
 
@@ -329,6 +346,7 @@ Object.assign(window.MangaEditor.prototype, {
         const before = this._histSnapshot();
         this.draft.items = items;
         this.selected = -1;
+        if (this._multiSelected) this._multiSelected.clear();   // 模板整页换格，多选集合失效（逐格生成范围）
         this._commitHistory(before, '应用分镜模板');
         this._invalidateCompiled();
         this._renderItems();

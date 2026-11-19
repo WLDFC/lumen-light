@@ -254,7 +254,7 @@ class StudioDomBuilder {
         const radiusLabel = this._sizeLabel('圆角');
         studio.shapeRadiusValueEl = this._sizeLabel(String(studio.shapeOpts.radius), true);
         studio.shapeRadiusSlider = this._slider(0, 120, studio.shapeOpts.radius,
-            '圆角半径（仅矩形类形状生效）', (v) => {
+            '圆角半径（矩形类与多边形生效）', (v) => {
                 studio.shapeOpts.radius = v;
                 studio.shapeRadiusValueEl.textContent = v;
                 studio._shape.applyOpts();
@@ -293,6 +293,8 @@ class StudioDomBuilder {
               svg: '<polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 9 22 12 19 15"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line>' },
             { key: 'brushBtn', tool: 'brush', title: '画笔',
               path: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z' },
+            { key: 'pickerBtn', tool: 'picker', title: '吸管：点按吸取画布颜色设为画笔色（可连取，切其他工具退出）',
+              svg: '<path d="m2 22 1-1h3l9-9"></path><path d="M3 21v-3l9-9"></path><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"></path>' },
             { key: 'rembgBtn', once: () => studio.removeBackground(),          // 图标与图片工具栏「去除背景」同款
               title: '抠图去背景：对选中图层 AI 分离主体，主体之外变透明（本地模型推理；结果写回该图层）',
               svg: '<rect x="3" y="4" width="12" height="16" rx="2"></rect><circle cx="7.5" cy="9" r="1.5"></circle><path d="m5 17 3.5-3.5 2.5 2.5 2-2"></path><path d="m15 14 3.5-3.5 3 3-5.5 5.5H13v-3z"></path><path d="m17 12 2 2"></path>' },
@@ -304,6 +306,8 @@ class StudioDomBuilder {
               svg: '<polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line>' },
             { key: 'shapeBtn', tool: 'shape', title: '形状工具：拖拽画矩形/椭圆/气泡框（顶栏选形状/填充/边框；Shift 约束正方；点击已有形状改属性）',
               svg: '<rect x="4" y="4" width="16" height="16" rx="2"></rect>' },
+            { key: 'penBtn', tool: 'pen', title: '钢笔工具：点击落点绘制多边形（近起点/Enter 闭合，Esc 取消；填充/边框/圆角随顶栏，圆角做顶点圆弧过渡）',
+              svg: '<path d="m12 19 7-7 3 3-7 7-3-3z"></path><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path><path d="m2 2 7.586 7.586"></path><circle cx="11" cy="11" r="2"></circle>' },
             { key: 'adjustBtn', once: () => studio.openAdjust(),                  // 图标 = 调音台推子
               title: '调色：对选中图层调节亮度/对比度/饱和度/色温/锐化/颗粒（关闭丢弃，保存生效）',
               svg: '<line x1="21" y1="4" x2="14" y2="4"></line><line x1="10" y1="4" x2="3" y2="4"></line><line x1="21" y1="12" x2="12" y2="12"></line><line x1="8" y1="12" x2="3" y2="12"></line><line x1="21" y1="20" x2="16" y2="20"></line><line x1="12" y1="20" x2="3" y2="20"></line><line x1="14" y1="2" x2="14" y2="6"></line><line x1="8" y1="10" x2="8" y2="14"></line><line x1="16" y1="18" x2="16" y2="22"></line>' },
@@ -330,8 +334,8 @@ class StudioDomBuilder {
             () => studio.revert(), 'ie-tool-btn');
         const sep = document.createElement('div');
         sep.className = 'is-toolbar-sep';
-        toolbar.append(studio.moveBtn, studio.brushBtn, studio.rembgBtn, studio.eraserBtn,
-            studio.fxBtn, studio.textBtn, studio.shapeBtn, studio.adjustBtn,
+        toolbar.append(studio.moveBtn, studio.brushBtn, studio.pickerBtn, studio.rembgBtn, studio.eraserBtn,
+            studio.fxBtn, studio.textBtn, studio.shapeBtn, studio.penBtn, studio.adjustBtn,
             studio.maskBtn, studio.removeBtn, sep, revertBtn, studio.cropBtn);
 
         // 舞台 + 画布承载区：图层画布（动态）/ 绘制面 / 选中框 / 裁剪覆盖层
@@ -433,6 +437,8 @@ class StudioDomBuilder {
             studio.dirty.layers = true;
             studio.opacityValueEl.textContent = v;
             studio._applyLayerStyles(layer);
+            // 作为剪贴基底的层透明度直接改遮罩 alpha——拖动中实时同步
+            studio._refreshClips();
         });
         opacityRow.append(opacityLabel, studio.opacitySlider, studio.opacityValueEl);
         // 透明度历史：change（松手/确认）记一条，input 拖动中不刷历史
@@ -490,7 +496,17 @@ class StudioDomBuilder {
             studio.layerMenuEl.hidden = true;
             studio.duplicateActiveLayer();
         });
-        studio.layerMenuEl.append(addItem, dupItem, studio.deleteItemEl);
+        // 剪贴蒙版（2026-11-11 自漫画编辑器移植，PS 同语义）：文案随激活
+        // 层状态切换（_showLayerMenu），守卫在 _syncPanels（最底层禁用）
+        studio.clipItemEl = document.createElement('div');
+        studio.clipItemEl.className = 'is-ctxmenu-item';
+        studio.clipItemEl.textContent = '剪贴到下图层';
+        studio.clipItemEl.title = '剪贴蒙版：本层内容只在下方最近未剪贴层的不透明像素内显示（再点释放）';
+        studio.clipItemEl.addEventListener('click', () => {
+            studio.layerMenuEl.hidden = true;
+            studio._toggleClipToBelow(studio.activeLayerId);
+        });
+        studio.layerMenuEl.append(addItem, dupItem, studio.clipItemEl, studio.deleteItemEl);
         document.addEventListener('pointerdown', (e) => {
             if (!studio.layerMenuEl.hidden && !studio.layerMenuEl.contains(e.target)) {
                 studio.layerMenuEl.hidden = true;
@@ -853,11 +869,19 @@ class StudioDomBuilder {
                 return;
             }
             if (e.key === 'Escape') {
+                // 钢笔会话优先取消（漫画同语义）：不关弹窗不关编辑器
+                if (studio._pen) { studio._penCancel(); return; }
                 if (!studio.pickerEl.hidden) { studio._closePicker(); return; }  // 弹窗开着先关弹窗
                 studio.fileMenuEl.hidden = true;
                 studio.fontMenuEl.hidden = true;
                 studio._history.closePanel();
                 studio.requestClose();
+                return;
+            }
+            // 钢笔闭合（近起点点击之外的键盘入口）
+            if (e.key === 'Enter' && studio._pen) {
+                e.preventDefault();
+                studio._penClose();
                 return;
             }
             // Delete 键删除激活图层（键盘入口，等同右键菜单「删除图层」）：

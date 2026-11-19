@@ -67,6 +67,15 @@ Object.assign(window.MangaEditor.prototype, {
         // 形状层可被 select 工具选中/拖动/八向非等比拉伸（MangaStage 手势泛化）
         rail.appendChild(btn('shape', '形状：拖拽创建矩形/圆角/椭圆/气泡框（顶部选类型/填充/边框），点击已有形状改属性',
             '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="9.5" height="9.5" rx="1"/><circle cx="16.5" cy="16.5" r="4.5"/></svg>'));
+        // 钢笔（2026-11-11）：点击落点多边形——近起点/Enter 闭合、Esc 取消；
+        // 落成形状层 poly 类型（填充/边框/边宽走形状选项条，红斜杠隐藏
+        // 填充/轮廓与形状工具同语义），闭合后自动选中可再编辑
+        rail.appendChild(btn('pen', '钢笔：点击落点绘制多边形（点回起点或 Enter 闭合，Esc 取消；填充/边框在顶部选项条）',
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>'));
+        // 吸管（2026-11-10 新增，灯箱同款工具）：点按吸取页面颜色按当前
+        // 工具分发入色（画笔/文字/形状填充），不切工具可连取——PS 同语义
+        rail.appendChild(btn('picker', '吸管：吸取页面颜色设为当前工具色（画笔/文字/形状填充）',
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></svg>'));
         // 抠图（动作型，2026-11-04 自灯箱 ImageStudio 迁移）：对选中图片
         // 层就地去背景——先在舞台点选图片或图层面板点图片行；图标与
         // 图片工具栏/灯箱「去除背景」同款（用户点名，不用剪刀）
@@ -146,7 +155,7 @@ Object.assign(window.MangaEditor.prototype, {
     /** 切换工具：进行中的拖拽/笔迹先收掉，离开文字工具先提交在途编辑；
      *  标题栏选项条随工具显隐（画笔条/文字条各自联动） */
     _setTool(id) {
-        if (id !== 'select' && id !== 'brush' && id !== 'eraser' && id !== 'text' && id !== 'shape' && id !== 'remove') return;
+        if (id !== 'select' && id !== 'brush' && id !== 'eraser' && id !== 'text' && id !== 'shape' && id !== 'remove' && id !== 'picker' && id !== 'pen') return;
         if (this.activeTool === id) return;
         // 离开移除工具：未提交遮罩随会话丢弃（灯箱同语义——遮罩只在
         // 会话内有效，漫画无手动提交链路故不保留，ADR 076）
@@ -156,6 +165,7 @@ Object.assign(window.MangaEditor.prototype, {
         if (id !== 'text' && this._textEdit) this._commitTextEdit();
         if (this._stroke) this._cancelStroke();
         if (this._drag) this._cancelDrag();   // 形状拖拽创建的临时层在此静默摘除
+        if (this._pen) this._penCancel();     // 钢笔落点会话随切换丢弃（零痕迹）
         this.activeTool = id;
         if (this.stageCv) {
             this.stageCv.style.cursor =
@@ -207,9 +217,10 @@ Object.assign(window.MangaEditor.prototype, {
         if (!this.stageCv) return;
         // 文字工具的 I 形光标在此保序（本方法在 _setTool/_syncToolRailUi
         // 末尾统一跑，会覆写前者设置的光标）
-        this.stageCv.style.cursor = (this.activeTool === 'brush' || this.activeTool === 'remove') ? 'none'
+        this.stageCv.style.cursor = (this.activeTool === 'brush' || this.activeTool === 'remove' ||
+            this.activeTool === 'picker') ? 'none'
             : this.activeTool === 'text' ? 'text'
-                : this.activeTool === 'shape' ? 'crosshair' : '';
+                : (this.activeTool === 'shape' || this.activeTool === 'pen') ? 'crosshair' : '';
         this._redrawCursorRing();
     },
 
@@ -429,6 +440,37 @@ Object.assign(window.MangaEditor.prototype, {
     _syncPaletteUi() {
         if (this._colorPicker) this._colorPicker.syncFromColor(this.color);
         this._syncPaletteSwatchUi();
+    },
+
+    // ==================== 吸管（点按取色入当前工具色） ====================
+
+    /**
+     * 吸管取色（2026-11-10 新增，灯箱同款工具）：把点按处的页面合成
+     * 像素读出来转 hex，走 setColor 统一入口按当前工具分发（画笔/文字/
+     * 形状填充；setColor 不切工具，吸管保持激活可连取——PS 同语义）。
+     * 采样源用 _composePageCanvas 整页合成（导出同源：页底+图层+元素框，
+     * 不含选中框/光标圈等编辑态覆盖层）；入参先 _toDraft 换算——
+     * _localPoint 产物是舞台本地像素，合成画布是草稿坐标空间，不换算
+     * 会在视口缩放/平移下采错位（2026-11-10 初版踩过）。
+     * @param {number} px - 舞台本地像素 x（MangaGestures._localPoint 产物）
+     * @param {number} py - 舞台本地像素 y
+     */
+    async _pickColorAt(px, py) {
+        if (this._picking) return;
+        this._picking = true;
+        try {
+            const p = this._toDraft(px, py);
+            const cv = await this._composePageCanvas(this.draft);
+            const x = Math.round(p.x), y = Math.round(p.y);
+            if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) return;
+            const d = cv.getContext('2d').getImageData(x, y, 1, 1).data;
+            const hex = '#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+            this.setColor(hex);
+            this.pushRecentColor(hex);
+            this._status(`已吸取 ${hex}`);
+        } finally {
+            this._picking = false;
+        }
     },
 
     // ==================== 抠图（动作型：选中图片层就地写回） ====================

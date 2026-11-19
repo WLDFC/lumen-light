@@ -37,6 +37,26 @@ describe('pickImageAdapter 适配器匹配', () => {
         expect(adapter.id).toBe('generations-image');
     });
 
+    test('方舟端点（volces.com）→ ark-image 适配器（模型家族无关）', () => {
+        for (const model of ['doubao-seedream-4-0-250828', 'doubao-seededit-3-0-i2i']) {
+            const adapter = pickImageAdapter({
+                model,
+                imageList: ['data:image/png;base64,xx'],
+                provider: { name: 'Doubao', config: { endpoint: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: 'k' } }
+            });
+            expect(adapter.id).toBe('ark-image');
+        }
+    });
+
+    test('非方舟端点不命中 ark——中转站转发 Seedream 仍走兜底', () => {
+        const adapter = pickImageAdapter({
+            model: 'doubao-seedream-4-0-250828',
+            imageList: [],
+            provider: { name: 'OpenAI兼容', config: { endpoint: 'https://api.example.com/v1', apiKey: 'k' } }
+        });
+        expect(adapter.id).toBe('generations-image');
+    });
+
     test('兜底保证：任意未知模型总有适配器返回', () => {
         const adapter = pickImageAdapter({ model: 'some-future-model', imageList: [] });
         expect(adapter).toBeDefined();

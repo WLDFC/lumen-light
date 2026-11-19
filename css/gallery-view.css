@@ -1,0 +1,553 @@
+/**
+ * ==========================================================================
+ * 在线画廊视图样式（提示词管理器内「Civitai / Danbooru」只读浏览，ADR 090）
+ * ==========================================================================
+ * 装载顺序：必须在 recipe-manager.css 之后——
+ *   .recipe-dialog.gallery-mode 的隐藏规则要覆盖收藏区控件的本档样式。
+ * 结构：视图挂在 .recipe-cards-area 内（.gallery-view 子树），收藏区 DOM
+ *   不动；画廊态靠 dialog 根上的 gallery-mode 类整体切换。
+ * 配色沿用收藏页语义：面板底 #1b1c21、凹陷底 rgba(0,0,0,.35)、描边
+ * rgba(128,128,128,.3)、强调 #3b82f6（筛选激活档，与 Civitai 官网同感）。
+ * ==========================================================================
+ */
+
+/* ===== 画廊态：工具行保持基础布局（用户拍板：批量/筛选/搜索/标签名
+   一概保留原样，画廊筛选条是额外新增行）；只隐藏收藏内容区——
+   本地网格/空态/批量条让位给画廊网格 ===== */
+
+.recipe-dialog.gallery-mode .recipe-batch-bar-slot,
+.recipe-dialog.gallery-mode .recipe-grid,
+.recipe-dialog.gallery-mode .recipe-empty-state {
+    display: none;
+}
+
+/* ===== 画廊入口下拉触发器（布局钮同款观感，位于其左侧） ===== */
+
+.recipe-toolbar-right .recipe-gallery-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(27, 28, 33, 1);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.recipe-toolbar-right .recipe-gallery-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+/* 画廊态高亮（与布局钮 is-active 同族语义） */
+.recipe-toolbar-right .recipe-gallery-btn.is-active {
+    border-color: #3b82f6;
+    color: #93c5fd;
+}
+
+/* ===== 视图容器 ===== */
+
+.gallery-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.gallery-view[hidden] {
+    display: none;
+}
+
+/* ===== 筛选条：SFW 三档 + 排序 + 源内搜索（吸顶随滚动容器） ===== */
+
+.gallery-filterbar {
+    position: sticky;
+    top: -24px;               /* 抵消 .recipe-cards-area 的 24px padding，贴住滚动口 */
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(27, 28, 33, 0.96);
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 10px;
+}
+
+/* 筛选行：分级行（+排序+搜索）与时间范围行共用 */
+.gallery-filter-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.gallery-filter-row[hidden] {
+    display: none;
+}
+.gallery-filter-spacer {
+    flex: 1;
+}
+
+/* 分节标签（对齐 Civitai 站内筛选的「Time period ─」节标题观感） */
+.gallery-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1;
+    padding-right: 10px;
+    border-right: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.gallery-pill-group {
+    display: flex;
+    gap: 6px;
+}
+
+.gallery-pill {
+    padding: 5px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gallery-pill:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+.gallery-pill.is-active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #fff;
+    font-weight: 600;
+}
+
+/* 排序已收敛到宿主工具行的「筛选」下拉（视图感知），画廊内不再自带 */
+
+/* 基模下拉触发器：与档位 pill 同族观感（胶囊形） */
+.gallery-model-btn {
+    height: 30px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12px;
+    cursor: pointer;
+}
+.gallery-model-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* 源内搜索框已退役（2026-11-19 拍板并入宿主工具行大搜索框，视图感知） */
+
+/* ===== 状态提示行 ===== */
+
+.gallery-warnings {
+    font-size: 12px;
+    color: #f59e0b;
+    padding: 0 2px;
+}
+
+.gallery-empty {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+    padding: 48px 0;
+}
+
+.gallery-error {
+    text-align: center;
+    padding: 32px 0;
+}
+.gallery-error-text {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    margin: 0 0 12px;
+}
+.gallery-retry-btn {
+    padding: 6px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    cursor: pointer;
+}
+.gallery-retry-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* ===== 瀑布流：与本地收藏页完全同款（固定列数+断点降档，ADR 090 用户
+   拍板「图片布局按本地画廊的流式」）——列数/间距/卡片观感逐项对齐
+   recipe-manager.css 的 .recipe-grid/.recipe-card，断点同步 6/4/2 列 ===== */
+
+.gallery-grid {
+    column-count: 6;
+    column-gap: 16px;
+    transition: opacity 0.15s;
+}
+@media (max-width: 1100px) {
+    .gallery-grid {
+        column-count: 4;
+    }
+}
+@media (max-width: 720px) {
+    .gallery-grid {
+        column-count: 2;
+    }
+}
+.gallery-grid.is-loading {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+.gallery-card {
+    position: relative;
+    min-width: 0;
+    break-inside: avoid;
+    margin-bottom: 16px;
+    overflow: hidden;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 8px;
+    cursor: zoom-in;
+}
+
+.gallery-card-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    min-height: 60px;         /* 载入前占位，防 0 高卡片闪跳（本地卡片无此患） */
+}
+
+/* 卡片信息行（参考图样式）：底模或画师 | 尺寸 */
+.gallery-card-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+.gallery-card-model,
+.gallery-card-size {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.gallery-card-model {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* 卡片三按钮行：落画布/下载/复制词 */
+.gallery-card-btns {
+    display: flex;
+    gap: 6px;
+    padding: 7px 8px 9px;
+}
+.gallery-card-btn {
+    flex: 1;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gallery-card-btn:not(:disabled):hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+.gallery-card-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+.gallery-card-btn.is-done {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: #22c55e;
+    color: #22c55e;
+}
+.gallery-card-btn.is-fail {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: #ef4444;
+    color: #ef4444;
+}
+
+.gallery-sentinel {
+    height: 1px;
+}
+
+/* ===== 详情浮层（叠在窗口之上；fixed 相对视口，受宿主 dialog z 序约束） ===== */
+
+.gallery-detail {
+    position: fixed;
+    inset: 0;
+    z-index: 1300;
+    display: flex;
+}
+.gallery-detail[hidden] {
+    display: none;
+}
+
+.gallery-detail-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 10, 12, 0.78);
+}
+
+.gallery-detail-body {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    display: flex;
+    gap: 16px;
+    padding: 32px;
+    min-height: 0;
+}
+
+.gallery-detail-imgwrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.gallery-detail-imgwrap.is-loading::after {
+    content: '载入中…';
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+}
+.gallery-detail-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+
+.gallery-detail-info {
+    width: 380px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: #1b1c21;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.gallery-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+.gallery-detail-badge {
+    font-size: 13px;
+    font-weight: 700;
+    color: #93c5fd;
+}
+.gallery-detail-link {
+    margin-left: auto;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+    text-decoration: none;
+}
+.gallery-detail-link:hover {
+    color: #fff;
+}
+.gallery-detail-close {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 14px;
+    cursor: pointer;
+}
+.gallery-detail-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.gallery-detail-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* 提示词区块：凹陷衬底 + 标题行复制钮 */
+.gallery-sec {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+.gallery-sec-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 6px;
+}
+.gallery-sec-copy {
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 4px;
+}
+.gallery-sec-copy:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+.gallery-sec-copy.is-done,
+.gallery-tag-chip.is-done {
+    color: #22c55e;
+}
+.gallery-sec-text {
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.85);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+/* 参数网格：两列 k/v */
+.gallery-detail-params {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+}
+.gallery-param {
+    display: flex;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+    min-width: 0;
+}
+.gallery-param-k {
+    color: rgba(255, 255, 255, 0.45);
+    flex-shrink: 0;
+}
+.gallery-param-v {
+    color: rgba(255, 255, 255, 0.85);
+    word-break: break-all;
+}
+
+/* Danbooru tag 芯片：点击复制 */
+.gallery-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.gallery-tag-chip {
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 11px;
+    cursor: pointer;
+}
+.gallery-tag-chip:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* ===== 详情操作区（参考图样式：底模或画师/尺寸信息行 + 三按钮，两源通用） ===== */
+
+.gallery-detail-actions {
+    border-top: 1px solid rgba(128, 128, 128, 0.25);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.gallery-detail-actions[hidden] {
+    display: none;
+}
+
+.gallery-meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+}
+.gallery-meta-model {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.gallery-btn-row {
+    display: flex;
+    gap: 8px;
+}
+.gallery-act-btn {
+    flex: 1;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gallery-act-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+.gallery-act-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+.gallery-act-btn.is-done {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: #22c55e;
+    color: #22c55e;
+}
+.gallery-act-btn.is-fail {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: #ef4444;
+    color: #ef4444;
+}
+
+/* ===== 窄屏：详情改上下叠放 ===== */
+
+@media (max-width: 900px) {
+    .gallery-detail-body {
+        flex-direction: column;
+        padding: 16px;
+        overflow-y: auto;
+    }
+    .gallery-detail-imgwrap {
+        flex-shrink: 0;
+        max-height: 55vh;
+    }
+    .gallery-detail-info {
+        width: auto;
+        max-height: none;
+    }
+}

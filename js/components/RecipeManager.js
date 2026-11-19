@@ -50,6 +50,10 @@ class RecipeManager {
     constructor() {
         this.triggerButton = null; // 顶栏"提示词"按钮元素
         this.dialog = null;        // 全屏弹窗根元素
+        // 布局模式（2026-11-08，同 LoRA 管理器）：右缘留白露出右侧 Comfy
+        // 面板。开关/记忆/置灰/留白全在 LumenLayoutPanel 预制件
+        // （createDialog 实例化），本类不再自持状态
+        this._layout = null;
         this.tags = [];            // 当前已加载的收藏列表
         this.models = [];          // 模型标签清单（[{ id, name, parentId?, createdAt }]，
                                    //  parentId 缺省 = 顶层标签，最多 3 级）
@@ -142,6 +146,11 @@ class RecipeManager {
                             <!-- 右侧控件组：批量按钮 + 筛选排序下拉 + 搜索栏（搜索按
                                  图片名字模糊检索，与左侧标签筛选叠加生效） -->
                             <div class="recipe-toolbar-right">
+                                <button class="recipe-gallery-btn" type="button" aria-label="在线画廊"></button>
+                                <button class="recipe-layout-btn" type="button" title="布局：窄化本窗口露出右侧 Comfy 面板" aria-label="切换布局模式">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+                                    <span>布局</span>
+                                </button>
                                 <button class="lumen-batch-btn recipe-batch-btn" type="button" title="批量管理：多选后右键移动/删除" aria-label="批量管理">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="m8.5 12 2.5 2.5 5-5"></path></svg>
                                     <span>批量</span>
@@ -164,6 +173,32 @@ class RecipeManager {
 
         // 关闭按钮 / 点击遮罩空白处均可关闭
         this.dialog.querySelector('.recipe-dialog-close').addEventListener('click', () => this.close());
+        // 布局模式开关（同 LoRA 管理器：右缘留白露出 Comfy 面板）
+        this._layout = new LumenLayoutPanel({
+            button: this.dialog.querySelector('.recipe-layout-btn'),
+            dialog: () => this.dialog,
+            storageKey: 'lumen.recipeLayout'
+        });
+
+        // ===== 在线画廊（ADR 090）：视图状态机 collection ↔ gallery(source) =====
+        // 下拉入口在布局钮左侧（用户拍板位置）；画廊态工具行保持基础布局
+        // （批量/筛选/搜索/标签名一概不隐藏，用户拍板），只由 .gallery-mode
+        // CSS 隐藏收藏内容区（本地网格/空态/批量条）让位画廊网格；左侧栏
+        // 保留，布局钮保留（管的是窗口本身）。
+        // 视图组件 RecipeGallery 渲染自己的子树，收藏区 DOM 一概不动。
+        this._view = 'collection';
+        this._gallerySource = null;
+        this.gallery = new RecipeGallery({ host: this });
+        this.dialog.querySelector('.recipe-cards-area').appendChild(this.gallery.root);
+        this._galleryDd = new LumenDropdown(this.dialog.querySelector('.recipe-gallery-btn'), {
+            triggerIcon: '<rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="m21 15-5-5L5 21"></path>',
+            staticIcon: true,
+            onChange: v => this._handleGallerySwitch(v)
+        });
+        // 菜单恒定三项，勾选跟随当前视图（本地画廊为默认勾选——
+        // 曾传 null 致回落勾到第一项 Civitai，用户指正）
+        this._galleryDd.setOptions(this._galleryOptions(), 'collection');
+        this._galleryDd.setLabel('在线画廊');
         this.dialog.addEventListener('click', event => {
             if (event.target === this.dialog) this.close();
         });
@@ -173,7 +208,9 @@ class RecipeManager {
 
         // ===== 批量管理 / 右键菜单 / 确认弹窗（Lumen 预制件） =====
         this.batch = new LumenBatchManager({
-            trigger: this.dialog.querySelector('.lumen-batch-btn'),
+            // 精确到宿主类：工具行里别按钮（布局钮等）不得借 lumen-batch-btn
+            // 类名，否则这里的 querySelector 会把先出现的借名钮当批量触发器
+            trigger: this.dialog.querySelector('.recipe-batch-btn'),
             barContainer: this.dialog.querySelector('.recipe-batch-bar-slot'),
             gridEl: this.dialog.querySelector('.recipe-grid'),
             getVisibleIds: () => this.visibleTagIds,
@@ -188,20 +225,36 @@ class RecipeManager {
             buildRows: (row, node, depth) => this.buildTagRow(row, node, depth)
         });
 
-        // Esc 逐层退出：右键菜单 → 移动选择框 → 确认弹窗 → 批量模式。
+        // Esc 逐层退出：画廊详情 → 右键菜单 → 移动选择框 → 确认弹窗 → 批量模式。
         // 菜单与确认弹窗自身也监听 Esc，这里 isOpen 先判负责"只退一层"
         document.addEventListener('keydown', event => {
             if (event.key !== 'Escape') return;
+            if (this.gallery.isDetailOpen()) { this.gallery.closeDetail(); return; }
             if (this.ctxMenu.isOpen) { this.ctxMenu.close(); return; }
             if (this.movePicker?.classList.contains('is-open')) { this.closeMovePicker(); return; }
             if (this.confirmDialog.isOpen) return;   // 预制件自关
             if (this.batch.isOpen) this.batch.exit();
         });
 
-        // 搜索栏：输入即过滤（名字模糊匹配，大小写不敏感），
-        // 与左侧标签筛选叠加生效；清空关键词自动恢复完整列表
+        // 搜索栏（视图感知，2026-11-19 拍板与画廊源内搜索合并共用大框）：
+        // 收藏态=名字模糊过滤、输入即生效；画廊态=转发画廊源内搜索
+        // （500ms 防抖——danbooru 每请求吃匿名配额），回车两态都立即生效
         const searchInput = this.dialog.querySelector('.recipe-search-input');
         searchInput.addEventListener('input', () => {
+            if (this._view === 'gallery') {
+                this.gallery.setSearch(searchInput.value);
+                return;
+            }
+            this.searchKeyword = searchInput.value.trim();
+            this.render();
+        });
+        searchInput.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            if (this._view === 'gallery') {
+                this.gallery.setSearch(searchInput.value, { immediate: true });
+                return;
+            }
             this.searchKeyword = searchInput.value.trim();
             this.render();
         });
@@ -214,9 +267,14 @@ class RecipeManager {
             triggerIcon: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
             staticIcon: true,
             onChange: v => {
-                this.sortMode = v;
-                localStorage.setItem('lumen.recipeSortMode', v);
-                this.render();
+                // 视图感知（ADR 090）：画廊态排序走画廊分源记忆，收藏态走本地
+                if (this._view === 'gallery') {
+                    this.gallery.setSort(v);
+                } else {
+                    this.sortMode = v;
+                    localStorage.setItem('lumen.recipeSortMode', v);
+                    this.render();
+                }
                 this.sortDropdown.setLabel('筛选');   // 文案固定为「筛选」，不随选中项变（动作型同款）
             }
         });
@@ -889,7 +947,8 @@ class RecipeManager {
      * 创建单张收藏卡片
      * 结构：图片（点击看原图，批量模式整卡点击=多选）+ 左上角模型角标
      *       + 右上角选择圈（批量模式显示，选中变绿✓）+ 右键菜单
-     *       + 底部信息栏（左侧 2/3 显示名字，右侧 Copy 按钮）
+     *       + 信息行（左=收藏名可双击改名，右=尺寸）+ 三按钮行
+     *       （落画布/下载/复制词——2026-11-19 拍板对齐在线画廊卡片布局）
      * 原"悬停红色×删除"已移除——删除/移动统一走右键菜单
      * @param {object} tag - 收藏记录（含 id、name、model、prompt、imageUrl、width、height 等）
      * @returns {HTMLElement} article.recipe-card
@@ -935,9 +994,10 @@ class RecipeManager {
             modelBadge.textContent = tag.model;
         }
 
-        // 底部信息栏：左侧 2/3 显示用户保存时填写的名字，右侧放 Copy 按钮
-        const infoBar = document.createElement('div');
-        infoBar.className = 'recipe-card-info';
+        // 信息行（对齐在线画廊卡片，2026-11-19 拍板）：左侧收藏名
+        // （双击原地重命名），右侧尺寸
+        const metaRow = document.createElement('div');
+        metaRow.className = 'gallery-card-meta';
 
         const nameLabel = document.createElement('span');
         nameLabel.className = 'recipe-card-name';
@@ -950,43 +1010,194 @@ class RecipeManager {
             if (!this.batch.isOpen) this.startRename(tag, nameLabel);
         });
 
-        // Copy 按钮：仅复制正向提示词（不含负向词），成功后变绿 1.2 秒反馈；
-        // 阻止冒泡——批量模式点 Copy 不应连带切换选中
+        const sizeLabel = document.createElement('span');
+        sizeLabel.className = 'gallery-card-size';
+        sizeLabel.textContent = (tag.width > 0 && tag.height > 0)
+            ? `${tag.width}×${tag.height}` : '—';
+
+        metaRow.append(nameLabel, sizeLabel);
+
+        // 三按钮行：落画布/下载/复制词（同在线画廊；stopPropagation 防
+        // 批量模式点按钮连带切换选中）
+        const btnRow = document.createElement('div');
+        btnRow.className = 'gallery-card-btns';
+
+        const dropButton = document.createElement('button');
+        dropButton.className = 'gallery-card-btn';
+        dropButton.type = 'button';
+        dropButton.textContent = '落画布';
+        dropButton.addEventListener('click', async event => {
+            event.stopPropagation();
+            await this._dropRecipeToCanvas(dropButton, tag);
+        });
+
+        const downloadButton = document.createElement('button');
+        downloadButton.className = 'gallery-card-btn';
+        downloadButton.type = 'button';
+        downloadButton.textContent = '下载';
+        downloadButton.addEventListener('click', event => {
+            event.stopPropagation();
+            const a = document.createElement('a');
+            a.href = tag.imageUrl;
+            a.download = tag.imageUrl.split('/').pop() || 'recipe.webp';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            this._flashRecipeBtn(downloadButton, true);
+        });
+
         const copyButton = document.createElement('button');
-        copyButton.className = 'recipe-copy-btn';
+        copyButton.className = 'gallery-card-btn';
         copyButton.type = 'button';
-        copyButton.textContent = 'Copy';
+        copyButton.textContent = '复制词';
         copyButton.title = '复制正面提示词';
         copyButton.addEventListener('click', async event => {
             event.stopPropagation();
             try {
                 await navigator.clipboard.writeText(tag.prompt || '');
-                copyButton.textContent = 'Copied';
-                copyButton.classList.add('is-copied');
-                window.setTimeout(() => {
-                    copyButton.textContent = 'Copy';
-                    copyButton.classList.remove('is-copied');
-                }, 1200);
+                this._flashRecipeBtn(copyButton, true);
             } catch (error) {
                 console.error('复制提示词失败:', error);
+                this._flashRecipeBtn(copyButton, false);
             }
         });
 
-        infoBar.append(nameLabel, copyButton);
+        btnRow.append(dropButton, downloadButton, copyButton);
 
         if (modelBadge) {
-            card.append(image, modelBadge, check, infoBar);
+            card.append(image, modelBadge, check, metaRow, btnRow);
         } else {
-            card.append(image, check, infoBar);
+            card.append(image, check, metaRow, btnRow);
         }
         return card;
     }
 
+    /** 落画布（本地收藏）：同源直取字节转 dataUrl 走 _bridgeDropImage 既有
+     *  管线（落点/存档持久化语义与在线画廊落图一致），不绕远程下载代理 */
+    async _dropRecipeToCanvas(btn, tag) {
+        btn.disabled = true;
+        try {
+            const resp = await fetch(tag.imageUrl);
+            if (!resp.ok) throw new Error(`取图失败：HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            // 静态服务的 Content-Type 可信（image/webp 等），异常时按扩展名兜底
+            let mime = (blob.type || '').startsWith('image/') ? blob.type : '';
+            if (!mime) {
+                const ext = ((/\.([a-z0-9]+)(?:\?|#|$)/i.exec(tag.imageUrl)) || [])[1] || 'png';
+                mime = ext.toLowerCase() === 'jpg' ? 'image/jpeg' : `image/${ext.toLowerCase()}`;
+            }
+            const dataUrl = await window.ImageExport.blobToDataUrl(blob, mime);
+            const result = await window.socket._bridgeDropImage({
+                dataUrl,
+                name: tag.imageUrl.split('/').pop() || 'recipe.png'
+            });
+            console.log('[recipe] 已落画布:', result.id, result.name);
+            this._flashRecipeBtn(btn, true);
+        } catch (err) {
+            console.error('[recipe] 落画布失败:', err.message);
+            this._flashRecipeBtn(btn, false);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    /** 按钮结果反馈：成功绿 / 失败红，1.2s 后还原（同在线画廊 _flashBtn） */
+    _flashRecipeBtn(btn, ok) {
+        btn.classList.add(ok ? 'is-done' : 'is-fail');
+        window.setTimeout(() => btn.classList.remove(ok ? 'is-done' : 'is-fail'), 1200);
+    }
+
     /** 打开弹窗：显示弹窗、拉取最新数据（收藏 + 模型标签）、焦点移到关闭按钮 */
+    // ==================== 在线画廊视图状态机（ADR 090） ====================
+
+    /** 下拉菜单选项集：恒定三项，勾选跟随当前视图（本地画廊=默认） */
+    _galleryOptions() {
+        return [
+            { value: 'collection', label: '本地画廊' },
+            { value: 'civitai', label: 'Civitai 画廊' },
+            { value: 'danbooru', label: 'Danbooru 画廊' }
+        ];
+    }
+
+    _handleGallerySwitch(value) {
+        if (value === 'collection') {
+            if (this._view !== 'collection') this._showCollection();
+            return;
+        }
+        this._showGallery(value);
+    }
+
+    /** 大搜索框分视图同步（2026-11-19 与画廊源内搜索合并共用）：
+     *  占位文案随视图换语义，词回填各自的记忆（收藏=searchKeyword，
+     *  画廊=gallery._q 按源）——换视图不带旧词、回来不丢词 */
+    _syncSearchBoxForView() {
+        const input = this.dialog.querySelector('.recipe-search-input');
+        if (this._view === 'gallery') {
+            input.placeholder = this._gallerySource === 'civitai'
+                ? '搜索 Images（支持中文）'
+                : 'tag 搜索，空格分隔（匿名限 2 个，含分级）';
+            input.value = this.gallery._q[this._gallerySource] || '';
+        } else {
+            input.placeholder = '搜索图片名字…';
+            input.value = this.searchKeyword || '';
+        }
+    }
+
+    /** 收藏态「筛选」下拉的选项集（本地排序三档） */
+    _collectionSortOptions() {
+        return [
+            { value: 'default', label: '收藏先后（默认）' },
+            { value: 'time-desc', label: '添加时间 新→旧' },
+            { value: 'name', label: '名称 A→Z' }
+        ];
+    }
+
+    /** 画廊态「筛选」下拉的选项集（当前源的排序两档；统计窗口由
+     *  时间范围行独立管辖，标签不再写死「本月」） */
+    _gallerySortOptions() {
+        return [
+            { value: 'hot', label: '最热' },
+            { value: 'new', label: '最新发布' }
+        ];
+    }
+
+    /** 切进画廊：窗口挂 gallery-mode 类（收藏内容区由 CSS 隐藏）；
+     *  「筛选」下拉重建为画廊排序选项集 */
+    _showGallery(source) {
+        this._view = 'gallery';
+        this._gallerySource = source;
+        this._syncSearchBoxForView();
+        this.dialog.classList.add('gallery-mode');
+        this._galleryDd.trigger.classList.add('is-active');
+        this._galleryDd.setOptions(this._galleryOptions(), source);
+        this._galleryDd.setLabel(source === 'civitai' ? 'Civitai 画廊' : 'Danbooru 画廊');
+        this.sortDropdown.setOptions(this._gallerySortOptions(), this.gallery._filter('sort'));
+        this.sortDropdown.setLabel('筛选');
+        this.gallery.show(source);
+    }
+
+    /** 切回收藏：卸画廊视图（停请求/收详情），「筛选」下拉还原本地排序 */
+    _showCollection() {
+        this._view = 'collection';
+        this._gallerySource = null;
+        this._syncSearchBoxForView();
+        this.dialog.classList.remove('gallery-mode');
+        this._galleryDd.trigger.classList.remove('is-active');
+        this._galleryDd.setOptions(this._galleryOptions(), 'collection');
+        this._galleryDd.setLabel('在线画廊');
+        this.sortDropdown.setOptions(this._collectionSortOptions(), this.sortMode);
+        this.sortDropdown.setLabel('筛选');
+        this.gallery.hide();
+    }
+
     open() {
+        // 开窗恒回收藏视图（画廊是浏览态，收藏是主界面）
+        if (this._view === 'gallery') this._showCollection();
         this.dialog.classList.add('is-open');
         this.dialog.setAttribute('aria-hidden', 'false');
         this.triggerButton.setAttribute('aria-expanded', 'true');
+        // 开窗应用记忆布局（视口放不下则回落普通模式并置灰按钮，预制件管）
+        this._layout.applyStored();
         this.loadTags();
         this.loadModels();
         this.dialog.querySelector('.recipe-dialog-close').focus();

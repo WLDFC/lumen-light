@@ -31,6 +31,7 @@ const NodeTypes = {
     SOURCE: {
         PROMPT_NODE: 'prompt-node',
         TEXT_NODE: 'text-node',
+        BOOKMARK_NODE: 'bookmark-node',
         LORA_NODE: 'lora-node',
         IMAGE_GEN_NODE: 'image-gen-node',
         COMFY_GEN_NODE: 'comfy-gen-node',
@@ -54,6 +55,11 @@ const NodeTypes = {
     /** 文本节点（画布备注，无端口不参与连线） */
     isTextNode(source) {
         return source === NodeTypes.SOURCE.TEXT_NODE;
+    },
+
+    /** 书签节点（编组快捷跳转目录，无端口不参与连线） */
+    isBookmarkNode(source) {
+        return source === NodeTypes.SOURCE.BOOKMARK_NODE;
     },
 
     /** LLM API 生图节点 */
@@ -88,6 +94,7 @@ const NodeTypes = {
     isPanelNode(source) {
         return NodeTypes.isPromptNode(source) ||
                NodeTypes.isTextNode(source) ||
+               NodeTypes.isBookmarkNode(source) ||
                NodeTypes.isLoraNode(source) ||
                NodeTypes.isGenNode(source);
     },

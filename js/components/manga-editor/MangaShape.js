@@ -176,10 +176,111 @@ Object.assign(window.MangaEditor.prototype, {
         this._renderLayerPanel();
     },
 
+    // ==================== 钢笔工具（点击落点多边形，2026-11-11） ====================
+
+    /**
+     * 钢笔按下：落一个顶点。会话状态 this._pen = { pts, cursor }——跨
+     * 多次 pointerdown/up 周期共享，与单次拖拽的 _drag 通道无关。
+     * 首点须在画幅内（形状创建同守卫）；近起点（屏幕 8px）且 ≥3 点 =
+     * 闭合提交；其余追加点（钳进画幅，出界贴边停住）
+     */
+    _penStart(px, py) {
+        if (!this._view) return;
+        const p = this._toDraft(px, py);
+        const dw = this.draft.width;
+        const dh = this.draft.height;
+        if (!this._pen) {
+            if (p.x < 0 || p.y < 0 || p.x > dw || p.y > dh) return;
+            this._pen = { pts: [[p.x, p.y]], cursor: null };
+            this._renderStage();
+            return;
+        }
+        const [fx, fy] = this._pen.pts[0];
+        const screenDist = Math.hypot(p.x - fx, p.y - fy) * this._view.scale;
+        if (this._pen.pts.length >= 3 && screenDist <= 8) {
+            this._penClose();
+            return;
+        }
+        this._pen.pts.push([
+            Math.max(0, Math.min(dw, p.x)),
+            Math.max(0, Math.min(dh, p.y))
+        ]);
+        this._renderStage();
+    },
+
+    /** 钢笔移动：橡皮筋预览终点实时更新（_onPointerMove 的 pen 分支调用） */
+    _penMove(px, py) {
+        if (!this._pen) return;
+        const p = this._toDraft(px, py);
+        this._pen.cursor = [
+            Math.max(0, Math.min(this.draft.width, p.x)),
+            Math.max(0, Math.min(this.draft.height, p.y))
+        ];
+        this._renderStage();
+    },
+
+    /**
+     * 闭合提交（近起点点击 / Enter）：≥3 点 → polyNormalize 归一化点集
+     * 建形状层（属性取当前选项条默认值：填充/边框/边宽——隐藏填充/隐藏
+     * 轮廓走既有红斜杠开关语义），「绘制多边形」入账 + 自动选中；
+     * 不足 3 点静默取消并提示（首次 Esc=取消，Enter 提前闭合同此路径）
+     */
+    _penClose() {
+        const pen = this._pen;
+        this._pen = null;
+        if (!pen || pen.pts.length < 3) {
+            if (pen) this._status('多边形至少需要 3 个顶点，已取消', true);
+            this._renderStage();
+            return;
+        }
+        const norm = ShapeLayout.polyNormalize(pen.pts);
+        if (!norm) {
+            this._renderStage();
+            return;
+        }
+        const before = this._histSnapshot();
+        const layers = this._ensureDrawLayers();
+        const id = this._allocLayerId();
+        const layer = {
+            id,
+            name: ShapeLayout.TYPE_NAME.poly,
+            visible: true,
+            x: norm.x,
+            y: norm.y,
+            shape: {
+                type: 'poly',
+                w: norm.w,
+                h: norm.h,
+                points: norm.points,
+                fill: this._shapeOpts.fill,
+                strokeColor: this._shapeOpts.strokeColor,
+                strokeWidth: this._shapeOpts.strokeWidth,
+                radius: this._shapeOpts.radius,   // 顶点圆角随滑杆（polyPath arcTo）
+                tail: 'lb'
+            }
+        };
+        layers.push(layer);
+        this._selectImageLayer(layer.id);
+        this._commitHistory(before, '绘制多边形');
+        this._draftTouched = true;
+        this._scheduleSave();
+        this._scheduleThumbRefresh();
+        this._renderLayerPanel();
+        this._renderStage();
+    },
+
+    /** 取消（Esc/切工具）：丢弃会话零痕迹 */
+    _penCancel() {
+        if (!this._pen) return;
+        this._pen = null;
+        this._renderStage();
+    },
+
     // ==================== 选项条（标题栏，形状工具激活时显示） ====================
 
     /** 形状选项条：类型四钮 + 填充色/红斜杠去填充 + 边框色/红斜杠去边框
-     *  + 边宽/圆角滑杆（灯箱 StudioDomBuilder 控件同款）。挂标题栏
+     *  + 边宽/圆角滑杆与数值框（滑杆继承灯箱 StudioDomBuilder 控件；数值
+     *  框为漫画侧增强——可编辑双向同步，量化精确值）。挂标题栏
      *  （.manga-header-right 之前，画笔/文字选项条同位同法——MangaDom 在
      *  _buildTextBar 之后调用） */
     _buildShapeBar() {
@@ -247,16 +348,56 @@ Object.assign(window.MangaEditor.prototype, {
             return el;
         };
         const width = mkSlider(0, 60, '边框宽度（草稿像素，0=无边框）');
+        const radius = mkSlider(0, 120, '圆角（草稿像素，矩形类/多边形生效）');
+        // 滑杆旁数值框（可编辑，双向同步）：拖滑杆好预览、键数字好量化
+        // （2026-11-11 用户诉求）。输入中只钳值不回写（防光标跳），清空/
+        // 非法输入不动当前值，失焦（change）回写规范化
+        const mkNum = (slider, key) => {
+            const el = document.createElement('input');
+            el.type = 'number';
+            el.className = 'manga-shape-num';
+            el.min = slider.min;
+            el.max = slider.max;
+            el.step = '1';
+            el.title = slider.title;
+            const clamp = () => {
+                if (String(el.value).trim() === '') return null;
+                const v = Math.round(Number(el.value));
+                return Number.isFinite(v)
+                    ? Math.min(Number(el.max), Math.max(Number(el.min), v)) : null;
+            };
+            el.addEventListener('input', () => {
+                const v = clamp();
+                if (v == null) return;
+                this._shapeOpts[key] = v;
+                slider.value = String(v);
+                this._applyShapeOpts(false);
+            });
+            el.addEventListener('change', () => {
+                const v = clamp();
+                if (v == null) { el.value = String(this._shapeOpts[key]); return; }
+                el.value = String(v);
+                this._shapeOpts[key] = v;
+                slider.value = String(v);
+                this._applyShapeOpts();
+            });
+            return el;
+        };
+        const wNum = mkNum(width, 'strokeWidth');
+        const rNum = mkNum(radius, 'radius');
         width.value = String(this._shapeOpts.strokeWidth);
+        wNum.value = String(this._shapeOpts.strokeWidth);
+        radius.value = String(this._shapeOpts.radius);
+        rNum.value = String(this._shapeOpts.radius);
         width.addEventListener('input', () => {
             this._shapeOpts.strokeWidth = Number(width.value);
+            wNum.value = width.value;      // 数值框随动
             this._applyShapeOpts(false);   // 拖动中轻路径（不重建面板）
         });
         width.addEventListener('change', () => this._applyShapeOpts());
-        const radius = mkSlider(0, 120, '圆角（草稿像素，仅矩形类生效）');
-        radius.value = String(this._shapeOpts.radius);
         radius.addEventListener('input', () => {
             this._shapeOpts.radius = Number(radius.value);
+            rNum.value = radius.value;
             this._applyShapeOpts(false);
         });
         radius.addEventListener('change', () => this._applyShapeOpts());
@@ -266,7 +407,7 @@ Object.assign(window.MangaEditor.prototype, {
         const rLabel = document.createElement('span');
         rLabel.className = 'manga-brush-width-label';
         rLabel.textContent = '圆角';
-        bar.append(fill, noFill, stroke, noStroke, wLabel, width, rLabel, radius);
+        bar.append(fill, noFill, stroke, noStroke, wLabel, width, wNum, rLabel, radius, rNum);
         const right = header.querySelector('.manga-header-right');
         if (right) header.insertBefore(bar, right);
         else header.appendChild(bar);
@@ -277,13 +418,16 @@ Object.assign(window.MangaEditor.prototype, {
         this._shapeNoStrokeEl = noStroke;
         this._shapeWidthEl = width;
         this._shapeRadiusEl = radius;
+        this._shapeWidthNumEl = wNum;
+        this._shapeRadiusNumEl = rNum;
         this._syncShapeBarDom();
     },
 
-    /** 选项条随工具显隐（_setTool→_syncToolRailUi 联动，画笔/文字条同款） */
+    /** 选项条随工具显隐（_setTool→_syncToolRailUi 联动，画笔/文字条同款）：
+     *  钢笔工具共用形状条（填充/边框/边宽，类型钮对 poly 无高亮） */
     _syncShapeBar() {
         if (!this._shapeBarEl) return;
-        this._shapeBarEl.hidden = this.activeTool !== 'shape';
+        this._shapeBarEl.hidden = this.activeTool !== 'shape' && this.activeTool !== 'pen';
         if (!this._shapeBarEl.hidden) this._syncShapeBarDom();
     },
 
@@ -307,6 +451,8 @@ Object.assign(window.MangaEditor.prototype, {
         }
         if (this._shapeWidthEl) this._shapeWidthEl.value = String(this._shapeOpts.strokeWidth);
         if (this._shapeRadiusEl) this._shapeRadiusEl.value = String(this._shapeOpts.radius);
+        if (this._shapeWidthNumEl) this._shapeWidthNumEl.value = String(this._shapeOpts.strokeWidth);
+        if (this._shapeRadiusNumEl) this._shapeRadiusNumEl.value = String(this._shapeOpts.radius);
     },
 
     // ==================== 选项实时应用（灯箱 applyOpts 同语义） ====================
@@ -319,12 +465,15 @@ Object.assign(window.MangaEditor.prototype, {
     },
 
     /** 选项改动 → 选中形状层重绘（未选中则只影响默认值）。full=false =
-     *  滑杆拖动中的轻路径（不重建面板，松手 change 再全量） */
+     *  滑杆拖动中的轻路径（不重建面板，松手 change 再全量）。多边形
+     *  （钢笔）不吃类型切换——类型钮只改默认值，不把 poly 转成其他形状 */
     _applyShapeOpts(full = true) {
         const layer = this._shapeTargetLayer();
         if (layer) {
+            const typePatch = layer.shape.type === 'poly'
+                ? {} : { type: this._shapeOpts.type };
             Object.assign(layer.shape, {
-                type: this._shapeOpts.type, fill: this._shapeOpts.fill,
+                ...typePatch, fill: this._shapeOpts.fill,
                 strokeColor: this._shapeOpts.strokeColor,
                 strokeWidth: this._shapeOpts.strokeWidth,
                 radius: this._shapeOpts.radius, tail: this._shapeOpts.tail
@@ -400,19 +549,21 @@ Object.assign(window.MangaEditor.prototype, {
     // 委托——MangaLayers._drawPageLayers/_paintLayerThumb、
     // MangaPages._drawPageThumb 与测试都经原型方法调用，签名保持不变
 
-    /** 形状内容绘制（调用方已设好 transform，草稿像素坐标系）——委托 ShapeLayout */
-    _drawShapeContent(g, s, x, y, w, h) {
-        return ShapeLayout.drawShapeContent(g, s, x, y, w, h);
+    /** 形状内容绘制（调用方已设好 transform，草稿像素坐标系）——委托
+     *  ShapeLayout；paint 拆笔模式透传（剪贴蒙版形状基底两笔渲染用） */
+    _drawShapeContent(g, s, x, y, w, h, paint) {
+        return ShapeLayout.drawShapeContent(g, s, x, y, w, h, paint);
     },
 
     /** 舞台绘制（_drawPageLayers 形状分支调用）：草稿坐标 → 舞台变换后
-     *  按属性现画（无离屏——解析图形渲染零成本，矢量永远锐利） */
-    _drawShapeLayer(ctx, layer, X, Y, scale) {
+     *  按属性现画（无离屏——解析图形渲染零成本，矢量永远锐利）；
+     *  paint 缺省全画，'fill'/'stroke' 拆笔见 ShapeLayout.drawShapeContent */
+    _drawShapeLayer(ctx, layer, X, Y, scale, paint) {
         const s = layer.shape;
         ctx.save();
         ctx.translate(X(layer.x), Y(layer.y));
         ctx.scale(scale, scale);
-        this._drawShapeContent(ctx, s, 0, 0, s.w, s.h);
+        this._drawShapeContent(ctx, s, 0, 0, s.w, s.h, paint);
         ctx.restore();
     },
 });

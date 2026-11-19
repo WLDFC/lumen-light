@@ -169,7 +169,9 @@
     outline: none;
 }
 .manga-dim-field input {
-    width: 72px;
+    width: 60px;   /* 72→60（2026-11-08）：给预设下拉让位——四位数字（最大
+                      4096）13px 等宽约 31px+内边距绰绰有余，72px 时右栏
+                      剩余宽度不够，预设钮文字被挤没 */
     font-family: Consolas, 'Courier New', monospace;
 }
 .manga-dim-field input:focus,
@@ -177,8 +179,12 @@
     border-color: rgba(59, 130, 246, 0.6);
 }
 .manga-preset {
-    flex: 1;
-    min-width: 0;
+    /* 定宽不伸缩：闭态恒显示「预设」占位（选中即复位，见 MangaDom），
+       二字+caret 的最小定宽；不能不设宽——原生 select 闭态宽度默认
+       吸最宽选项（'1024 × 1024（方形）'）会爆行 */
+    flex: none;
+    width: 60px;
+    padding: 0 4px 0 8px;
     color: rgba(255, 255, 255, 0.75);
     cursor: pointer;
 }
@@ -328,6 +334,16 @@
 .manga-item.selected {
     border-color: rgba(59, 130, 246, 0.6);
     background: rgba(59, 130, 246, 0.06);
+}
+/* 多选（Shift+点选，逐格生成范围，2026-11-12）：虚线描边区分主选中
+   实线——卡片与舞台框同一语言 */
+.manga-item.multi-selected {
+    border-color: rgba(59, 130, 246, 0.45);
+    border-style: dashed;
+    background: rgba(59, 130, 246, 0.04);
+}
+.manga-item.multi-selected.selected {
+    border-style: solid;   /* 主选中兼多选：实线优先 */
 }
 
 .manga-item-head {
@@ -480,8 +496,7 @@
     transform: rotate(-90deg);
 }
 .manga-item.collapsed .manga-item-caption,
-.manga-item.collapsed .manga-item-text,
-.manga-item.collapsed .manga-item-bbox {
+.manga-item.collapsed .manga-item-text {
     display: none;
 }
 .manga-item-layer:hover {
@@ -515,8 +530,7 @@
 }
 .manga-item-caption:focus,
 .manga-item-title:focus,
-.manga-item-text:focus,
-.manga-bbox-n:focus {
+.manga-item-text:focus {
     border-color: rgba(59, 130, 246, 0.6);
 }
 
@@ -547,25 +561,6 @@
     font-size: 12.5px;
     outline: none;
     margin-bottom: 6px;
-}
-
-.manga-item-bbox {
-    display: flex;
-    gap: 4px;
-}
-.manga-bbox-n {
-    width: 0;
-    flex: 1;
-    height: 26px;
-    padding: 0 5px;
-    box-sizing: border-box;
-    border: 1px solid rgba(128, 128, 128, 0.25);
-    border-radius: 5px;
-    background: rgba(27, 28, 33, 0.7);
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 11.5px;
-    font-family: Consolas, 'Courier New', monospace;
-    outline: none;
 }
 
 .manga-add-item {
@@ -733,6 +728,14 @@
     cursor: pointer;
     border: 1px solid transparent;
     transition: background 0.15s ease, border-color 0.15s ease;
+}
+/* 剪贴蒙版行标记（2026-11-11）：↳ 指向下方基底（PS 面板同视觉语义） */
+.manga-layer-clip {
+    flex: none;
+    color: #4d9fff;
+    font-size: 13px;
+    line-height: 1;
+    user-select: none;
 }
 .manga-layer-row:hover {
     background: rgba(255, 255, 255, 0.05);

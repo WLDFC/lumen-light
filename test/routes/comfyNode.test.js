@@ -573,9 +573,10 @@ describe('POST /run 免节点双通道仲裁', () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.outputVia).toBe('none');
-        // 等 100ms 确认没有 history 查询发生
-        await new Promise((r) => setTimeout(r, 100));
-        expect(global.fetch.mock.calls.some((c) => String(c[0]).includes('/history/'))).toBe(false);
+        // 契约即 outputVia 字段本身：回流产物轮询不启动（video 工作流无
+        // history 兜底）。不再侦查 /history fetch——2026-11-08 起执行终态
+        // 看门狗独立轮询 /history/{promptId}（与产物回流无关，同样消费
+        // LUMEN_TEST_HISTORY_MS 测试钩子，旧 fetch 侦查会误伤）
     });
 });
 

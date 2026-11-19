@@ -81,6 +81,7 @@ class StudioHistory {
                 layer.ty = Number(spec.y) || 0;
                 layer.tscale = Number(spec.scale) > 0 ? Number(spec.scale) : 1;
                 layer.flipX = !!spec.flipX;
+                layer.clipped = !!spec.clipped;   // 剪贴蒙版标记随快照恢复
                 layer.empty = !spec.paint;
                 const paintJob = studio._loadInto(layer.paintCv, spec.paint);
                 jobs.push(paintJob);
@@ -124,6 +125,7 @@ class StudioHistory {
             studio._renderLayerList();
             studio._syncPanels();
             studio._drawSelOverlay();
+            studio._refreshClips();   // 剪贴层显示随快照重建（内容已全部就绪）
         } finally {
             studio._restoring = false;
         }

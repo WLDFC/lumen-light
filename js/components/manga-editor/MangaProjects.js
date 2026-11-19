@@ -9,7 +9,7 @@
  *       自动保存按项目路由（MangaDraftStore）、生成图转存项目夹
  *       （MangaGenerate._transferGenImage）、状态文案按归属汇报。
  * 「导出本页」钮（同在顶栏）：整页所见即所得合成一张 PNG 落画布视口中
- *       心（_exportPageToCanvas，主类）——唯一保留的画布交付口，逐层写
+ *       心（_exportPageToCanvas，MangaExport 混入）——唯一保留的画布交付口，逐层写
  *       回已退役（层与画布不再互相渗透）。
  * 打开项目遇未保存改动先弹确认（保存并打开 / 放弃修改，ADR 072——未保
  *       存改动不自动落盘也不静默丢弃）；删除当前项目后回落默认草稿。
@@ -37,6 +37,7 @@ Object.assign(window.MangaEditor.prototype, {
         this.activePage = doc.active;
         this.draft = this.pages[this.activePage];
         this.selected = -1;
+        if (this._multiSelected) this._multiSelected.clear();   // 多选集合随项目换血失效（逐格生成范围）
         this._selLayerId = null;
         if (typeof this._ensureDefaultLayerSelection === 'function') this._ensureDefaultLayerSelection();   // 灯箱同语义：进本即有选中层（调色/抠图开箱即用）
         this._resetHistory();   // 恢复态为新基线：撤销不越过本次恢复
@@ -44,7 +45,6 @@ Object.assign(window.MangaEditor.prototype, {
         this._renderAll();
         this._renderLayerPanel();   // 层栈随活动页恢复（面板停在首建空态，切页自愈的就是它）
         this._renderRail();     // 页面栏随恢复重建（rail 未建时方法自带守卫）
-        if (this.draft.background) this._loadBackgroundImg(this.draft.background);   // 背景引用随活动页恢复（MangaBackground 混入）
         this._updateProjectBtnLabel();
     },
 

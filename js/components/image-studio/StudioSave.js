@@ -22,12 +22,26 @@ class StudioSave {
     /**
      * 按图层变换把内容画进合成上下文（文档坐标）。
      * 左右翻转（layer.flipX）时以图层矩形右缘为轴水平镜像——与编辑期
-     * 画布元素的 scaleX(-1) 视觉一致，保存结果与所见相同
+     * 画布元素的 scaleX(-1) 视觉一致，保存结果与所见相同。
+     * 剪贴层（2026-11-11 自漫画编辑器移植，PS Clipping Mask 同语义）：
+     * paintCv 的 blit 走合成结果（内容 ∩ 基底 alpha + 形状基底描边补笔，
+     * 见 _composeClipScratch）——显示（clipCv）/拍平/吸管同口径；cv 为
+     * maskCv 时不经剪贴（遮罩是重绘元数据，不受剪贴影响）
      * @param {CanvasRenderingContext2D} g - 目标上下文（已含文档→画幅平移）
      * @param {Object} layer - 图层
      * @param {HTMLCanvasElement} cv - 图层画布（paintCv 或 maskCv）
      */
     _blitLayer(g, layer, cv) {
+        if (layer.clipped && cv === layer.paintCv) {
+            g.drawImage(this._composeClipped(layer), 0, 0);
+            return;
+        }
+        this._blitRaw(g, layer, cv);
+    }
+
+    /** 变换 blit 本体（剪贴合成内部用——blit 剪贴层的内容源时不可再入
+     *  剪贴分支，否则无限递归） */
+    _blitRaw(g, layer, cv) {
         const w = cv.width * layer.tscale;
         const h = cv.height * layer.tscale;
         // 形状层的翻转已由 _render 烘焙进画布内容（尾巴换向后重绘），
@@ -41,6 +55,127 @@ class StudioSave {
             return;
         }
         g.drawImage(cv, layer.tx, layer.ty, w, h);
+    }
+
+    // ==================== 剪贴蒙版（2026-11-11 自漫画编辑器移植） ====================
+
+    /** 剪贴基底：本层下方最近的未剪贴层（PS 链式语义——多个剪贴层挂
+     *  同一基底；拖拽排序后按新位置自动定基）。返回层对象或 null */
+    _clipBaseFor(layer) {
+        const layers = this.studio.layers;
+        const idx = layers.indexOf(layer);
+        if (idx < 0) return null;
+        for (let i = idx - 1; i >= 0; i--) {
+            const l = layers[i];
+            if (l && !l.clipped) return l;
+        }
+        return null;
+    }
+
+    /** 文档尺寸实例级合成 scratch（惰性建 + 随画幅改尺寸） */
+    _clipScratch(key) {
+        const studio = this.studio;
+        let cv = this[key];
+        if (!cv) {
+            cv = document.createElement('canvas');
+            this[key] = cv;
+        }
+        if (cv.width !== studio.iw || cv.height !== studio.ih) {
+            cv.width = studio.iw;
+            cv.height = studio.ih;
+        }
+        return cv;
+    }
+
+    /**
+     * 剪贴合成（文档坐标，结果落实例 scratch B 并返回）：
+     * A = 基底内容（按其变换/翻转 blit，**基底透明度参与遮罩**——PS 同
+     * 语义基底越透明剪贴越透）；B = 本层内容（按本层变换/翻转 blit）→
+     * destination-in 基底 alpha → 形状基底补 stroke-only 一笔（置入图
+     * 遮罩含描边 alpha 会盖住框线内半边，链顶补笔让分镜框线恒在最上，
+     * 2026-11-11 漫画同语义）。本层自身透明度不在此烘焙（显示走
+     * clipCv 的 CSS opacity、拍平走调用方 globalAlpha）
+     */
+    _composeClipScratch(layer, base) {
+        const a = this._clipScratch('_clipScratchA');
+        const ga = a.getContext('2d');
+        ga.setTransform(1, 0, 0, 1, 0, 0);
+        ga.clearRect(0, 0, a.width, a.height);
+        ga.globalAlpha = base.opacity;
+        this._blitRaw(ga, base, base.paintCv);
+        ga.globalAlpha = 1;
+        const b = this._clipScratch('_clipScratchB');
+        const gb = b.getContext('2d');
+        gb.setTransform(1, 0, 0, 1, 0, 0);
+        gb.clearRect(0, 0, b.width, b.height);
+        this._blitRaw(gb, layer, layer.paintCv);
+        gb.globalCompositeOperation = 'destination-in';
+        gb.drawImage(a, 0, 0);
+        gb.globalCompositeOperation = 'source-over';
+        if (base.isShape && base.shape) {
+            const s = base.shape;
+            const w = Math.max(2, Math.round(s.w));
+            const h = Math.max(2, Math.round(s.h));
+            // 翻转镜像与 StudioShapeTool._render 同构：气泡换尾、多边形
+            // 镜像层内点集（x → w − x），内容烘焙式翻转无 CSS 镜像
+            const eff = base.flipX
+                ? {
+                    ...s,
+                    tail: ShapeLayout.MIRROR_TAIL[s.tail] || s.tail,
+                    points: s.type === 'poly' && Array.isArray(s.points)
+                        ? s.points.map(([px, py]) => [s.w - px, py]) : s.points
+                }
+                : s;
+            const ext = ShapeLayout.extFor(eff, w, h);
+            gb.save();
+            gb.translate(base.tx, base.ty);
+            gb.scale(base.tscale, base.tscale);
+            ShapeLayout.drawShapeContent(gb, eff, ext.left, ext.top, w, h, 'stroke');
+            gb.restore();
+        }
+        return b;
+    }
+
+    /** 剪贴层文档坐标合成结果（拍平/吸管经 _blitLayer 剪贴分支消费）；
+     *  基底缺失/隐藏 → 空画布（整层不显示） */
+    _composeClipped(layer) {
+        const b = this._clipScratch('_clipScratchB');
+        const gb = b.getContext('2d');
+        gb.setTransform(1, 0, 0, 1, 0, 0);
+        gb.clearRect(0, 0, b.width, b.height);
+        const base = this._clipBaseFor(layer);
+        if (base && base.visible !== false) {
+            this._composeClipScratch(layer, base);
+        }
+        return b;
+    }
+
+    /**
+     * 剪贴层显示刷新（主类 _refreshClips 转发）：逐剪贴层把合成结果画进
+     * 其 clipCv（文档尺寸画布钉在文档原点，变换已烘焙进内容）。
+     * 无剪贴层时零开销早退；内容/变换/透明度的变化点都应调用（涂画/模糊
+     * 段点、移动拖拽、形状/文字重渲染、透明度滑杆、历史恢复等）
+     */
+    _refreshClipDisplays() {
+        const studio = this.studio;
+        if (!studio.image || !studio.layers.some((l) => l.clipped)) return;
+        for (const layer of studio.layers) {
+            if (!layer.clipped) continue;
+            studio._ensureClipCanvas(layer);
+            const cv = layer.clipCv;
+            if (cv.width !== studio.iw || cv.height !== studio.ih) {
+                cv.width = studio.iw;
+                cv.height = studio.ih;
+            }
+            const g = cv.getContext('2d');
+            g.setTransform(1, 0, 0, 1, 0, 0);
+            g.clearRect(0, 0, cv.width, cv.height);
+            const base = this._clipBaseFor(layer);
+            if (base && base.visible !== false) {
+                g.drawImage(this._composeClipScratch(layer, base), 0, 0);
+            }   // 基底缺失/隐藏 → 保持清空（整链不显示即目标态）
+            studio._positionLayerCanvases(layer);
+        }
     }
 
     /**
@@ -130,6 +265,8 @@ class StudioSave {
                 scale: layer.tscale || 1,
                 // 左右翻转标记（非破坏式镜像，恢复时重新应用到显示/拍平）
                 flipX: !!layer.flipX,
+                // 剪贴蒙版标记（显示/拍平走合成结果，恢复时重导出）
+                clipped: !!layer.clipped,
                 mask: layer.maskCv.toDataURL('image/png'),
                 paint: layer.paintCv.toDataURL('image/png')
             };

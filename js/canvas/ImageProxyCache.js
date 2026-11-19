@@ -86,7 +86,9 @@ class ImageProxyCache {
      */
     getDrawSource(img, scale, dpr) {
         const proxyMax = ImageProxyCache.getProxyMaxLongEdge(
-            (typeof SettingsManager !== 'undefined' && SettingsManager.getImageQuality()) || 'native'
+            // 兜底默认与 SettingsManager.getImageQuality 同源（平衡档，
+            // 2026-11-12 起默认不再原生）
+            (typeof SettingsManager !== 'undefined' && SettingsManager.getImageQuality()) || 'balanced'
         );
         const entry = this._entry(img.id);
 

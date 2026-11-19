@@ -30,12 +30,15 @@ const editsImageAdapter = require('./editsImageAdapter');
 const chatImageAdapter = require('./chatImageAdapter');
 const generationsImageAdapter = require('./generationsImageAdapter');
 const dashscopeImageAdapter = require('./dashscopeImageAdapter');
+const arkImageAdapter = require('./arkImageAdapter');
 
-// 顺序即优先级：dashscope 按端点域名精确命中（百炼没有 OpenAI 图像端点，
-// 必须抢在兜底前处理），edits / chat 按模型家族精确匹配，
+// 顺序即优先级：dashscope / ark 按端点域名精确命中（百炼没有 OpenAI 图像
+// 端点；方舟默认带水印需固定 watermark:false——都必须抢在兜底前处理），
+// edits / chat 按模型家族精确匹配，
 // generations 是永远命中的兜底，必须保持在末位
 const adapters = [
     dashscopeImageAdapter,
+    arkImageAdapter,
     editsImageAdapter,
     chatImageAdapter,
     generationsImageAdapter

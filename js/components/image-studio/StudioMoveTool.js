@@ -103,6 +103,8 @@ class StudioMoveTool {
             // 变换影响拍平与遮罩并集（两者都按变换合成）
             studio.dirty[layer.isImage ? 'base' : 'strokes'] = true;
             studio.dirty.mask = true;
+            // 拖拽中实时同步剪贴合成（被拖层作基底或被剪贴均受影响）
+            studio._refreshClips();
             return;
         }
         // 悬停光标：控制点 → 缩放光标，图层体 → 移动光标
@@ -231,15 +233,45 @@ class StudioMoveTool {
         const dpr = studio._selDpr || 1;
         g.setTransform(dpr, 0, 0, dpr, 0, 0);
         g.clearRect(0, 0, studio.selCanvas.width, studio.selCanvas.height);
+        // 文档坐标 → 舞台屏幕坐标（与图层画布定位同源：包裹层偏移 +
+        // (文档值 - 画幅偏移) × 缩放比；小数不取整，与图层定位保持
+        // 亚像素一致，避免选框相对图层抖动）。钢笔预览与选框共用
+        const sx = (x) => studio._wrapLeft + (x - studio.frame.fx) * studio.zoom;
+        const sy = (y) => studio._wrapTop + (y - studio.frame.fy) * studio.zoom;
+        // 钢笔预览（2026-11-11 自漫画编辑器移植）：已落点折线 + 至光标
+        // 橡皮筋 + 顶点蓝点 + ≥3 点时起点洋红可闭合圈；不受下方 move/text
+        // 早退影响（预览属钢笔工具态），纯视觉不进保存
+        if (studio._pen) {
+            const pen = studio._pen;
+            g.lineJoin = 'round';
+            g.lineCap = 'round';
+            g.strokeStyle = '#38bdf8';
+            g.lineWidth = 1.5;
+            g.beginPath();
+            pen.pts.forEach(([px, py], i) => {
+                if (i === 0) g.moveTo(sx(px), sy(py));
+                else g.lineTo(sx(px), sy(py));
+            });
+            if (pen.cursor) g.lineTo(sx(pen.cursor[0]), sy(pen.cursor[1]));
+            g.stroke();
+            g.fillStyle = '#38bdf8';
+            for (const [px, py] of pen.pts) {
+                g.beginPath();
+                g.arc(sx(px), sy(py), 2.5, 0, Math.PI * 2);
+                g.fill();
+            }
+            if (pen.pts.length >= 3) {
+                g.beginPath();
+                g.arc(sx(pen.pts[0][0]), sy(pen.pts[0][1]), 6, 0, Math.PI * 2);
+                g.strokeStyle = '#ff4fd8';
+                g.stroke();
+            }
+        }
         if ((studio.tool !== 'move' && studio.tool !== 'text') || !studio.image) return;
         const layer = studio._activeLayer();
         if (!layer || layer.isBackground || layer.empty) return;
-        // 文档坐标 → 舞台屏幕坐标（与图层画布定位同源：包裹层偏移 +
-        // (文档值 - 画幅偏移) × 缩放比；小数不取整，与图层定位保持
-        // 亚像素一致，避免选框相对图层抖动）
+        // 文档坐标 → 舞台屏幕坐标换算已在上方定义（钢笔预览共用）
         const doc = this._layerRect(layer);
-        const sx = (x) => studio._wrapLeft + (x - studio.frame.fx) * studio.zoom;
-        const sy = (y) => studio._wrapTop + (y - studio.frame.fy) * studio.zoom;
         // 磁吸参考线：吸附生效的轴画贯穿画幅的粉线（拖拽中随移动实时
         // 重绘，松手由宿主 _onPaintUp 清除并重绘本覆盖层）
         const guides = studio._snapGuides;

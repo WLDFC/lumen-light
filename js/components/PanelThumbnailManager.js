@@ -75,7 +75,8 @@ class PanelThumbnailManager {
     /**
      * 设置槽位清单并重渲染（工作流切换时由 PromptPanel 调用）。
      * 条目形态：{kind: 'image'|'video', loadImageId?: 节点id}（兼容旧
-     * 纯类型字符串）。LoadImage 直注槽带 loadImageId——渲染节点角标，
+     * 纯类型字符串）。LoadImage 直注槽带 loadImageId（记在槽位 data
+     * 属性上，2026-11-10 起不再渲染 #id 角标——用户拍板无用），
      * 运行时按「节点 id → 槽位内容」组 imageMapping 直注。
      * 类型不变的槽位保留已有内容；类型变化（image↔video）或被裁掉的
      * 槽位清空数据——避免运行时写出类型不匹配的脏内容
@@ -150,7 +151,6 @@ class PanelThumbnailManager {
             <span class="thumbnail-placeholder">+</span>
             <img class="thumbnail-img" style="display: none;" />
             <span class="thumbnail-video-badge" title="视频槽位">▶</span>
-            ${loadImageId ? `<span class="thumbnail-node-badge" title="免节点直注：对应工作流 LoadImage 节点">#${loadImageId}</span>` : ''}
             <button class="thumbnail-remove" style="display: none;">×</button>
             <input type="file" class="thumbnail-file-input" accept="image/*" style="display: none;" />`;
         return slot;

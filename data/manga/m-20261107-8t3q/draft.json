@@ -8,7 +8,7 @@
         "bbox_format": "xyxy",
         "summary": {
           "caption": "一页彩色漫画，亚丝娜穿着校服在教室",
-          "canvas": "multi_panel"
+          "canvas": "single"
         },
         "items": [
           {
@@ -48,16 +48,119 @@
         "drawLayers": [
           {
             "id": 1,
+            "name": "生成·从外面开门的分镜，只能看",
+            "visible": true,
+            "image": {
+              "src": "/api/manga-projects/m-20261107-8t3q/images/1794497308832-1.png",
+              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794497308832-1.png",
+              "bbox": [
+                0,
+                0,
+                416,
+                608
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "width": 832,
+        "height": 1248,
+        "bbox_coord_space": "abs",
+        "bbox_format": "xyxy",
+        "summary": {
+          "caption": "一页彩色漫画，桐人和亚丝娜约会的情景，桐人穿着冬装，亚丝娜穿着羽绒服",
+          "canvas": "single"
+        },
+        "items": [
+          {
+            "label": "character",
+            "caption": "亚丝娜脸红低头，侧面视图",
+            "bbox": [
+              491,
+              0,
+              832,
+              632
+            ]
+          },
+          {
+            "label": "character",
+            "caption": "亚丝娜的手部特写，",
+            "bbox": [
+              491,
+              644,
+              832,
+              1248
+            ]
+          },
+          {
+            "label": "character",
+            "caption": "桐人双手伸到嘴巴上捂暖",
+            "bbox": [
+              0,
+              0,
+              483,
+              1248
+            ]
+          },
+          {
+            "label": "text",
+            "caption": "",
+            "bbox": [
+              709,
+              18,
+              832,
+              246
+            ],
+            "text": "一起去嘛。"
+          },
+          {
+            "label": "text",
+            "caption": "",
+            "bbox": [
+              637,
+              672,
+              807,
+              1059
+            ],
+            "text": "这段时间我们从未像那样靠近过......"
+          },
+          {
+            "label": "text",
+            "caption": "气泡框",
+            "bbox": [
+              261,
+              402,
+              483,
+              743
+            ],
+            "text": "她想更近一步吧"
+          },
+          {
+            "label": "text",
+            "caption": "气泡框",
+            "bbox": [
+              34,
+              846,
+              242,
+              1109
+            ],
+            "text": "肯定"
+          }
+        ],
+        "drawLayers": [
+          {
+            "id": 1,
             "name": "生成落图",
             "visible": true,
             "image": {
-              "src": "/api/manga-projects/m-20261107-8t3q/images/1794070985309-1.png",
-              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794070985309-1.png",
+              "src": "/api/manga-projects/m-20261107-8t3q/images/1794168171798-1.png",
+              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794168171798-1.png",
               "bbox": [
                 0,
                 0,
                 832,
-                1216
+                1248
               ]
             }
           },
@@ -66,35 +169,97 @@
             "name": "生成落图",
             "visible": true,
             "image": {
-              "src": "/api/manga-projects/m-20261107-8t3q/images/1794071071604-1.png",
-              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794071071604-1.png",
+              "src": "/api/manga-projects/m-20261107-8t3q/images/1794168276648-1.png",
+              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794168276648-1.png",
               "bbox": [
                 0,
                 0,
                 832,
-                1216
+                1248
               ]
-            }
+            },
+            "strokes": []
           },
           {
-            "id": 3,
+            "id": 18,
             "name": "生成落图",
             "visible": true,
             "image": {
-              "src": "/api/manga-projects/m-20261107-8t3q/images/1794071124603-1.png",
-              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794071124603-1.png",
+              "src": "/api/manga-projects/m-20261107-8t3q/images/1794254571257-1.png",
+              "fromSrc": "/api/manga-projects/m-20261107-8t3q/images/1794254571257-1.png",
               "bbox": [
                 0,
                 0,
                 832,
-                1216
+                1248
               ]
+            },
+            "strokes": [
+              {
+                "color": "#e60000",
+                "width": 40,
+                "points": [
+                  928.1840228637544,
+                  268.8470536679066
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "name": "多边形",
+            "visible": true,
+            "x": 595.7914040984547,
+            "y": 695.3361088765587,
+            "shape": {
+              "type": "poly",
+              "w": 207,
+              "h": 457,
+              "points": [
+                [
+                  0,
+                  11
+                ],
+                [
+                  59,
+                  457
+                ],
+                [
+                  207,
+                  357
+                ],
+                [
+                  164,
+                  0
+                ]
+              ],
+              "fill": "#ffffff",
+              "strokeColor": "#000000",
+              "strokeWidth": 7,
+              "radius": 0,
+              "tail": "lb"
             }
+          },
+          {
+            "id": 4,
+            "name": "画布图片 1",
+            "visible": true,
+            "image": {
+              "src": "http://localhost:8080/save/anima-2/images/llm_image_img_lt7g9fg2n.png",
+              "fromSrc": "http://localhost:8080/save/anima-2/images/llm_image_img_lt7g9fg2n.png",
+              "bbox": [
+                560.9953311373876,
+                678.2276446973971,
+                832,
+                1160.0137226753748
+              ]
+            },
+            "clipped": true
           }
         ]
       }
     ],
     "active": 0
   },
-  "savedAt": 1794071468253
+  "savedAt": 1794497325392
 }

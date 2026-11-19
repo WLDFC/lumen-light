@@ -47,9 +47,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // 数据源为 window.taskRegistry 登记表，见 js/components/TaskCenter.js）
     window.taskCenter = new TaskCenter();
 
+    // 初始化工作流模板窗口（左侧工具栏工作流按钮弹出，资产库同尺寸窗口；
+    // 模板存取 UI 后续迭代接入，见 js/components/WorkflowTemplateLibrary.js）
+    window.workflowTemplateLibrary = new WorkflowTemplateLibrary();
+
     // 初始化 LoRA 管理窗口（顶栏右侧按钮：左文件夹/右封面网格，置顶星标；
     // 数据源 /api/lora，见 js/components/LoraManager.js 与 routes/lora.js）
     window.loraManager = new LoraManager();
+
+    // 初始化图层拆分窗口（顶栏「拆图」按钮，插在 LoRA 左边：VLM 识别前景
+    // 元素 → 校准框 → 拆成图层编辑 → AI 补齐被遮背景 → 分层落画布；
+    // 见 js/components/LayerSplit.js 与 layer-split/ 混入，须后于 LoraManager
+    // 实例化——顶栏按钮 insertBefore 其按钮）
+    window.layerSplit = new LayerSplit();
 
     // 初始化存档管理器（左上角文件菜单）
     // 挂到 window 上供 RealtimeSaveManager 等后续组件复用其 serializer 与 currentSave

@@ -111,9 +111,15 @@ class GroupManager {
             titleNS: Math.max(Math.min(w, h) / GroupManager.DESIGN_BASE, 0.01),
             // 聚集开关（全局至多一个，见 setCollect）；缺省 false
             collect: false,
+            // 上次应用的布局模式（'grid'|'waterfall'|'horizontal'|'vertical'，
+            // GroupToolbar.applyLayout 写入）：「按时间排序」在当前布局基础
+            // 上重排；'' = 从未排版过（时间排序回退宫格）
+            layoutMode: '',
             selected: false
         };
         this.groups.push(group);
+        // 组集合变化通知（书签节点等派生消费者刷新条目）
+        window.dispatchEvent(new CustomEvent('canvasGroupsChanged'));
         // 撤销记账：新建组可回退（undo=摘壳、redo=原对象放回）
         this.canvas.history?.recordGroupCreate(group);
         return group;
@@ -133,6 +139,8 @@ class GroupManager {
         if (this._renameInput && this._renameInput.group.id === id) {
             this._closeRename(false);
         }
+        // 组集合变化通知（书签节点等派生消费者刷新条目）
+        window.dispatchEvent(new CustomEvent('canvasGroupsChanged'));
         return true;
     }
 
@@ -506,6 +514,10 @@ class GroupManager {
         if (commit && value) {
             const from = ctx.group.title;
             ctx.group.title = value;
+            if (from !== value) {
+                // 组标题变化通知（书签节点等派生消费者同步组名）
+                window.dispatchEvent(new CustomEvent('canvasGroupsChanged'));
+            }
             // 撤销记账：改名可回退（值未变不记）
             this.canvas.history?.recordValue(ctx.group, 'title', from, value, '组改名');
         }

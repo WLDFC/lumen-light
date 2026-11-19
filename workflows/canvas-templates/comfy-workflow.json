@@ -1,0 +1,57 @@
+{
+  "kind": "lumen-canvas-template",
+  "name": "comfy工作流",
+  "description": "提示词 → LoRA → Comfy 生图的完整链路：正向提示词经 LoRA 节点堆叠后进入 Comfy 生图节点。Comfy 节点的具体工作流与参数未固化，套用后自行选择。",
+  "createdAt": "2026-11-15T00:00:00.000Z",
+  "updatedAt": "2026-11-15T00:00:00.000Z",
+  "nodes": [
+    {
+      "type": "prompt-node",
+      "x": 0,
+      "y": 69.9718134357997,
+      "width": 1911.873734829842,
+      "height": 1917.3744569510036,
+      "text": ""
+    },
+    {
+      "type": "prompt-node",
+      "x": 2180.974636599687,
+      "y": 58.7918523150785,
+      "width": 1911.873734829842,
+      "height": 1917.3744569510036,
+      "text": ""
+    },
+    {
+      "type": "lora-node",
+      "x": 4525.414293632792,
+      "y": 39.2257521931018,
+      "width": 2419.426140985889,
+      "height": 2536.4608519425133,
+      "entries": []
+    },
+    {
+      "type": "comfy-gen-node",
+      "x": 7228.764606367832,
+      "y": 0,
+      "width": 2048,
+      "height": 2600,
+      "workflowId": "",
+      "models": {},
+      "loraEnabled": {},
+      "loraStrengths": {},
+      "steps": null,
+      "cfg": null,
+      "sampler": null,
+      "sizeW": null,
+      "sizeH": null,
+      "denoise": null,
+      "count": 1
+    }
+  ],
+  "connections": [
+    { "from": 0, "to": 1, "order": 0 },
+    { "from": 1, "to": 2, "order": 0 },
+    { "from": 2, "to": 3, "order": 0 }
+  ],
+  "groups": []
+}

@@ -10,9 +10,35 @@
 /* ==================== 提示词节点面板 ==================== */
 /* --ns 为内容缩放系数（由 PromptNode.updateTransform 写入）：
    节点实际尺寸 ÷ 设计基准 512。内部所有布局尺寸（行高、字号、
-   端口、手柄、内边距）均乘以该系数，实现"框变大内容同比例放大"。 */
+   端口、手柄、内边距）均乘以该系数，实现"框变大内容同比例放大"。
+
+   ==================== 节点规格规范 v1（基准：ComfyGenNode） ====================
+   新增/调整节点一律对齐本规格，禁止散落魔法数；字号/行高引用下方
+   语义变量（var(--node-fs-xxx, 值)，带 fallback 以兼容面板侧同名类）。
+
+   【几何】默认宽 2048（全节点族统一）；默认高按内容量取 2048（Prompt/
+     Text/生图/视频）~2600（Comfy）/2800（RunningHub）；最小 1024×1024；
+     标题栏 48、状态栏 40（BaseCanvasNode 常量）；ns = min(宽,高)÷512，
+     Comfy 默认 ns=4.0。含原生 <select> 的节点 LAYOUT_MODE='design'。
+   【字号】×ns：标题 18（semibold）/ 右上角徽标 13（灰0.5）/ 行标签 12
+     （灰0.45，letter-spacing 0.3px）/ 控件（下拉、数字输入）15，
+     已知例外=模型下拉 17px（英文模型名视觉补偿）。
+   【控件】高 38 / 圆角 6 / 边框 rgba(128,128,128,0.3) / 底色 #0f0f12 /
+     焦点 #3b82f6 / 光标 #6cebff / 内边距 0 8。
+   【间距】表单 gap 8、表单内边距 10×12、行内 label↔控件 gap 3、
+     双列合并行 gap 12。
+   【色板】面板 var(--icon-bg) #1b1c21；凹陷层 #0f0f12；选中边 #6cebff。
+   ========================================================================== */
 .text-node {
     --ns: 1;                       /* 兜底值：JS 写入前按 1:1 渲染 */
+    /* ---- 节点规格语义变量（设计基准 px，值=ComfyGenNode 实测规格）----
+       共享样式统一引用，改一处全局生效；使用处一律带 fallback */
+    --node-fs-title: 18px;         /* 标题字号 */
+    --node-fs-badge: 13px;         /* 右上角类型徽标字号 */
+    --node-fs-label: 12px;         /* 行标签字号 */
+    --node-fs-control: 15px;       /* 控件字号（下拉/数字输入） */
+    --node-h-control: 38px;        /* 控件高度 */
+    --node-radius-control: 6px;    /* 控件圆角 */
     --input-font: 16px;            /* 输入框字号（设计基准）：textarea 与镜像层共用，
                                       两处必须同值，改这里即可，禁止分开写死 */
     position: fixed;               /* 绝对定位，位置由 updateTransform 按视口换算 */
@@ -43,6 +69,18 @@
 .text-node.selected {
     outline-color: #6cebff;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+/* 忽略态（ComfyUI bypass 语义，工作流编辑器同款视觉）：
+   整体半透明 + 标题栏紫色，表达「连线仍在、贡献不进收集」 */
+.text-node.bypassed {
+    outline-color: rgba(167, 139, 250, 0.6);
+    opacity: 0.72;
+}
+
+.text-node.bypassed .text-node-header {
+    background: rgba(139, 92, 246, 0.28);
+    color: #d8ccff;
 }
 
 /* ---------- 标题栏（固定高度，与 PromptNode.HEADER_HEIGHT 一致） ---------- */
@@ -98,7 +136,7 @@
 }
 
 .text-node-title {
-    font-size: calc(18px * var(--ns));
+    font-size: calc(var(--node-fs-title, 18px) * var(--ns));
     font-weight: 600;
     color: #fff;
     letter-spacing: 0.3px;
@@ -112,7 +150,7 @@
     min-width: 0;
     margin-right: calc(12px * var(--ns));
     font-family: inherit;
-    font-size: calc(18px * var(--ns));
+    font-size: calc(var(--node-fs-title, 18px) * var(--ns));
     font-weight: 600;
     color: #fff;
     letter-spacing: 0.3px;
@@ -126,7 +164,7 @@
 
 /* 右上角类型徽标：次要说明文字 */
 .text-node-badge {
-    font-size: calc(13px * var(--ns));
+    font-size: calc(var(--node-fs-badge, 13px) * var(--ns));
     color: rgba(255, 255, 255, 0.5);
 }
 
@@ -569,10 +607,11 @@
     gap: calc(3px * var(--ns));
 }
 
-/* 行标签：参考样图的小号浅灰说明文字 */
+/* 行标签：参考样图的小号浅灰说明文字（面板侧 #comfyContent 有同名类
+   的固定覆盖，此处 var 带兜底互不影响） */
 .image-gen-label,
 .comfy-param-label {
-    font-size: calc(12px * var(--ns));
+    font-size: calc(var(--node-fs-label, 12px) * var(--ns));
     color: rgba(255, 255, 255, 0.45);
     letter-spacing: 0.3px;
     user-select: none;
@@ -606,15 +645,16 @@
     border-color: #3b82f6;
 }
 
-/* 模型 / 质量 / 比例分辨率 / 数量四个折叠框统一加大：38px 高、15px 字号。
-   仅改节点表面的折叠框本体；点击比例/分辨率弹出的双段面板
-   （llm-size-options-wrap 及其内部选项）有独立样式，不受此规则影响 */
+/* 模型 / 质量 / 比例分辨率 / 数量四个折叠框统一为规格控件：38px 高、
+   15px 字号（规格语义变量见文件头）。仅改节点表面的折叠框本体；
+   点击比例/分辨率弹出的双段面板（llm-size-options-wrap 及其内部选项）
+   有独立样式，不受此规则影响 */
 .image-gen-node .llm-model-select,
 .image-gen-node .llm-quality-select,
 .image-gen-node .llm-count-select,
 .image-gen-node .llm-size-select {
-    height: calc(38px * var(--ns));
-    font-size: calc(15px * var(--ns));
+    height: calc(var(--node-h-control, 38px) * var(--ns));
+    font-size: calc(var(--node-fs-control, 15px) * var(--ns));
 }
 
 /* 模型框字号视觉补偿：模型名多为英文小写（如 gpt2），同一字号下
@@ -840,16 +880,17 @@
     gap: calc(8px * var(--ns));
 }
 
-/* 数值输入框（步数/宽高/降噪/LoRA 强度）：与同表单的下拉框同规格，
-   保证视觉统一；spinner 按钮在深色主题下过亮，隐藏后用键盘/滚轮调值。
-   作用域含 Comfy 生图节点与 LoRA 节点（共用 comfy-num-input 类） */
+/* 数值输入框（步数/宽高/降噪/LoRA 强度）：与同表单的下拉框同规格
+   （规格语义变量见文件头），保证视觉统一；spinner 按钮在深色主题下
+   过亮，隐藏后用键盘/滚轮调值。作用域含 Comfy 生图节点与 LoRA 节点
+   （共用 comfy-num-input 类） */
 .comfy-gen-node input.comfy-num-input,
 .lora-node input.comfy-num-input {
     flex: 0 0 auto;
     width: 100%;
-    height: calc(38px * var(--ns));
-    font-size: calc(15px * var(--ns));
-    border-radius: calc(6px * var(--ns));
+    height: calc(var(--node-h-control, 38px) * var(--ns));
+    font-size: calc(var(--node-fs-control, 15px) * var(--ns));
+    border-radius: calc(var(--node-radius-control, 6px) * var(--ns));
     border: 1px solid rgba(128, 128, 128, 0.3);
     background-color: #0f0f12;
     color: #ffffff;
@@ -1021,6 +1062,35 @@
     font-size: calc(14px * var(--ns));
     color: rgba(255, 255, 255, 0.45);
     user-select: none;
+}
+
+/* 尺寸行预设下拉：按钮样式定宽不伸缩，闭态恒显「预设」占位（选中即复位）。
+   实际只命中 RunningHub 节点（Comfy 节点尺寸行不带预设，sizePresets 是
+   面板专属选项）；规格对齐节点控件语义变量（见文件头）。选项弹层不受
+   节点 transform 缩放影响，字号乘 --render-scale 与其他节点下拉同规 */
+.comfy-size-row select.comfy-size-preset {
+    flex: 0 0 auto;
+    width: calc(60px * var(--ns));
+    height: calc(var(--node-h-control, 38px) * var(--ns));
+    font-size: calc(var(--node-fs-control, 15px) * var(--ns));
+    border-radius: calc(var(--node-radius-control, 6px) * var(--ns));
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    background-color: #0f0f12;
+    color: rgba(255, 255, 255, 0.75);
+    outline: none;
+    cursor: pointer;
+    padding: 0 calc(4px * var(--ns)) 0 calc(8px * var(--ns));
+    font-family: inherit;
+}
+
+.comfy-size-row select.comfy-size-preset:focus {
+    border-color: #3b82f6;
+}
+
+.comfy-size-row select.comfy-size-preset option {
+    font-size: calc(15px * var(--render-scale, 1));
+    background: #0f0f12;
+    color: #ffffff;
 }
 
 /* ==================== RunningHub 节点（RunningHubGenNode） ==================== */
@@ -1254,3 +1324,102 @@
    .comfy-num-input / .llm-count-select，生成按钮走 .comfy-generate-row。
    本段暂无覆盖规则，作为新节点类型的样式锚点——后续若有节点专属
    差异化需求（如徽标强调色）从这里扩展，不修改共享 comfy 规则 */
+
+/* ==================== 书签节点（BookmarkNode） ==================== */
+/* 编组快捷跳转目录：复用 .text-node 壳与 world 布局，body 内为行列表。
+   行 = 左数字快捷键徽标 + 中组名 + 右 → 跳转图标；整行可点跳转，
+   点击不触发节点拖动（BookmarkNode.bindEvents 已在行级 stopPropagation）。
+   行样式完全对齐节点规格规范 v1（见文件头）：行=规格控件（38px 高、
+   15px 字号、6px 圆角、0.3 边框、#0f0f12 凹陷底），字号一律引语义变量 */
+
+/* 行列表区：纵向排列（与 textarea 同容器的 body 默认 row 方向改列），
+   行多超出节点高度时内部滚动兜底（正常情况高度自适应不出滚动条） */
+.bookmark-node .text-node-body {
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.bookmark-rows {
+    display: flex;
+    flex-direction: column;
+    gap: calc(8px * var(--ns));          /* 规格：表单行间距 8 */
+    width: 100%;
+}
+
+/* 空列表提示（画布无编组时） */
+.bookmark-empty {
+    font-size: calc(var(--node-fs-label, 12px) * var(--ns));
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.6;
+    padding: calc(4px * var(--ns)) 0;
+}
+
+/* 单行条目：规格控件同款（高 38 / 圆角 6 / 边框 0.3 / 凹陷底 #0f0f12）；
+   hover 青色描边呼应节点选中色 */
+.bookmark-row {
+    display: flex;
+    align-items: center;
+    gap: calc(10px * var(--ns));
+    min-height: calc(var(--node-h-control, 38px) * var(--ns));
+    padding: 0 calc(8px * var(--ns));    /* 规格：控件内边距 0 8 */
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: calc(var(--node-radius-control, 6px) * var(--ns));
+    background: #0f0f12;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    width: 100%;
+    flex: 0 0 auto;
+}
+
+.bookmark-row:hover {
+    border-color: rgba(108, 235, 255, 0.6);
+    background: rgba(108, 235, 255, 0.08);
+}
+
+/* 左：数字快捷键徽标（小圆片，徽标规格 13px；未分配到数字键的条目
+   显示占位点 ·） */
+.bookmark-row-key {
+    flex: 0 0 auto;
+    width: calc(22px * var(--ns));
+    height: calc(22px * var(--ns));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: calc(4px * var(--ns));
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: calc(var(--node-fs-badge, 13px) * var(--ns));
+    font-weight: 600;
+    line-height: 1;
+}
+
+/* 中：组名（超长省略号截断，textContent 渲染防注入）。
+   规格对齐：控件字号 15px（与 Comfy 下拉框文字同大） */
+.bookmark-row-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(var(--node-fs-control, 15px) * var(--ns));
+}
+
+/* 右：跳转图标（Feather 风格 →，hover 时点亮为青色） */
+.bookmark-row-go {
+    flex: 0 0 auto;
+    width: calc(18px * var(--ns));
+    height: calc(18px * var(--ns));
+    color: rgba(255, 255, 255, 0.45);
+    display: flex;
+}
+
+.bookmark-row-go svg {
+    width: 100%;
+    height: 100%;
+}
+
+.bookmark-row:hover .bookmark-row-go {
+    color: #6cebff;
+}

@@ -3,26 +3,30 @@
     "inputs": {
       "text": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, low contrast, signature, flexible deformity, abstract, low contrast,score_1, score_2, score_3,score_4,",
       "clip": [
-        "889",
-        1
+        "808",
+        0
       ]
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
-      "title": "负面词"
+      "title": "负面词",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.34"
     }
   },
   "604": {
     "inputs": {
       "text": "1girl, solo, green_eyes,  ",
       "clip": [
-        "889",
-        1
+        "808",
+        0
       ]
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
-      "title": "CLIP文本编码"
+      "title": "CLIP文本编码",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.34"
     }
   },
   "763": {
@@ -31,7 +35,9 @@
     },
     "class_type": "Seed (rgthree)",
     "_meta": {
-      "title": "随机种子"
+      "title": "随机种子",
+      "cnr_id": "rgthree-comfy",
+      "ver": "0fb1e239a903e93ef626a8c20589b38f46e39dff"
     }
   },
   "806": {
@@ -41,7 +47,9 @@
     },
     "class_type": "UNETLoader",
     "_meta": {
-      "title": "UNet加载器"
+      "title": "UNet加载器",
+      "cnr_id": "comfy-core",
+      "ver": "0.11.0"
     }
   },
   "807": {
@@ -50,7 +58,9 @@
     },
     "class_type": "VAELoader",
     "_meta": {
-      "title": "加载VAE"
+      "title": "加载VAE",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.40"
     }
   },
   "808": {
@@ -61,7 +71,9 @@
     },
     "class_type": "CLIPLoader",
     "_meta": {
-      "title": "加载CLIP"
+      "title": "加载CLIP",
+      "cnr_id": "comfy-core",
+      "ver": "0.11.0"
     }
   },
   "862": {
@@ -72,7 +84,9 @@
     },
     "class_type": "EmptyLatentImage",
     "_meta": {
-      "title": "空Latent图像"
+      "title": "空Latent图像",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.3"
     }
   },
   "866": {
@@ -86,20 +100,24 @@
     },
     "class_type": "ImpactGaussianBlurMask",
     "_meta": {
-      "title": "Gaussian Blur Mask"
+      "title": "Gaussian Blur Mask",
+      "cnr_id": "comfyui-impact-pack",
+      "ver": "6a517ebe06fea2b74fc41b3bd089c0d7173eeced"
     }
   },
   "867": {
     "inputs": {
       "strength": 1,
       "model": [
-        "889",
+        "806",
         0
       ]
     },
     "class_type": "DifferentialDiffusion",
     "_meta": {
-      "title": "差异扩散DifferentialDiffusion"
+      "title": "差异扩散DifferentialDiffusion",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.27"
     }
   },
   "868": {
@@ -114,8 +132,8 @@
         0
       ],
       "vae": [
-        "889",
-        2
+        "807",
+        0
       ],
       "pixels": [
         "878",
@@ -128,7 +146,9 @@
     },
     "class_type": "InpaintModelConditioning",
     "_meta": {
-      "title": "内补模型条件"
+      "title": "内补模型条件",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.26"
     }
   },
   "869": {
@@ -141,7 +161,9 @@
     },
     "class_type": "VAEEncodeForInpaint",
     "_meta": {
-      "title": "VAE编码（局部重绘）"
+      "title": "VAE编码（局部重绘）",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.26"
     }
   },
   "870": {
@@ -150,7 +172,10 @@
     },
     "class_type": "Primitive float [Crystools]",
     "_meta": {
-      "title": "🪛 Primitive float"
+      "title": "🪛 Primitive float",
+      "cnr_id": "comfyui-crystools",
+      "aux_id": "crystian/ComfyUI-Crystools",
+      "ver": "72e2e9af4a6b9a58ca5d753cacff37ba1ff9bfa8"
     }
   },
   "871": {
@@ -162,7 +187,9 @@
     },
     "class_type": "MaskPreview+",
     "_meta": {
-      "title": "🔧 Mask Preview"
+      "title": "🔧 Mask Preview",
+      "cnr_id": "comfyui_essentials",
+      "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9"
     }
   },
   "872": {
@@ -178,17 +205,19 @@
     },
     "class_type": "SetLatentNoiseMask",
     "_meta": {
-      "title": "设置Latent噪波遮罩"
+      "title": "设置Latent噪波遮罩",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.28"
     }
   },
   "873": {
     "inputs": {
-      "seed": 816932377123560,
+      "seed": 563529793804368,
       "steps": 30,
       "cfg": 5,
       "sampler_name": "euler_ancestral",
       "scheduler": "normal",
-      "denoise": 0.8,
+      "denoise": 0.7,
       "model": [
         "867",
         0
@@ -208,7 +237,9 @@
     },
     "class_type": "KSampler",
     "_meta": {
-      "title": "K采样器"
+      "title": "K采样器",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.26"
     }
   },
   "874": {
@@ -218,13 +249,15 @@
         0
       ],
       "vae": [
-        "889",
-        2
+        "807",
+        0
       ]
     },
     "class_type": "VAEDecode",
     "_meta": {
-      "title": "VAE解码"
+      "title": "VAE解码",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.26"
     }
   },
   "878": {
@@ -232,25 +265,11 @@
       "slot": "1",
       "wait_for_image": true,
       "force_reload": true,
-      "seed": 489603043171059
+      "seed": 415347890355038
     },
     "class_type": "LumenReceiveImageFromCanvas",
     "_meta": {
       "title": "💡 From Canvas (Edit Image)"
-    }
-  },
-  "879": {
-    "inputs": {
-      "auto_send": true,
-      "lumen_target": "",
-      "images": [
-        "874",
-        0
-      ]
-    },
-    "class_type": "LumenSendImageRealtime",
-    "_meta": {
-      "title": "💡 To Canvas (Image)"
     }
   },
   "888": {
@@ -267,13 +286,19 @@
       "title": "💡 To Canvas (Image)"
     }
   },
-  "889": {
+  "892": {
     "inputs": {
-      "ckpt_name": "illustriousXL\\waiNSFWIllustrious_v110.safetensors"
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "874",
+        0
+      ]
     },
-    "class_type": "CheckpointLoaderSimple",
+    "class_type": "SaveImage",
     "_meta": {
-      "title": "Checkpoint加载器（简易）"
+      "title": "保存图像",
+      "cnr_id": "comfy-core",
+      "ver": "0.44.2"
     }
   }
 }

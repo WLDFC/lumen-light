@@ -22,6 +22,11 @@ class PanelComfyRunner {
      * @param {Function} deps.getPrompts - () => {positive, negative} 面板提示词
      * @param {Function} deps.getWorkflowId - () => 当前工作流 id（未选择时 null）
  * @param {Function} deps.getOverrides - (batchCount) => 参数覆盖表（ComfyParamRows 编译）
+ * @param {Function} [deps.getLatentSizeTargets] - () => [{nodeId,width,height}]
+ *                                      工作流探测到的 latent 尺寸节点
+ *                                      （ComfyParamRows.detected.sizeTargets）：
+ *                                      run({latentSize}) 一次性覆写用（漫画
+ *                                      逐格生成每格尺寸不同，不动面板行状态）
  * @param {Function} [deps.getLoras] - () => 生效的叠加 LoRA 条目
  *                                      （ComfyParamRows.getLoras；缺省不传 loras）
  * @param {Function} [deps.getDeletedLoraIds] - () => 已删除的模板内嵌 lora
@@ -43,6 +48,7 @@ class PanelComfyRunner {
         this.getPrompts = deps.getPrompts;
         this.getWorkflowId = deps.getWorkflowId;
         this.getOverrides = deps.getOverrides;
+        this.getLatentSizeTargets = deps.getLatentSizeTargets || null;
         this.getLoras = deps.getLoras;
         this.getDeletedLoraIds = deps.getDeletedLoraIds;
         this.getBatchCount = deps.getBatchCount;
@@ -51,6 +57,17 @@ class PanelComfyRunner {
         this.getNodelessImages = deps.getNodelessImages || null;
         this.getGenInfo = deps.getGenInfo || null;
         this.button = null;   // 发送按钮（bindButton 绑定）
+        // 本轮提交的 promptIds（comfyWsRelay 中继事件对位用，2026-11-08）：
+        // 采样进度刷工作流状态行，让面板也看见 KSampler 步数
+        this._activePromptIds = [];
+        window.addEventListener('lumen-comfy-progress', (e) => {
+            const d = e.detail || {};
+            if (!this._activePromptIds.includes(d.promptId)) return;
+            if (d.value != null && d.max != null) {
+                this.updateWorkflowStatus(
+                    `采样中 ${d.value}/${d.max}（${Math.round(d.pct * 100)}%）…`);
+            }
+        });
     }
 
     /**
@@ -68,11 +85,19 @@ class PanelComfyRunner {
      * 槽位内容随提交体 images+imageMapping 直注，跳过槽位上传；有取图
      * 节点 → 缩略图上传后端槽位（提交体不传 images，后端跳过槽位写入）
      * 提交失败或异常时收回占位图并中止剩余任务；按钮 3 秒后恢复原始状态。
+     * @param {Object|null} [runOpts] - 一次性运行选项（缺省=面板按钮常规路径）
+     * @param {{width:number,height:number}} [runOpts.latentSize] - 本轮 latent
+     *        尺寸一次性覆写（漫画逐格生成）：patch 进全部探测到的尺寸节点，
+     *        编译表之上生效、不动面板行状态；未探测到尺寸节点时忽略
+     * @param {number} [runOpts.count] - 强制本轮数量（缺省用面板批量值；
+     *        逐格生成固定传 1）
      */
-    async run() {
+    async run(runOpts = null) {
         const prompts = this.getPrompts();
         const workflowId = this.getWorkflowId();
-        const count = this.getBatchCount ? this.getBatchCount() : 1;
+        const count = (runOpts && Number.isFinite(runOpts.count) && runOpts.count > 0)
+            ? runOpts.count
+            : (this.getBatchCount ? this.getBatchCount() : 1);
         const btn = this.button;
         const originalText = btn.textContent;
 
@@ -158,7 +183,7 @@ class PanelComfyRunner {
                         workflowId: workflowId,
                         positive: prompts.positive,
                         negative: prompts.negative,
-                        overrides: this.getOverrides(1),
+                        overrides: this._buildOverrides(runOpts),
                         // 面板 LoRA 叠加堆栈：后端 injectLoraChain 动态拼链，
                         // 追加在工作流模板 lora 之后（与画布 LoRA 节点同语义）
                         loras: this.getLoras ? this.getLoras() : [],
@@ -179,7 +204,17 @@ class PanelComfyRunner {
                     throw new Error(result.message || '未知错误');
                 }
                 submitted++;
-                if (result.promptId) promptIds.push(result.promptId);
+                if (result.promptId) {
+                    promptIds.push(result.promptId);
+                    // promptId ↔ 占位图绑定（2026-11-08）：面板占位图先进先出
+                    // 对位（未绑定的最旧一个），中继的进度/预览/失败事件按此
+                    // 定向——画布上的面板占位图同样能看到 KSampler 进度与预览
+                    const pending = window.placeholderManager?.getByOwner('panel')
+                        .find((h) => !(h.promptIds || []).length);
+                    if (pending) {
+                        window.placeholderManager.bindPromptId(pending, result.promptId);
+                    }
+                }
             }
 
             // 取消发生在提交期间：任务已按停止收尾（占位图已随 cancelTask
@@ -187,6 +222,7 @@ class PanelComfyRunner {
             if (!taskRef.isRunning()) return;
 
             btn.textContent = count > 1 ? `✓ 已提交 ${count} 个任务` : '✓ 已启动';
+            this._activePromptIds = promptIds;
             this._attachPanelTask(taskRef, count, null);
             btn.style.background = '#22c55e';
             this.updateWorkflowStatus('工作流运行中...');
@@ -219,6 +255,26 @@ class PanelComfyRunner {
             btn.disabled = false;
             btn.style.background = '';
         }, 3000);
+    }
+
+    /**
+     * 组装本轮提交的覆盖表：面板参数行编译（getOverrides(1)）之上，
+     * 叠加 runOpts.latentSize 一次性覆写——patch 进全部探测到的 latent
+     * 尺寸节点（漫画逐格生成每格尺寸不同，覆写随提交体走、不动面板
+     * 行状态）。未探测到尺寸节点或未传 latentSize 时即编译表原样
+     * @param {Object|null} runOpts - run(runOpts) 的运行选项
+     * @returns {Object} overrides 表 { [nodeId]: { [inputKey]: value } }
+     */
+    _buildOverrides(runOpts) {
+        const overrides = this.getOverrides(1);
+        const size = runOpts && runOpts.latentSize;
+        if (size && typeof this.getLatentSizeTargets === 'function') {
+            for (const t of this.getLatentSizeTargets()) {
+                overrides[t.nodeId] = Object.assign({}, overrides[t.nodeId] || {},
+                    { width: size.width, height: size.height });
+            }
+        }
+        return overrides;
     }
 
     /**

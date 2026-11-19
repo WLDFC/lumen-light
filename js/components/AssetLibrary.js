@@ -4,6 +4,9 @@
  * ==========================================================================
  * 作用：左侧工具栏的文件夹图标按钮（"本地上传"按钮下方），点击打开一个
  *       300 宽、贴顶栏到底部控件区之间自适应高度的资产窗口（左侧弹出）：
+ *       另支持锚定模式 show(anchorFn)——宿主（漫画编辑器，2026-11-12）给
+ *       矩形提供器把窗口钉在自己的栏位上，hide/refitAnchor 随关随清/随布局
+ *       重适配；画布默认入口行为不变：
  *   - 标签栏：标签下拉框（LumenDropdown，一行容纳任意多标签）+ 新建
  *     （文件夹图标，选目录即建标签）+ 删除当前标签（×）；
  *   - 资产网格：展示绑定文件夹内的图片/视频缩略图（滚动懒加载），
@@ -39,8 +42,16 @@ class AssetLibrary {
         this._activeUrls = [];       // 当前正在构建/展示的网格的 blob URL
         this._scrollHandler = null;  // 资产网格滚动补填监听
         this._scrollRaf = null;      // 滚动补填的 rAF 节流句柄
+        // 锚定态（2026-11-12 漫画编辑器接入）：宿主给矩形提供器把窗口钉在
+        // 自己的栏位上（如漫画钉在整体描述/元素列）；null = 画布默认位置。
+        // hideCb = 关窗回调（宿主同步按钮态用）
+        this._anchorFn = null;
+        this.hideCb = null;
 
         this.init();
+
+        // 宿主栏位随窗口尺寸变（漫画编辑器并排留白/窄屏），显示中重适配
+        window.addEventListener('resize', () => this.refitAnchor());
     }
 
     init() {
@@ -132,26 +143,70 @@ class AssetLibrary {
         this.tagDelBtn.addEventListener('click', () => this.deleteCurrentTag());
     }
 
-    /** 打开/关闭窗口 */
-    async toggle() {
-        if (this.el.classList.contains('show')) {
-            this.hide();
-            return;
-        }
-        // 与任务中心互斥：同列弹窗不叠开（点击哪个哪个开，另一个收起）
+    /** 打开窗口（可带锚定矩形提供器——宿主把窗口钉在自己的栏位上，
+     *  如漫画编辑器钉在整体描述/元素列，避开选页栏与工具列；
+     *  null = 画布默认位置。返回 promise 便于宿主 await 刷新完成） */
+    async show(anchorFn = null) {
+        // 与任务中心/工作流模板互斥：同列弹窗不叠开（点击哪个哪个开，其余收起）
         window.taskCenter?.hide();
+        window.workflowTemplateLibrary?.hide();
+        this._anchorFn = anchorFn || null;
+        if (this._anchorFn) this._applyAnchor();
+        else this._clearAnchor();
         this.el.classList.add('show');
-        this.btn.classList.add('active');
+        this.btn?.classList.add('active');
         await this.refreshTags();
         // 窗口已瞬时显示缓存网格，后台静默重扫目录：
         // 外部增删了文件才重建（重建期间用户看的仍是缓存，无感知）
         this._backgroundRefresh();
     }
 
+    /** 打开/关闭窗口 */
+    async toggle() {
+        if (this.el.classList.contains('show')) {
+            this.hide();
+            return;
+        }
+        await this.show(null);
+    }
+
     hide() {
         this.el.classList.remove('show');
         this.btn?.classList.remove('active');
+        this._clearAnchor();   // 锚定态随关随清（下次画布入口回归默认位置）
+        if (this.hideCb) this.hideCb();   // 宿主按钮态同步（漫画标题栏钮）
         // 不清缓存：下次打开瞬时恢复，blob URL 继续有效
+    }
+
+    /** 锚定定位：按提供器给的矩形（fixed 坐标=视口坐标）钉住窗口 */
+    _applyAnchor() {
+        const rect = this._anchorFn && this._anchorFn();
+        if (!rect || !rect.width) return;
+        const s = this.el.style;
+        s.left = rect.left + 'px';
+        s.top = rect.top + 'px';
+        s.width = rect.width + 'px';
+        s.height = rect.height + 'px';
+        s.bottom = 'auto';
+        s.zIndex = '1205';   // 盖过宿主弹窗壳（recipe-dialog 1200），低于灯箱(2000)
+    }
+
+    /** 清锚定：内联样式归空回落 css 默认（画布左工具栏旁） */
+    _clearAnchor() {
+        this._anchorFn = null;
+        const s = this.el.style;
+        s.left = '';
+        s.top = '';
+        s.width = '';
+        s.height = '';
+        s.bottom = '';
+        s.zIndex = '';
+    }
+
+    /** 宿主布局变化后的重适配（窗口 resize / 漫画布局开关调用；
+     *  非锚定或未显示时空操作） */
+    refitAnchor() {
+        if (this.el.classList.contains('show') && this._anchorFn) this._applyAnchor();
     }
 
     // ==================== 标签管理 ====================
@@ -275,7 +330,8 @@ class AssetLibrary {
 
     /**
      * 打开传统文件夹选择框（webkitdirectory），回调根文件夹名与
-     * 根层级的文件列表（与 File System Access 扫描一样只取根层级）
+     * 层级上限内的文件列表（与 File System Access 递归扫描一样最多
+     * MAX_DIR_DEPTH 层目录；子文件夹文件带 _assetDir 标记）
      * @param {Function} onPicked - (folderName, files[]) => void
      */
     _openFolderInput(onPicked) {
@@ -290,12 +346,17 @@ class AssetLibrary {
                 all.map((f) => (f.webkitRelativePath || f.name).split('/')[0])
             );
             const folderName = rootNames.size === 1 ? [...rootNames][0] : '';
-            // 只保留根层级文件（webkitRelativePath 恰好两段：目录/文件名）
-            const rootFiles = all.filter(
-                (f) => (f.webkitRelativePath || '').split('/').length === 2
-            );
+            // 层级上限内（webkitRelativePath 段数 ≤ 目录层级上限 + 文件段）：
+            // 根/a/file.png = 3 段（2 层目录），根/a/b/file.png = 4 段（3 层目录）
+            const kept = all.filter((f) => {
+                const segs = (f.webkitRelativePath || '').split('/');
+                if (segs.length > AssetLibrary.MAX_DIR_DEPTH + 1) return false;
+                // 子文件夹文件带相对路径标记（去掉根段与文件段），供分组节头使用
+                f._assetDir = segs.length > 2 ? segs.slice(1, -1).join('/') : '';
+                return true;
+            });
             input.remove();
-            onPicked(folderName, rootFiles);
+            onPicked(folderName, kept);
         }, { once: true });
         input.click();
     }
@@ -363,6 +424,37 @@ class AssetLibrary {
         if (!cached) return;
         cached.urls.forEach((u) => URL.revokeObjectURL(u));
         this._gridCache.delete(tagName);
+    }
+
+    /**
+     * 递归扫描目录下的图片/视频文件（目录层级上限 MAX_DIR_DEPTH，
+     * 根目录=第 1 层，即根 + 两层子文件夹内的文件都能看到）。
+     * 命中的文件带上 _assetDir 标记（相对根目录的子路径，根为 ''），
+     * 供网格分组节头与后台刷新对比使用
+     * @param {FileSystemDirectoryHandle} dirHandle - 起始目录句柄
+     * @param {number} depth - 当前目录层级（根=1）
+     * @param {string} dirLabel - 相对根目录的子路径（根为 ''）
+     * @param {File[]} out - 收集输出
+     */
+    async _scanDir(dirHandle, depth, dirLabel, out) {
+        for await (const [name, entry] of dirHandle.entries()) {
+            if (entry.kind === 'directory') {
+                if (depth >= AssetLibrary.MAX_DIR_DEPTH) continue;  // 超出层级不深入
+                await this._scanDir(entry, depth + 1,
+                    dirLabel ? `${dirLabel}/${name}` : name, out);
+            } else if (entry.kind === 'file') {
+                const file = await entry.getFile();
+                if (CanvasVideoManager.isVideoFile(file) || AssetLibrary.isImageFile(file)) {
+                    file._assetDir = dirLabel;
+                    out.push(file);
+                }
+            }
+        }
+    }
+
+    /** 文件的分组键：子路径 + 文件名（后台刷新对比与排序统一用它） */
+    static assetKey(file) {
+        return (file._assetDir ? file._assetDir + '/' : '') + file.name;
     }
 
     /**
@@ -484,16 +576,10 @@ class AssetLibrary {
             return;
         }
 
-        // 扫描目录根层级的图片/视频文件（不递归子文件夹）
+        // 递归扫描目录内的图片/视频文件（含最多 MAX_DIR_DEPTH 层子文件夹）
         const files = [];
         try {
-            for await (const [name, entry] of tag.handle.entries()) {
-                if (entry.kind !== 'file') continue;
-                const file = await entry.getFile();
-                if (CanvasVideoManager.isVideoFile(file) || AssetLibrary.isImageFile(file)) {
-                    files.push(file);
-                }
-            }
+            await this._scanDir(tag.handle, 1, '', files);
         } catch (err) {
             console.error('读取文件夹失败:', err);
             this.bodyEl.innerHTML =
@@ -515,16 +601,10 @@ class AssetLibrary {
         if (!tag?.handle || !cached) return;
         try {
             if (await tag.handle.queryPermission({ mode: 'read' }) !== 'granted') return;
-            const names = [];
-            for await (const [name, entry] of tag.handle.entries()) {
-                if (entry.kind !== 'file') continue;
-                const file = await entry.getFile();
-                if (CanvasVideoManager.isVideoFile(file) || AssetLibrary.isImageFile(file)) {
-                    names.push(file.name);
-                }
-            }
-            names.sort();
-            const cachedNames = cached.files.map((f) => f.name).sort();
+            const files = [];
+            await this._scanDir(tag.handle, 1, '', files);
+            const names = files.map(AssetLibrary.assetKey).sort();
+            const cachedNames = cached.files.map(AssetLibrary.assetKey).sort();
             if (names.join('\u0000') !== cachedNames.join('\u0000')) {
                 this._revokeGrid(tag.name);
                 if (this.el.classList.contains('show') && this.activeTag === tag.name) {
@@ -564,14 +644,33 @@ class AssetLibrary {
     }
 
     /**
-     * 渲染资产网格：过滤图片/视频、按名称排序、懒加载缩略图
-     * @param {File[]} files - 文件列表
+     * 渲染资产网格：过滤图片/视频、按名称排序、懒加载缩略图。
+     * 带 _assetDir 标记的文件按子文件夹分组展示——根目录文件在最前
+     * （无节头），其后每个子文件夹一个节头（按名称排序），节头带
+     * 文件夹图标与相对路径
+     * @param {File[]} files - 文件列表（可含子文件夹文件）
      */
     _renderGrid(files) {
         const assetFiles = files.filter(
             (f) => CanvasVideoManager.isVideoFile(f) || AssetLibrary.isImageFile(f)
         );
-        assetFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+        // 分组：_assetDir → 文件列表（保持传入顺序，组内稍后统一排序）
+        const groups = new Map();   // dir -> File[]
+        for (const f of assetFiles) {
+            const dir = f._assetDir || '';
+            if (!groups.has(dir)) groups.set(dir, []);
+            groups.get(dir).push(f);
+        }
+        // 组排序：根目录最前，其余子文件夹按名称排序
+        const dirs = [...groups.keys()].sort((a, b) => {
+            if (a === '') return -1;
+            if (b === '') return 1;
+            return a.localeCompare(b, undefined, { numeric: true });
+        });
+        for (const list of groups.values()) {
+            list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        }
 
         // 旧缓存（若有）作废：新网格将持有全新的 blob URL
         this._revokeGrid(this.activeTag);
@@ -583,9 +682,26 @@ class AssetLibrary {
         }
 
         const grid = document.createElement('div');
-        grid.className = 'asset-library-grid';
-        for (const file of assetFiles) {
-            grid.appendChild(this._makeCard(file));
+        grid.className = 'asset-library-grid asset-library-grid-grouped';
+        for (const dir of dirs) {
+            // 每组一个区块容器（横跨整行）：子文件夹组 = 可折叠节头 + 内网格，
+            // 根组无节头不可折叠。折叠状态按「标签+子路径」记忆到 localStorage
+            const section = document.createElement('div');
+            section.className = 'asset-library-section';
+
+            const inner = document.createElement('div');
+            inner.className = 'asset-library-grid';
+            for (const file of groups.get(dir)) {
+                inner.appendChild(this._makeCard(file));
+            }
+
+            if (dir) {
+                section.appendChild(
+                    this._makeGroupHeader(this.activeTag, dir, groups.get(dir).length, inner)
+                );
+            }
+            section.appendChild(inner);
+            grid.appendChild(section);
         }
         this.bodyEl.appendChild(grid);
 
@@ -612,6 +728,89 @@ class AssetLibrary {
     }
 
     /**
+     * 生成子文件夹折叠节头：caret + 文件夹图标 + 相对路径 + 文件数。
+     * 点击切换组内网格显隐；折叠状态持久化（localStorage，键「标签+子路径」），
+     * 重开窗口/重启后保持。折叠中的组直接 display:none——懒加载天然跳过
+     * （_fillVisibleCards 遍历不到不可见卡片），展开时按需补填
+     * @param {string} tagName - 当前标签名（折叠状态记忆键的一半）
+     * @param {string} dir - 子文件夹相对路径
+     * @param {number} count - 组内文件数（角标显示）
+     * @param {HTMLElement} innerEl - 该组的卡片网格（折叠即隐藏它）
+     * @returns {HTMLElement} 节头元素
+     */
+    _makeGroupHeader(tagName, dir, count, innerEl) {
+        const header = document.createElement('div');
+        header.className = 'asset-library-group-header';
+        header.setAttribute('role', 'button');
+        header.title = '点击折叠/展开';
+        header.innerHTML =
+            `<svg class="asset-library-group-caret" width="12" height="12" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+            </svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span>${LumenLight.escapeHtml(dir)}</span>
+            <span class="asset-library-group-count">${count}</span>`;
+
+        // 折叠状态回放（渲染时即可折叠）
+        if (this._isGroupFolded(tagName, dir)) {
+            header.classList.add('is-folded');
+            innerEl.style.display = 'none';
+        }
+
+        header.addEventListener('click', () => {
+            const folded = !header.classList.contains('is-folded');
+            header.classList.toggle('is-folded', folded);
+            innerEl.style.display = folded ? 'none' : '';
+            this._setGroupFolded(tagName, dir, folded);
+            if (!folded) this._fillVisibleCards();   // 展开时补填可视区缩略图
+        });
+        return header;
+    }
+
+    /** 折叠状态存储键（全部组共用一个 localStorage 条目） */
+    static get FOLDED_STORAGE_KEY() { return 'lumen-asset-folded'; }
+
+    /**
+     * 读取折叠记忆：localStorage JSON 表，键「标签名\0子路径」
+     * @param {string} tagName - 标签名
+     * @param {string} dir - 子文件夹相对路径
+     * @returns {boolean} 是否处于折叠
+     */
+    _isGroupFolded(tagName, dir) {
+        try {
+            const map = JSON.parse(localStorage.getItem(AssetLibrary.FOLDED_STORAGE_KEY) || '{}');
+            return map[`${tagName}\u0000${dir}`] === true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * 写入折叠记忆
+     * @param {string} tagName - 标签名
+     * @param {string} dir - 子文件夹相对路径
+     * @param {boolean} folded - true=折叠
+     */
+    _setGroupFolded(tagName, dir, folded) {
+        let map = {};
+        try {
+            map = JSON.parse(localStorage.getItem(AssetLibrary.FOLDED_STORAGE_KEY) || '{}');
+        } catch { /* 损坏表按空处理 */ }
+        const key = `${tagName}\u0000${dir}`;
+        if (folded) map[key] = true;
+        else delete map[key];
+        try {
+            localStorage.setItem(AssetLibrary.FOLDED_STORAGE_KEY, JSON.stringify(map));
+        } catch { /* 存储满等异常静默：折叠只是体验增强 */ }
+    }
+
+    /**
      * 填充可视区内（含上下 200px 预载区）尚未加载缩略图的卡片
      */
     _fillVisibleCards() {
@@ -635,7 +834,8 @@ class AssetLibrary {
         const card = document.createElement('div');
         card.className = 'asset-card';
         card.draggable = true;
-        card.title = file.name + '（拖拽到画布，双击预览）';
+        const relPath = file._assetDir ? file._assetDir + '/' : '';
+        card.title = relPath + file.name + '（拖拽到画布，双击预览）';
         card.dataset.fileName = file.name;
         card.dataset.kind = isVideo ? 'video' : 'image';
         card._file = file;
@@ -781,6 +981,10 @@ AssetLibrary.isImageFile = function (file) {
     if ((file.type || '').startsWith('image/')) return true;
     return /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name || '');
 };
+
+// 子文件夹扫描层级上限（根目录=第 1 层）：3 = 根 + 两层子文件夹。
+// FSA 递归扫描与 webkitdirectory 降级通道共用此常量
+AssetLibrary.MAX_DIR_DEPTH = 3;
 
 // 内置标签「我的资产」：name 用哨兵值避免与用户自建的同名 FSA 标签
 // 在下拉框里 value 冲突；label 才是显示名

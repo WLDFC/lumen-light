@@ -154,8 +154,9 @@ class TaskCenter {
             this.hide();
             return;
         }
-        // 与资产库互斥：同列弹窗不叠开（点击哪个哪个开，另一个收起）
+        // 与资产库/工作流模板互斥：同列弹窗不叠开（点击哪个哪个开，其余收起）
         window.assetLibrary?.hide();
+        window.workflowTemplateLibrary?.hide();
         this.el.classList.add('show');
         this.btn.classList.add('active');
         // 定位到按钮旁边（.show 生效后量高）：水平贴工具栏右侧，

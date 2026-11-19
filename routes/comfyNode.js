@@ -34,6 +34,7 @@ const {
 } = require('../utils/workflowInjector');
 const { applyBypass } = require('../utils/workflowBypass');
 const { submitPromptToComfy } = require('../utils/comfySubmit');
+const { broadcastToClients } = require('../utils/comfyWsRelay');
 const {
     scanCanvasFlow,
     decideImageInject,
@@ -361,6 +362,13 @@ function createComfyNodeRouter(options) {
             }
             if (result.status === 'error') {
                 console.log(`⚠️ [免节点回流] ${promptId} 执行失败/被中断，无产物回流`);
+                // 失败终态广播（2026-11-08）：画布占位图进失败态，不再哑等
+                broadcastToClients(clients, {
+                    type: 'generation-failed',
+                    promptId,
+                    message: result.message || 'ComfyUI 执行失败或被中断',
+                    timestamp: Date.now()
+                });
                 return;
             }
             const files = collectOutputFiles(result.entry);
@@ -395,6 +403,51 @@ function createComfyNodeRouter(options) {
         } catch (err) {
             console.error(`❌ [免节点回流] ${promptId} 失败:`, err.message);
         }
+    }
+
+    /**
+     * 执行终态看门狗（2026-11-08）：Send 节点链路此前「提交即黑盒」——
+     * 执行中报错（模型缺失/节点异常）永远无终态，画布占位图哑等。轮询
+     * /history 到终态：error 广播 generation-failed（前端占位图失败态），
+     * success 静默收工（产物走实时回流）。免节点链路自带 history 轮询
+     * （错误在其 error 分支广播），不重复挂。
+     * 轮询间隔 5s、上限 60 分钟（超时静默放弃——极端长任务仍由实时回流
+     * 负责出图；WS 中继的 execution_error 通常先于本看门狗发现失败）
+     */
+    async function watchPromptFailure(comfyApiUrl, promptId, watchClients, opts = {}) {
+        const fetchImpl = opts.fetchImpl || fetch;
+        // 睡眠定时器 unref：看门狗不阻塞进程退出（jest 单套件挂起的根因）
+        const sleepImpl = opts.sleepImpl ||
+            ((ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); }));
+        const intervalMs = opts.intervalMs || 5000;
+        const deadline = Date.now() + (opts.timeoutMs || 60 * 60 * 1000);
+        while (Date.now() < deadline) {
+            await sleepImpl(intervalMs);
+            let entry = null;
+            try {
+                const res = await fetchImpl(`${comfyApiUrl}/history/${encodeURIComponent(promptId)}`);
+                if (res.ok) {
+                    const data = await res.json().catch(() => null);
+                    entry = data && data[promptId];
+                }
+            } catch { /* 瞬时抖动下一轮重试 */ }
+            if (!entry) continue;
+            const status = entry.status || {};
+            if (status.status_str === 'error') {
+                const errEntry = (status.messages || []).find(
+                    (m) => Array.isArray(m) && m[0] === 'execution_error');
+                const d = errEntry && errEntry[1];
+                const message = d && d.exception_message
+                    ? `${d.node_type || d.node_id}: ${d.exception_message}`
+                    : 'ComfyUI 执行失败或被中断';
+                console.log(`⚠️ [执行看门狗] ${promptId} 失败：${message}`);
+                broadcastToClients(watchClients, {
+                    type: 'generation-failed', promptId, message, timestamp: Date.now()
+                });
+            }
+            return;   // 终态（成功/失败）即收工
+        }
+        console.log(`⌛ [执行看门狗] ${promptId} 看护超时，放弃（任务可能仍在执行）`);
     }
 
     /**
@@ -751,6 +804,15 @@ function createComfyNodeRouter(options) {
                     }
                     pushHistoryOutputsToCanvas(promptId, target || null, historyOpts);
                 }
+            }
+            // Send 节点链路（含无输出结构的 none）：挂执行终态看门狗，
+            // 报错时广播 generation-failed——画布占位图不再哑等（后台任务）
+            if (outputVia !== 'history') {
+                const watchOpts = {};
+                if (process.env.LUMEN_TEST_HISTORY_MS) {
+                    watchOpts.intervalMs = Number(process.env.LUMEN_TEST_HISTORY_MS) || 20;
+                }
+                watchPromptFailure(comfyApiUrl, promptId, clients, watchOpts);
             }
 
             res.json({

@@ -2,7 +2,8 @@
  * ==========================================================================
  * GroupLayout 单元测试
  * 覆盖阅读顺序排序（行容差）、水平/垂直/宫格三种布局的坐标与尺寸、
- * 归一化输出（0,0 起点）、只移动不缩放约定。
+ * 归一化输出（0,0 起点）、只移动不缩放约定；时间键回退链与组内按
+ * 时间排序（timeKeyOf/sortTimeOrder，2026-11-16 编组时间排序功能）。
  * 被测文件是浏览器端经典脚本（依赖全局词法作用域），与 groupManager
  * 测试同款做法：用 vm 模块按浏览器加载顺序执行源码。
  * ==========================================================================
@@ -180,5 +181,99 @@ describe('waterfall（瀑布流布局）', () => {
         GroupLayout.arrange('waterfall', [a, b]);
         expect(a).toMatchObject({ width: 100, height: 300 });
         expect(b).toMatchObject({ width: 400, height: 80 });
+    });
+});
+
+describe('timeKeyOf（时间键回退链）', () => {
+    test('created 优先于 genInfo.time', () => {
+        const o = member('a', 0, 0, 100, 100);
+        o.created = 2000;
+        o.genInfo = { time: 1000 };
+        expect(GroupLayout.timeKeyOf(o)).toBe(2000);
+    });
+
+    test('无 created 时回退 genInfo.time', () => {
+        const o = member('a', 0, 0, 100, 100);
+        o.genInfo = { time: 1000 };
+        expect(GroupLayout.timeKeyOf(o)).toBe(1000);
+    });
+
+    test('再回退 name/videoUrl 内嵌 13 位毫秒戳', () => {
+        const o1 = member('a', 0, 0, 100, 100);
+        o1.name = 'upscaled_1699999999999.png';
+        const o2 = member('b', 0, 0, 100, 100);
+        o2.videoUrl = '/data/videos/video_1700000000000.mp4';
+        expect(GroupLayout.timeKeyOf(o1)).toBe(1699999999999);
+        expect(GroupLayout.timeKeyOf(o2)).toBe(1700000000000);
+    });
+
+    test('无任何时间线索返回 Infinity', () => {
+        expect(GroupLayout.timeKeyOf(member('a', 0, 0, 100, 100))).toBe(Infinity);
+    });
+
+    test('失真值不采纳：非有限数/非正数视同缺失', () => {
+        const o = member('a', 0, 0, 100, 100);
+        o.created = -5;
+        expect(GroupLayout.timeKeyOf(o)).toBe(Infinity);
+        o.created = NaN;
+        o.genInfo = { time: 'abc' };
+        expect(GroupLayout.timeKeyOf(o)).toBe(Infinity);
+    });
+});
+
+describe('sortTimeOrder（组内按时间排序）', () => {
+    test('时间升序（旧→新），无时间成员尾置并保持阅读序', () => {
+        // 阅读序基座：old(左上) newest(右上) none1(左下) none2(右下)
+        const old = member('old', 0, 0, 100, 100);
+        old.created = 1000;
+        const newest = member('newest', 500, 0, 100, 100);
+        newest.genInfo = { time: 9000 };
+        const none1 = member('none1', 0, 500, 100, 100);
+        const none2 = member('none2', 500, 500, 100, 100);
+        const ordered = GroupLayout.sortTimeOrder([newest, old, none2, none1]);
+        expect(ordered.map(o => o.id)).toEqual(['old', 'newest', 'none1', 'none2']);
+    });
+
+    test('desc 方向（新→旧）：最新在阅读序首位，无时间成员仍尾置', () => {
+        const old = member('old', 0, 0, 100, 100);
+        old.created = 1000;
+        const newest = member('newest', 500, 0, 100, 100);
+        newest.genInfo = { time: 9000 };
+        const none = member('none', 0, 500, 100, 100);
+        const ordered = GroupLayout.sortTimeOrder([old, newest, none], 'desc');
+        expect(ordered.map(o => o.id)).toEqual(['newest', 'old', 'none']);
+    });
+
+    test('同毫秒并列不洗牌（保持阅读序基座）', () => {
+        const a = member('a', 0, 0, 100, 100);
+        a.created = 5000;
+        const b = member('b', 500, 0, 100, 100);
+        b.created = 5000;   // 批量同帧
+        const ordered = GroupLayout.sortTimeOrder([b, a]);
+        expect(ordered.map(o => o.id)).toEqual(['a', 'b']);
+    });
+
+    test('不修改入参数组', () => {
+        const a = member('a', 0, 0, 100, 100);
+        a.created = 2000;
+        const b = member('b', 500, 0, 100, 100);
+        b.created = 1000;
+        const input = [a, b];
+        GroupLayout.sortTimeOrder(input);
+        expect(input.map(o => o.id)).toEqual(['a', 'b']);
+    });
+
+    test('arrange 第三参：时间序直接喂宫格（跳过阅读序）', () => {
+        // 位置上 b 在前（阅读序 b,a），时间上 a 旧 b 新
+        const b = member('b', 0, 0, 100, 100);
+        b.created = 9000;
+        const a = member('a', 500, 0, 100, 100);
+        a.created = 1000;
+        const { placements } = GroupLayout.arrange(
+            'grid', [b, a], GroupLayout.sortTimeOrder([b, a]));
+        // 宫格逐行按传入序：a（旧）占左上，b（新）占右上
+        expect(placements.map(p => p.obj.id)).toEqual(['a', 'b']);
+        expect(placements[0]).toMatchObject({ x: 0, y: 0 });
+        expect(placements[1]).toMatchObject({ x: 100 + GroupLayout.GAP, y: 0 });
     });
 });

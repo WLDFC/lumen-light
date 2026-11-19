@@ -1,0 +1,144 @@
+/**
+ * ==========================================================================
+ * LumenLight 工作流模板窗口样式
+ * 对应组件：js/components/WorkflowTemplateLibrary.js
+ * 位置：屏幕左侧，左侧工具栏按钮旁；几何与本地资产库窗口完全一致
+ *       （300 宽、left 62 / top 56 / bottom 100，见 css/asset-library.css）
+ * ==========================================================================
+ */
+
+/* ==================== 窗口容器 ==================== */
+
+.workflow-template-window {
+    position: fixed;
+    left: 62px;                    /* 左侧工具栏(6px + 48px 宽)右侧留出间距（同资产库） */
+    top: 56px;                     /* 顶栏(48px)下方留出间距（同资产库） */
+    bottom: 100px;                 /* 让出左下角"适应屏幕"按钮与缩放指示器（同资产库） */
+    width: 300px;
+    display: none;
+    flex-direction: column;
+    background: #101014;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 12px;           /* 与右侧面板/资产库一致 */
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    z-index: 1150;                 /* 高于左侧工具栏(1100)，低于文件菜单(1200) */
+    overflow: hidden;
+}
+
+.workflow-template-window.show {
+    display: flex;
+}
+
+/* ==================== 头部 ==================== */
+
+.workflow-template-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    flex-shrink: 0;
+}
+
+.workflow-template-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+}
+
+.workflow-template-header-spacer {
+    flex: 1 1 auto;
+}
+
+/* 关闭按钮：与资产库 icon-btn 同款小方块 */
+.workflow-template-icon-btn {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.workflow-template-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+/* ==================== 内容区 ==================== */
+
+.workflow-template-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
+    scrollbar-width: thin;
+}
+
+/* 空态提示（后端不可达/目录无模板时） */
+.workflow-template-empty {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.8;
+}
+
+/* ==================== 模板条目 ==================== */
+/* 一模板一条目（名称+说明），可拖拽到画布整套铺开 */
+
+.workflow-template-item {
+    padding: 10px 12px;
+    border: 1px solid rgba(128, 128, 128, 0.25);
+    border-radius: 8px;
+    background: #16161b;
+    margin-bottom: 8px;
+    cursor: grab;
+    user-select: none;
+}
+
+.workflow-template-item:hover {
+    border-color: rgba(108, 235, 255, 0.55);
+    background: rgba(108, 235, 255, 0.06);
+}
+
+.workflow-template-item.dragging {
+    opacity: 0.5;
+}
+
+.workflow-template-item-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 节点数角标：小号灰字标签 */
+.workflow-template-item-count {
+    font-size: 10px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 1px 5px;
+}
+
+.workflow-template-item-desc {
+    margin-top: 4px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.6;
+}
+
+/* ==================== 工具栏按钮激活态 ==================== */
+
+/* 窗口打开时，左侧工具栏的工作流按钮保持蓝色高亮（与资产库按钮同款） */
+.side-toolbar-btn.workflow-template-btn.active {
+    background-color: #3b82f6;
+}

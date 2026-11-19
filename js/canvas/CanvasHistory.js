@@ -99,6 +99,9 @@ class CanvasHistory {
         this._applying = false;
         this._redoStack.push(cmd);
         this.canvas.draw();
+        // 组集合可能被本步改变（组撤销/重做/解组等）——统一广播，
+        // 书签节点等派生消费者据此刷新（无订阅方时代价可忽略）
+        window.dispatchEvent(new CustomEvent('canvasGroupsChanged'));
         this._toast('已撤销：' + cmd.label);
         this._notify();
         return true;
@@ -116,6 +119,9 @@ class CanvasHistory {
         this._applying = false;
         this._undoStack.push(cmd);
         this.canvas.draw();
+        // 组集合可能被本步改变（组撤销/重做/解组等）——统一广播，
+        // 书签节点等派生消费者据此刷新（无订阅方时代价可忽略）
+        window.dispatchEvent(new CustomEvent('canvasGroupsChanged'));
         this._toast('已重做：' + cmd.label);
         this._notify();
         return true;
@@ -328,6 +334,9 @@ class CanvasHistory {
                 { width: json.width, height: json.height });
         } else if (json.type === NT.TEXT_NODE) {
             node = new TextNode(this.canvas, json.x, json.y, json.text,
+                { width: json.width, height: json.height });
+        } else if (json.type === NT.BOOKMARK_NODE) {
+            node = new BookmarkNode(this.canvas, json.x, json.y,
                 { width: json.width, height: json.height });
         } else if (json.type === NT.IMAGE_GEN_NODE) {
             node = new ImageGenNode(this.canvas, json.x, json.y, {

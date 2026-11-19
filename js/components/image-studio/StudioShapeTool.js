@@ -42,6 +42,7 @@ class StudioShapeTool {
     constructor(studio) {
         this.studio = studio;
         this.drag = null;   // 拖拽创建态 { layer, startX, startY }
+        studio._pen = null; // 钢笔会话态 { pts, cursor }（挂宿主，预览/键盘消费）
     }
 
     // ==================== 输入路由（主类 _onPaintDown 转发） ====================
@@ -146,14 +147,17 @@ class StudioShapeTool {
         return active && active.isShape ? active : null;
     }
 
-    /** 顶栏属性改动 → 选中形状层重渲染（未选中则只影响默认值） */
+    /** 顶栏属性改动 → 选中形状层重渲染（未选中则只影响默认值）。
+     *  多边形（钢笔）不吃类型切换——类型钮只改默认值，不把 poly 转成
+     *  矩形/椭圆（否则拖圆角滑杆都会把多边形变矩形） */
     applyOpts() {
         const studio = this.studio;
         const layer = this._targetLayer();
         const o = studio.shapeOpts;
         if (!layer) return;
+        const typePatch = layer.shape.type === 'poly' ? {} : { type: o.type };
         Object.assign(layer.shape, {
-            type: o.type, fill: o.fill, strokeColor: o.strokeColor,
+            ...typePatch, fill: o.fill, strokeColor: o.strokeColor,
             strokeWidth: o.strokeWidth, radius: o.radius, tail: o.tail
         });
         this._render(layer);
@@ -168,6 +172,95 @@ class StudioShapeTool {
         const studio = this.studio;
         Object.assign(studio.shapeOpts, layer.shape);
         studio._syncShapeOptsDom?.();
+    }
+
+    // ==================== 钢笔工具（2026-11-11 自漫画编辑器移植） ====================
+
+    /** 钢笔按下（主类 _onPaintDown pen 分支转发）：无会话则首点开话
+     *  （钳到文档边界）；近起点（屏幕 8px/zoom 换算文档距离）且 ≥3 点 →
+     *  闭合提交，否则追加顶点。预览经 _drawSelOverlay（StudioMoveTool） */
+    _penDown(e) {
+        const studio = this.studio;
+        if (!studio._readyDone) return;
+        e.preventDefault();
+        const pos = studio._toImagePos(e);
+        const clamp = (p) => [
+            Math.max(0, Math.min(studio.iw, p.x)),
+            Math.max(0, Math.min(studio.ih, p.y))
+        ];
+        if (!studio._pen) {
+            studio._pen = { pts: [clamp(pos)], cursor: null };
+            studio._drawSelOverlay();
+            return;
+        }
+        const pen = studio._pen;
+        const dist = Math.hypot(pos.x - pen.pts[0][0], pos.y - pen.pts[0][1]) * studio.zoom;
+        if (dist <= 8 && pen.pts.length >= 3) {
+            this._penClose();
+            return;
+        }
+        pen.pts.push(clamp(pos));
+        studio._drawSelOverlay();
+    }
+
+    /** 钢笔移动：橡皮筋预览终点实时更新 */
+    _penMove(e) {
+        const studio = this.studio;
+        if (!studio._pen) return;
+        const pos = studio._toImagePos(e);
+        studio._pen.cursor = [
+            Math.max(0, Math.min(studio.iw, pos.x)),
+            Math.max(0, Math.min(studio.ih, pos.y))
+        ];
+        studio._drawSelOverlay();
+    }
+
+    /**
+     * 闭合提交（近起点 / Enter）：polyNormalize 归一化点集建形状层
+     * （属性取顶栏默认值：填充/边框色/边宽/圆角——圆角做顶点圆弧过渡，
+     * polyPath arcTo），命名「多边形」+「绘制多边形」入账 + 自动选中；
+     * <3 点提示取消零痕迹
+     */
+    _penClose() {
+        const studio = this.studio;
+        const pen = studio._pen;
+        studio._pen = null;
+        if (!pen || pen.pts.length < 3) {
+            if (pen) studio._flashMsg('多边形至少需要 3 个顶点，已取消');
+            studio._drawSelOverlay();
+            return;
+        }
+        const norm = ShapeLayout.polyNormalize(pen.pts);
+        if (!norm) { studio._drawSelOverlay(); return; }
+        const layer = studio.addShapeLayer({ x: norm.x, y: norm.y });
+        layer.shape = {
+            type: 'poly',
+            w: norm.w,
+            h: norm.h,
+            points: norm.points,
+            fill: studio.shapeOpts.fill,
+            strokeColor: studio.shapeOpts.strokeColor,
+            strokeWidth: studio.shapeOpts.strokeWidth,
+            radius: studio.shapeOpts.radius,
+            tail: 'lb'
+        };
+        layer.name = ShapeLayout.TYPE_NAME.poly;
+        this._render(layer);   // 外伸画布 + tx 重定位同拖拽创建口径
+        studio._positionLayerCanvases(layer);
+        studio.dirty.layers = true;
+        studio._refreshThumb(layer);
+        studio._pushHistory('绘制多边形');
+        studio._renderLayerList();
+        studio._drawSelOverlay();
+    }
+
+    /** 取消会话（Esc/切工具/关编辑器）；无会话返回 false 供调用方判别 */
+    _penCancel() {
+        const studio = this.studio;
+        if (!studio._pen) return false;
+        studio._pen = null;
+        studio._drawSelOverlay();
+        return true;
     }
 
     // ==================== 形状渲染 ====================
@@ -197,14 +290,21 @@ class StudioShapeTool {
      * 在文档中纹丝不动，画布只向外伸方向扩。填充 'none' = 透明
      * （只要边框）；描边宽 0 = 无边框 */
     _render(layer) {
+        const studio = this.studio;   // 尾部 _refreshClips 消费（漏声明=ReferenceError，渲染中断画布停 1px）
         const s = layer.shape;
         const w = Math.max(2, Math.round(s.w));
         const h = Math.max(2, Math.round(s.h));
         // 左右翻转：气泡尾巴方位水平镜像后再渲染（这类形状的左右不对称
         // 完全来自尾巴，换向后重算外伸，本体锚点由下方重定位保持不变；
-        // 绘制面不再叠加 CSS 镜像，避免外伸不对称导致内容偏移/裁切）
+        // 绘制面不再叠加 CSS 镜像，避免外伸不对称导致内容偏移/裁切）。
+        // 多边形（钢笔）：镜像层内点集（x → w − x），与气泡同属内容烘焙
         const eff = layer.flipX
-            ? { ...s, tail: StudioShapeTool.MIRROR_TAIL[s.tail] || s.tail }
+            ? {
+                ...s,
+                tail: StudioShapeTool.MIRROR_TAIL[s.tail] || s.tail,
+                points: s.type === 'poly' && Array.isArray(s.points)
+                    ? s.points.map(([px, py]) => [s.w - px, py]) : s.points
+            }
             : s;
         const ext = StudioShapeTool._extFor(eff, w, h);
         const prev = layer._shapeExt || { left: 0, top: 0 };
@@ -219,6 +319,8 @@ class StudioShapeTool {
         layer.empty = false;
         // 线型策略 + 建路径 + 填充/描边在共享层统一原语（ADR 069）
         ShapeLayout.drawShapeContent(g, eff, ext.left, ext.top, w, h);
+        // 形状内容变化影响剪贴合成（本层作基底或被剪贴均受影响）
+        studio._refreshClips();
     }
 
     /** 按类型构建形状路径——算法在共享层 ShapeLayout.buildPath（ADR 069），一行委托 */

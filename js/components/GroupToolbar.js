@@ -154,6 +154,16 @@ class GroupToolbar {
                 value: 'vertical',
                 label: '垂直布局',
                 icon: '<circle cx="12" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="12" cy="19" r="2.4"/>'
+            },
+            {
+                value: 'time-desc',
+                label: '按最新排序',
+                icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="8"/><polyline points="8.5 11.5 12 8 15.5 11.5"/>'
+            },
+            {
+                value: 'time',
+                label: '按最旧排序',
+                icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><polyline points="8.5 12.5 12 16 15.5 12.5"/>'
             }
         ];
 
@@ -161,7 +171,11 @@ class GroupToolbar {
         this.layoutDropdown = new LumenDropdown(layoutBtn, {
             actionMenu: true,   // 动作型：菜单不打对勾，选项随时可重复执行
             onChange: (mode) => {
-                this.applyLayout(mode);
+                // 'time'/'time-desc' 不是几何排列：在组当前布局基础上按时间
+                // 重排（时间序替换阅读序喂同一几何算法），见 GroupLayout
+                // .sortTimeOrder；其余四项走既有几何
+                if (mode === 'time' || mode === 'time-desc') this.applyTimeSort(mode);
+                else this.applyLayout(mode);
                 // 动作型下拉：触发器文案保持动作名（setOptions 初始渲染
                 // 会写成第一项的"宫格布局"，构造后与每次执行后都要复位）
                 this.layoutDropdown.setLabel('布局');
@@ -208,20 +222,57 @@ class GroupToolbar {
     }
 
     /**
-     * 应用布局：成员按 GroupLayout 算法重排（只移动不缩放），组矩形
-     * 重_fit 到内容包围盒 + 内边距（锚点 = 组左上角不动）。
-     * 顶部内边距取 max(ENCLOSURE_PADDING, 标题栏高 + 40)——标题栏画在
-     * 组矩形内部，留白不足时第一排成员会顶进标题栏。
-     * draw() 经 hook 被 CanvasChangeWatcher 捕获，实时保存自动落盘
-     * @param {string} mode - 'grid' | 'horizontal' | 'vertical'
+     * 应用布局：成员按 GroupLayout 算法重排（只移动不缩放），副作用壳见
+     * _applyArrangeResult。布局模式记到组上（layoutMode，随存档持久化）
+     * ——「按时间排序」在当前布局基础上重排。注：layoutMode 不参与撤销
+     * （撤销只回几何，布局模式是粘性状态）
+     * @param {string} mode - 'grid' | 'waterfall' | 'horizontal' | 'vertical'
      */
     applyLayout(mode) {
         if (!this.group) return;
-        const group = this.group;
-        const members = this.canvas.groups.getMembers(group);
+        const members = this.canvas.groups.getMembers(this.group);
         if (members.length === 0) return;
+        this._applyArrangeResult(GroupLayout.arrange(mode, members), '布局重排');
+        this.group.layoutMode = mode;
+    }
 
-        const result = GroupLayout.arrange(mode, members);
+    /**
+     * 按时间排序（2026-11-16，11-17 加双向）：在组当前布局的基础上按时间
+     * 重排——上次应用宫格就出宫格时间线、水平就出水平时间线（时间序替换
+     * 阅读序喂给同一几何算法，布局形状不变）。从未排版过的组回退宫格。
+     * 「按最新排序」最新在阅读序首位、「按最旧排序」最旧在首位（缺省）；
+     * 时间键回退链与稳定规则见 GroupLayout.sortTimeOrder/timeKeyOf
+     * @param {string} mode - 'time-desc'（新→旧）| 'time'（旧→新）
+     */
+    applyTimeSort(mode = 'time') {
+        if (!this.group) return;
+        const members = this.canvas.groups.getMembers(this.group);
+        if (members.length === 0) return;
+        const layout = this.group.layoutMode || 'grid';
+        this._applyArrangeResult(
+            GroupLayout.arrange(layout, members,
+                GroupLayout.sortTimeOrder(members, mode === 'time-desc' ? 'desc' : 'asc')),
+            mode === 'time-desc' ? '按最新排序' : '按最旧排序');
+    }
+
+    /**
+     * 应用排列结果（applyLayout/applyTimeSort 公共副作用壳）：写成员坐标
+     * （面板节点补 updateTransform）、组矩形重_fit、撤销记账、draw 与工具栏
+     * 重定位。顶部内边距取 max(ENCLOSURE_PADDING, 标题栏高 + 40)——标题栏
+     * 画在组矩形内部，留白不足时第一排成员会顶进标题栏。
+     * 撤销记账同组拖动的合并模式（CanvasInteraction 组拖动）：成员记 x/y、
+     * 组壳含宽高，recordGeometry 一次入账（布局重排此前不可撤销，本次补齐）
+     * @param {{placements: Array<{obj,x,y}>, width: number, height: number}} result
+     * @param {string} label - 撤销命令标签
+     */
+    _applyArrangeResult(result, label) {
+        const group = this.group;
+        // 撤销捕获（apply 前取 from）
+        const entries = result.placements.map(p => ({
+            obj: p.obj,
+            from: { x: p.obj.x, y: p.obj.y }
+        }));
+        const groupFrom = { x: group.x, y: group.y, width: group.width, height: group.height };
 
         // 应用坐标：DOM 节点成员移动后同步 transform（与拖动组联动同款）
         const topPad = Math.max(
@@ -245,6 +296,15 @@ class GroupToolbar {
             result.height + topPad + GroupManager.ENCLOSURE_PADDING,
             GroupManager.MIN_HEIGHT
         );
+
+        // 撤销记账：成员 to 坐标 + 组壳 to 几何（undo/redo 回放含组壳宽高）
+        for (const en of entries) en.to = { x: en.obj.x, y: en.obj.y };
+        entries.push({
+            obj: group,
+            from: groupFrom,
+            to: { x: group.x, y: group.y, width: group.width, height: group.height }
+        });
+        this.canvas.history?.recordGeometry(entries, label);
 
         this.canvas.draw();
         // 组矩形变了，工具栏重新定位（元素可见，测量正常）

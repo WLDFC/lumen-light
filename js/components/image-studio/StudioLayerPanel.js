@@ -142,7 +142,13 @@ class StudioLayerPanel {
         }
         if (src.isShape) {
             copy.isShape = true;
-            copy.shape = { ...src.shape };
+            // 多边形（钢笔）点集深拷贝——副本与原层各自演化，缩放烘焙
+            // 换算不能串味（rect 类无点集不受影响）
+            copy.shape = {
+                ...src.shape,
+                points: Array.isArray(src.shape.points)
+                    ? src.shape.points.map((p) => p.slice()) : src.shape.points
+            };
             // 外伸快照随层复制：_render 以「tx + 外伸 = 包围盒」反推锚点，
             // 不带快照会把副本包围盒算错（向左上漂移一个外伸量）
             copy._shapeExt = src._shapeExt ? { ...src._shapeExt } : null;
@@ -170,6 +176,8 @@ class StudioLayerPanel {
         const studio = this.studio;
         studio.wrapEl.innerHTML = '';
         for (const layer of studio.layers) {
+            // 剪贴层的显示画布一并重挂（在 paintCv 之前，遮罩画布之下）
+            if (layer.clipCv) studio.wrapEl.append(layer.clipCv);
             studio.wrapEl.append(layer.paintCv, layer.maskCv);
             this._applyLayerStyles(layer);
         }
@@ -177,7 +185,10 @@ class StudioLayerPanel {
         studio.wrapEl.append(studio.paintSurface, studio.cropCanvas);
     }
 
-    /** 同步单块图层的显示样式（可见性 / 透明度；定位在 _applyTransform） */
+    /** 同步单块图层的显示样式（可见性 / 透明度；定位在 _applyTransform）。
+     *  剪贴层（2026-11-11）：clipCv 顶替 paintCv 显示（paintCv 退居内容
+     *  源隐藏），透明度照常走 CSS；本层翻转对 clipCv 无意义（变换已
+     *  烘焙进合成内容），恒不镜像 */
     _applyLayerStyles(layer) {
         const studio = this.studio;
         const display = layer.visible ? '' : 'none';
@@ -185,9 +196,15 @@ class StudioLayerPanel {
         // 矩形仍是轴对齐矩形，无需换算）。形状层除外——它由 _render 按
         // 镜像后的尾巴方位重渲染（外伸不对称，叠加 CSS 镜像会偏移/裁切）
         const flip = (layer.flipX && !layer.isShape) ? 'scaleX(-1)' : '';
-        layer.paintCv.style.display = display;
+        const clipped = !!layer.clipped && !!layer.clipCv;
+        layer.paintCv.style.display = clipped ? 'none' : display;
         layer.paintCv.style.opacity = layer.opacity;
         layer.paintCv.style.transform = flip;
+        if (layer.clipCv) {
+            layer.clipCv.style.display = clipped ? display : 'none';
+            layer.clipCv.style.opacity = layer.opacity;
+            layer.clipCv.style.transform = '';
+        }
         layer.maskCv.style.display = display;
         layer.maskCv.style.opacity = layer.opacity * ImageStudio.MASK_DISPLAY_OPACITY;
         layer.maskCv.style.transform = flip;
@@ -279,7 +296,17 @@ class StudioLayerPanel {
                     this._renderLayerList();
                     studio._pushHistory('显隐图层');
                 });
-            row.append(typeEl, nameEl);
+            row.append(typeEl);
+            if (layer.clipped) {
+                // 剪贴蒙版角标（漫画编辑器 ↳ 蓝标同款）：内容只在下方
+                // 基底图层的不透明像素内显示
+                const clipBadge = document.createElement('span');
+                clipBadge.className = 'is-layer-clip';
+                clipBadge.title = '剪贴蒙版：内容只在下方基底图层的不透明像素内显示';
+                clipBadge.textContent = '↳';
+                row.append(clipBadge);
+            }
+            row.append(nameEl);
             if (layer.isBackground) {
                 // 背景层锁标：锁变换/不可拖拽排序/不可删——约束前置可见，
                 // 不用等右键或 Delete 时才发现
@@ -456,6 +483,11 @@ class StudioLayerPanel {
         // 删除项守卫：激活层是背景层（不可删）时禁用
         studio.deleteItemEl.classList.toggle('disabled',
             !layer || layer.isBackground);
+        // 剪贴项守卫：无激活层 / 最底层（无基底可挂）时禁用
+        if (studio.clipItemEl) {
+            studio.clipItemEl.classList.toggle('disabled',
+                !layer || studio.layers.indexOf(layer) === 0);
+        }
         // 顶栏翻转按钮：无选中层 / 背景层（锁定白底）时禁用
         if (studio.flipBtn) {
             const canFlip = !!layer && !layer.isBackground;
@@ -480,14 +512,44 @@ class StudioLayerPanel {
         }
     }
 
-    /** 图层右键菜单定位显示 */
+    /** 图层右键菜单定位显示（剪贴项文案随激活层状态切换） */
     _showLayerMenu(x, y) {
         const studio = this.studio;
+        const layer = studio._activeLayer();
+        if (studio.clipItemEl) {
+            studio.clipItemEl.textContent =
+                layer && layer.clipped ? '释放剪贴蒙版' : '剪贴到下图层';
+        }
         studio.layerMenuEl.hidden = false;
         const rect = studio.layerMenuEl.getBoundingClientRect();
         studio.layerMenuEl.style.left = Math.min(x, window.innerWidth - rect.width - 8) + 'px';
         studio.layerMenuEl.style.top = Math.min(y, window.innerHeight - rect.height - 8) + 'px';
         this._syncPanels();
+    }
+
+    /**
+     * 剪贴蒙版开关（2026-11-11 自漫画编辑器移植，PS Clipping Mask 同
+     * 语义）：本层内容只在下方最近未剪贴层（基底）的不透明像素内显示。
+     * 最底层/背景层无基底可挂 → 状态栏拒绝；释放即删字段（栈数据干净）
+     */
+    _toggleClipToBelow(id) {
+        const studio = this.studio;
+        const layer = studio.layers.find((l) => l.id === id);
+        if (!layer || layer.isBackground) return;
+        if (studio.layers.indexOf(layer) === 0) {
+            studio._flashMsg('下方没有可作基底的图层');
+            return;
+        }
+        const was = !!layer.clipped;
+        if (was) delete layer.clipped;
+        else layer.clipped = true;
+        studio._ensureClipCanvas(layer);   // 剪贴时惰性建显示画布
+        studio.dirty.layers = true;        // 图层栈语义变化：驱动重新序列化
+        this._applyLayerStyles(layer);     // paintCv/clipCv 显示切换
+        this._renderLayerList();           // 行角标 ↳
+        this._syncPanels();
+        studio._refreshClips();
+        studio._pushHistory(was ? '释放剪贴蒙版' : '创建剪贴蒙版');
     }
 }
 

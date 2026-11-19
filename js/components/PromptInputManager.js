@@ -145,14 +145,23 @@ class PromptInputManager {
      * 两个正面框交给 PromptMerge.join 统一合并：框 1 在前（质量/画风类）、
      * 框 2 在后（人物/动作等内容类），段间空行、拼接处自动补逗号
      * （区分中英文）。PanelComfyRunner 经此发送合并结果，画布 Comfy
-     * 生图节点取负面词
+     * 生图节点取负面词。
+     * LoRA 触发词「专用框」（写入目标=3 的虚拟框，无实体）在本处注入：
+     * 托管块插在框 1 之后——即框 1 末尾、空一行分隔（LoraTriggerManager
+     * .getVirtualBlock，非专用框目标返回空串不参与合并）。存档序列化读
+     * DOM 原文，专用框内容不进存档
      * @returns {{positive: string, negative: string}} 提示词对象
      */
     getPrompts() {
         const pos1 = this.posPrompt ? this.posPrompt.value : '';
         const pos2 = this.posPrompt2 ? this.posPrompt2.value : '';
+        const virtual = (window.promptPanel && window.promptPanel.triggerManager)
+            ? window.promptPanel.triggerManager.getVirtualBlock() : '';
+        const positive = virtual
+            ? PromptMerge.join([pos1, virtual, pos2])
+            : PromptMerge.join([pos1, pos2]);
         return {
-            positive: PromptMerge.join([pos1, pos2]),
+            positive,
             negative: this.negPrompt ? this.negPrompt.value : ''
         };
     }

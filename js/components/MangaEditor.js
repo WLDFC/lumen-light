@@ -53,7 +53,7 @@
  *       草稿自动持久化到后端 data/manga-draft.json（/api/manga-draft，
  *       全局单份，防抖 800ms + pagehide keepalive 兜底；打开弹窗时恢复，
  *       恢复走 CoordinateLayout.normalizeDraft 宽松归一——见 ADR 018）。
- * 拆分：本类按职责域拆为 manga-editor/ 下十一个混入模块（partial-class，
+ * 拆分：本类按职责域拆为 manga-editor/ 下十个混入模块（partial-class，
  *       ADR 026）——方法 Object.assign 回本类 prototype，this 即实例，
  *       调用点与测试契约（Object.create(prototype) + 实例打桩）零改动：
  *       MangaDom.js        DOM 装配与事件绑定（懒建于首次 show）
@@ -64,14 +64,13 @@
  *       MangaHistory.js    撤销重做快照栈（ADR 017 决策十一）
  *       MangaDraftStore.js 草稿自动持久化（ADR 018）
  *       MangaAi.js         AI 写提示词（模型/技能/解析/回填）
- *       MangaBackground.js 舞台背景参考图与生成图透显（悬浮工具条）
  *       MangaPages.js      页面栏与多页文档操作（切页/新建/清空）
  *       MangaGenerate.js   图像生成（Comfy/API 双模式与结果落参考层）
  *       本文件保留：构造与状态声明、开合与保存/关闭确认（右上保存蓝钮 +
  *       ×红钮，图片层同步画布对应图——干净底片+可见笔迹叠加分通道，
  *       ImageStudio 同模型）、并排窗口宽度、共享小工具（配色/稳定 id）、
  *       草稿失效枢纽与编译导出。
- *       加载顺序：本文件先于十一个混入模块（混入依赖类已定义）。
+ *       加载顺序：本文件先于十个混入模块（混入依赖类已定义）。
  * 纯函数层：js/utils/CoordinateLayout.js（校验/编译/几何辅助，Jest 可单测）。
  * 样式：css/manga-editor.css（窗口壳复用 recipe-manager.css 的
  *       recipe-dialog 类，本档只补内部排布）。
@@ -120,6 +119,10 @@ class MangaEditor {
         this.currentProjectId = null;
         this.currentProjectName = null;
         this.selected = -1;        // 选中元素下标（-1 = 无）
+        // 元素框多选集合（cid，2026-11-12）：Shift+点击往里加/出，逐格生成
+        // 按它定范围（选中 1 格=单格、多格=只跑选中格、空=全页）；存 cid
+        // 防删框/重排的下标漂移
+        this._multiSelected = new Set();
         this.compiled = null;      // 最近一次编译产物 { ok, prompt?, error? }
         this._thumbTimer = null;   // 缩略图重绘防抖（MangaPages 混入）
 
@@ -189,7 +192,8 @@ class MangaEditor {
         this._lastShapeStrokeWidth = null;
 
         // 图层系统（MangaLayers 混入）：draft.drawLayers 页面层栈（笔迹层/
-        // 图片层，底→顶数组序），笔迹与图片都是图层；背景参考图不并入
+        // 图片层，底→顶数组序），笔迹与图片都是图层（2026-11-08 起一切
+        // 图像皆图层，背景参考图功能退役）
         this._activeLayerId = null;    // 画笔目标层（笔迹层）
         this._selLayerId = null;       // 舞台选中的图片层（与元素选中互斥）
         this._layerImgCache = new Map();   // 图片层 src → {img}（跨页共享）
@@ -268,11 +272,9 @@ class MangaEditor {
             collage: '拼贴：元素像贴纸一样可重叠堆放'
         };
 
-        // 生成图事件监听（MangaBackground 混入）：构造器即挂，不等首次
+        // 生成图事件监听（MangaGenerate 混入）：构造器即挂，不等首次
         // show——刷新后先出图、后开编辑器的窗口期也能接住回流
         this._attachGeneratedImageListener();
-        // 画布删图联动清背景（MangaBackground 混入）：同样构造器即挂
-        this._attachCanvasDeleteListener();
     }
 
     // ==================== 开合与保存/关闭确认 ====================
@@ -297,6 +299,7 @@ class MangaEditor {
 
     hide() {
         if (!this.dialog) return;
+        window.assetLibrary?.hide();   // 锚定在本编辑器的资产库随窗收起（画布默认态打开中无此可能，hide 幂等无害）
         if (this._adjust?._open) this._adjust.close();   // 调色中关窗=丢弃预览（灯箱同语义）
         if (this._remove?._open) this._remove.close();   // 移除涂抹中关窗=丢弃未提交遮罩（ADR 076）
         // 关窗后 activeTool 不得停留在 remove（会话已关——重开时按钮
@@ -309,6 +312,7 @@ class MangaEditor {
             this._shapeCreateAbort();   // 拖拽创建中的临时层随窗摘除（从未入账零痕迹）
         }
         this._drag = null;
+        this._penCancel();         // 钢笔落点会话随窗丢弃（零痕迹，2026-11-11）
         this._abortTextEdit();     // 就地编辑框硬清理（layer 栈不动，下次打开按草稿恢复）
         this._hideSaveConfirm();   // 确认浮层随窗收起（下次打开保持干净态）
         if (this.btn) this.btn.setAttribute('aria-expanded', 'false');
@@ -415,106 +419,20 @@ class MangaEditor {
         return true;
     }
 
-    // ==================== 导出本页到画布（显式交付，ADR 071） ====================
-
-    /**
-     * 整页所见即所得合成一张 PNG 落画布视口中心（唯一保留的画布交付口
-     * ——逐层写回已退役）：白页底 + 当前页图层栈（笔迹/图片/文字/形状，
-     * 与舞台同一渲染口径 _drawPageLayers，恒等变换草稿像素 1:1）。元素
-     * 景别框是结构化标注不属页面视觉，不入合成。命名 manga_page_<ts>.png
-     */
-    async _exportPageToCanvas() {
-        const app = window.canvas;
-        if (!app || !app.images || !app.viewport) {
-            this._status('画布未就绪，无法导出', true);
-            return;
-        }
-        // 整页合成收口在 MangaExport 混入 _composePageCanvas（ADR 079：
-        // 本页到画布 / 本页到本地 / 本项目 zip 三口共用同一渲染口径）
-        const cv = await this._composePageCanvas(this.draft);
-        try {
-            await this._placeCompositeAsNewImage(app, cv.toDataURL('image/png'), `manga_page_${Date.now()}.png`);
-            this._status('已导出当前页到画布（整页合成图）');
-        } catch (err) {
-            this._status('导出失败：' + ((err && err.message) || err), true);
-        }
-    }
-
-    /**
-     * 无画布对应图的新建落图（导出本页交付出口，ADR 071）：页面合成图以
-     * 草稿像素原生分辨率落画布视口中心（LlmImageDrag.dropToCanvas 同款落
-     * 点语义），返回新建的画布图对象；name 可指定画布图文件名
-     */
-    async _placeCompositeAsNewImage(app, url, name) {
-        const img = new Image();
-        await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = () => reject(new Error('写回图加载失败'));
-            img.src = url;
-        });
-        const rect = app.canvas.getBoundingClientRect();
-        const cp = app.viewport.screenToCanvas(
-            rect.left + rect.width / 2, rect.top + rect.height / 2);
-        return app.images.addImage({
-            img,
-            x: cp.x - img.width / 2,
-            y: cp.y - img.height / 2,
-            width: img.width,
-            height: img.height,
-            isPlaceholder: false,
-            source: 'manga',
-            name: name || `manga_layer_${Date.now()}.png`
-        });
-    }
-
-    /**
-     * 等齐页面图层引用的图片加载完成（写回前置，防缺图/缺底片）：
-     * 图片层**全部**等（含隐藏层——写回要对齐其画布图 src，隐藏层底片
-     * 同样参与）；加载完成或出错都放行（出错=该层暂缺图，写回时按层
-     * 计失败）；3s 超时兜底不挂死保存
-     */
-    _awaitLayerImages() {
-        const pending = [];
-        for (const l of this._ensureDrawLayers()) {
-            if (!l || !l.image || !l.image.src) continue;
-            const img = this._ensureLayerImage(l.image.src);
-            if (img.complete) continue;
-            pending.push(new Promise((resolve) => {
-                if (img.complete) { resolve(); return; }
-                const done = () => { img.onload = null; img.onerror = null; resolve(); };
-                img.onload = done;
-                img.onerror = done;
-                setTimeout(done, 3000);
-            }));
-        }
-        return Promise.all(pending);
-    }
-
     // ==================== 并排窗口宽度（右缘留白给面板） ====================
 
     /**
      * 留白钳制：0（全屏）到 innerWidth-900（保住编辑器三栏最小宽）。
-     * 与坐标编辑器在此分叉：无 360px 下限——漫画默认全屏（留白 0），
-     * 右缘手柄拖出多少留白全由用户决定
+     * 与坐标编辑器在此分叉：无 360px 下限——漫画关布局即全屏（留白 0），
+     * 右缘手柄拖出多少留白全由用户决定。
+     * 开关/记忆/置灰在 LumenLayoutPanel 预制件（MangaDom._buildDom 实例化，
+     * 变量 --manga-gap）；留白取值=拖拽记忆优先、无记忆面板实测（预制件
+     * getGap 钩子）；本方法只服务右缘手柄拖拽与记忆值钳制
      */
     _clampGap(px, innerWidth) {
         const max = Math.max(0, innerWidth - 900);
         const n = typeof px === 'number' && Number.isFinite(px) ? px : 0;
         return Math.round(Math.max(0, Math.min(max, n)));
-    }
-
-    /** 默认留白：恒 0（全屏开窗；用户拖拽过的值在 _applyStoredGap 里优先） */
-    _defaultGap() {
-        return 0;
-    }
-
-    /** 启动时应用留白宽度：用户拖拽过的值（localStorage）优先，否则全屏（0） */
-    _applyStoredGap() {
-        const raw = Number(localStorage.getItem('lumenLight.mangaDialogGap'));
-        const gap = Number.isFinite(raw) && raw > 0
-            ? this._clampGap(raw, window.innerWidth)
-            : this._defaultGap();
-        this.dialog.style.setProperty('--manga-gap', gap + 'px');
     }
 
     /** 右缘拖拽：更新 --manga-gap（窄屏媒体查询强制全屏时拖拽自然无效）、
@@ -579,6 +497,23 @@ class MangaEditor {
         this.statusEl.classList.toggle('is-error', !!isError);
     }
 
+    /**
+     * 入资产库（内容寻址去重），返回稳定引用 URL——图层置入/生成落图/
+     * 调色·橡皮·抠图·移除烘焙等各链路共用的上传通道
+     */
+    async _uploadToAssets(dataUrl, name) {
+        const r = await fetch('/api/assets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ src: dataUrl, name })
+        });
+        const result = await r.json().catch(() => null);
+        if (!r.ok || !result || result.status !== 'ok') {
+            throw new Error((result && result.message) || ('HTTP ' + r.status));
+        }
+        return result.url;
+    }
+
     // ==================== 草稿失效枢纽 ====================
 
     /** 草稿变化后编译产物失效（复制按钮回落禁用态；右栏正在显示编译
@@ -612,8 +547,8 @@ class MangaEditor {
         // 剥离编辑器侧元数据（编译层白名单会拒绝未认可字段）：
         // shot = 景别（织进 caption 后完成使命）、cid = 稳定 id（编号/颜色显示）、
         // title = 框标题（舞台标签显示）——三者都不属于 MOSS 草稿契约；
-        // background = 背景参考图 URL（MangaBackground 混入，纯参照不参与编译）；
-        // backgroundSrcId = 背景来源画布图 id（删图联动用，同属编辑器侧元数据）；
+        // background/backgroundSrcId = 背景参考图残留字段（功能已退役，
+        // 2026-11-08 用户拍板：一切图像皆图层——旧档里可能还带着，剥离防漏）；
         // strokes/drawLayers = 画笔笔迹与图层（MangaLayers 混入，页面草稿层
         // 不参与编译——剥离后笔迹增删不清右栏编译产物）
         const { background, backgroundSrcId, strokes, drawLayers, ...draftCore } = this.draft;
