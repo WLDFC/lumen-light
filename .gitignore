@@ -81,3 +81,15 @@ data/update-backup/
 
 # Trae IDE 项目配置（个人 IDE 数据，不入公开仓库）
 .trae/
+
+# 漫画图片垃圾箱（编辑器删除图片的恢复区，用户运行时数据）
+data/manga/**/.trash/
+
+# LoRA 元数据一次性迁移备份（运行时产物）
+data/lora-meta.json.migrated.bak
+
+# 云端网关运行时配置（首次启动自动生成，含访问 token，勿入库）
+cloud/config.json
+
+# 云端网关无头打包产物（pack-server.js 输出，上传服务器用）
+cloud/dist/
