@@ -5,7 +5,10 @@
  *   - POST /api/pi/prompt    ：发用户消息（自动切模型/会话，流式内容走 WS 广播）
  *   - POST /api/pi/abort     ：中止当前推理（清队列+掐 bash+中止，明细返回）
  *   - GET  /api/pi/stop-signal ：停止信号时间戳（扩展后台任务取消检查用）
- *   - POST /api/pi/reset-session ：重置当前存档的 pi 会话（清空对话联动）
+ *   - POST /api/pi/reset-session ：重置当前会话绑定（清空对话联动，只推倒
+ *                                  当前 <存档>::<会话id>，多会话其余保留）
+ *   - POST /api/pi/switch-session ：面板切换会话（切到绑定会话/自动新建）
+ *   - POST /api/pi/delete-session ：面板删除会话（跨存档绑定与会话文件一并清）
  *   - POST /api/pi/restart     ：重启 pi 进程（状态灯黄/红点击、疑似卡死按钮用；
  *                                kill 后自动拉起新进程接续会话）
  *   - GET  /api/pi/state     ：pi 运行状态
@@ -29,7 +32,7 @@ function createPiAgentRouter({ manager }) {
 
     router.post('/prompt', async (req, res) => {
         try {
-            const { message, images, archive, provider, modelId, systemPrompt } = req.body || {};
+            const { message, images, archive, sessionId, provider, modelId, systemPrompt } = req.body || {};
             if (!message || !message.trim()) {
                 return res.status(400).json({ status: 'error', message: '消息为空' });
             }
@@ -37,6 +40,7 @@ function createPiAgentRouter({ manager }) {
                 message: message.trim(),
                 images: Array.isArray(images) ? images : [],
                 archive: archive || null,
+                sessionId: sessionId || null,
                 provider: provider || null,
                 modelId: modelId || null,
                 systemPrompt: typeof systemPrompt === 'string' ? systemPrompt : ''
@@ -67,11 +71,37 @@ function createPiAgentRouter({ manager }) {
 
     router.post('/reset-session', async (req, res) => {
         try {
-            const { archive } = req.body || {};
-            await manager.resetSession(archive || null);
+            const { archive, sessionId } = req.body || {};
+            await manager.resetSession(archive || null, sessionId || null);
             res.json({ status: 'ok' });
         } catch (err) {
             console.error('[pi] reset-session 失败:', err.message);
+            res.status(500).json({ status: 'error', message: err.message });
+        }
+    });
+
+    // 面板切换会话（LlmSessionManager）：把 pi 切到 <存档>::<会话id> 的
+    // 绑定会话（映射无文件时自动新建）。尽力而为——前端失败不阻塞界面
+    // 切换，下一条 prompt 带 sessionId 兜底对齐
+    router.post('/switch-session', async (req, res) => {
+        try {
+            const { archive, sessionId } = req.body || {};
+            await manager.switchToArchive(archive || null, sessionId || null);
+            res.json({ status: 'ok' });
+        } catch (err) {
+            console.error('[pi] switch-session 失败:', err.message);
+            res.status(500).json({ status: 'error', message: err.message });
+        }
+    });
+
+    // 面板删除会话（LlmSessionManager）：跨存档的绑定条目与会话文件一并清
+    router.post('/delete-session', async (req, res) => {
+        try {
+            const { sessionId } = req.body || {};
+            const removed = await manager.deleteChatSession(sessionId || null);
+            res.json({ status: 'ok', removed });
+        } catch (err) {
+            console.error('[pi] delete-session 失败:', err.message);
             res.status(500).json({ status: 'error', message: err.message });
         }
     });

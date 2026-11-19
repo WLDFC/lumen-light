@@ -118,6 +118,10 @@ class LlmChat {
         this._genParams = new Map();   // 生成图片块 id → 原始请求参数（重新生成/恢复重绑用）
         this._piUsage = null;          // 最近一次 pi 调用统计 {usage, modelId}（随快照持久化）
 
+        // 多会话管理（2026-11-20）：新建/切换/改名/删除，快照键与会话绑定
+        // （LlmHistoryController._historyKey 经它路由）；须先于 init() 就位
+        this.sessions = new LlmSessionManager(this);
+
         this.init();
     }
 
@@ -708,6 +712,8 @@ class LlmChat {
         if (this.piUsageEl) {
             this.piUsageEl.style.display = (mode === 'llm' && this.piUsageEl.textContent) ? '' : 'none';
         }
+        // 会话按钮同规则再叠加「非网页桥接」（桥接对话本体在站点侧）
+        this.sessions?.updateVisibility();
     }
 
     /**
@@ -770,6 +776,8 @@ class LlmChat {
         }
         this.updateToolbarForModel();
         this._swapHistorySnapshot();
+        // 模型切到/切出网页桥接：会话按钮跟随显隐（桥接无本地会话）
+        this.sessions?.updateVisibility();
     }
 
     /**
@@ -851,21 +859,27 @@ class LlmChat {
     }
 
     /**
-     * 清空对话历史与界面
+     * 清空当前对话（2026-11-20 多会话语义：只推倒当前会话，其他会话与
+     * 其他存档的 agent 上下文保留）
      */
     clearChat() {
         this.history = [];
         // 终止所有进行中的视频生成轮询
         this.videoGen?.cancelAll();
-        // 同步重置 pi 会话：pi 的对话按存档持久化在会话文件里，只清界面
-        // 会让旧上下文在下一句原样背进去（上下文持续膨胀，历史里的
-        // 过期信息甚至会误导模型自我认知）；后端重置时清空 sessions/
-        // 全部会话文件（所有存档的 agent 上下文一并推倒重来）
+        // 同步重置 pi 会话（当前存档 × 当前会话）：pi 的对话持久化在会话
+        // 文件里，只清界面会让旧上下文在下一句原样背进去（上下文持续膨胀，
+        // 历史里的过期信息甚至会误导模型自我认知）；后端只删当前绑定的
+        // 会话文件，其余会话与其余存档不受影响
         fetch('/api/pi/reset-session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ archive: window.saveManager?.currentSave || null })
+            body: JSON.stringify({
+                archive: window.saveManager?.currentSave || null,
+                sessionId: this.sessions?.currentId || null
+            })
         }).catch(() => { /* pi 未运行或重置失败：不阻塞界面清空 */ });
+        // 当前会话被推倒：自动标题作废（陈旧标题配空对话易误导；用户命名的保留）
+        this.sessions?.resetCurrentTitle();
         if (this.piUsageEl) {
             this.piUsageEl.textContent = '';
             this._piUsage = null;   // 随快照持久化的统计一并清除

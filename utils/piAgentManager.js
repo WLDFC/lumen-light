@@ -6,7 +6,9 @@
  *       提供 agent 能力：
  *   - prompt(message, images, archive, model) ：发消息（自动切模型/会话）
  *   - 事件流经回调转发（路由层广播到浏览器 WebSocket）
- *   - 每个画布存档绑定一个 pi 会话（session-map.json 持久化映射）
+ *   - 每条聊天会话（前端多会话）× 每个画布存档 = 一个 pi 会话绑定
+ *     （session-map.json v2：<存档键>::<会话id> → 会话文件；v1 单存档
+ *     映射自动迁移为 ::legacy）
  *   - 模型走 LLM 面板：从 data/settings.json 生成 provider 注册配置，
  *     apiKey 经环境变量（LUMEN_KEY_*）注入，扩展内用 $LUMEN_KEY_* 引用
  *
@@ -20,7 +22,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { syncPiExtensions } = require('./piExtensionSync');
+const { cleanupLegacyGlobalExtensions } = require('./piExtensionCleanup');
 
 /** spawn 后等待扩展加载/注册 provider 的时间（ms） */
 const MODEL_SETTLE_MS = 2500;
@@ -68,8 +70,9 @@ class PiAgentManager {
         this.pending = new Map();   // id -> {resolve, reject, timer}
         this.seq = 0;
         this.currentModel = null;   // {provider, modelId}
-        this.currentArchiveKey = null;
-        this.sessionMap = this._readJson(this.mapFile, {});
+        this.currentArchiveKey = null;   // 当前存档键（附图登记隔离用）
+        this.currentPairKey = null;      // 当前会话绑定键 <存档>::<会话id>
+        this.sessionMap = this._loadSessionMap();
         this.permissionLevel = this._readJson(this.settingsFile, {}).permissionLevel || 'standard';
         this.starting = null;
         this.rpcFailStreak = 0;   // 连续 RPC 超时计数（疑似卡死上报判定用）
@@ -99,6 +102,36 @@ class PiAgentManager {
         } catch (err) {
             console.error('写入 pi 配置失败:', err);
         }
+    }
+
+    // ==================== 会话映射（多会话，2026-11-20） ====================
+    // v2 结构 { version: 2, pairs: { '<存档键>::<会话id>': 会话文件 } }：
+    // 一条聊天会话（前端 LlmSessionManager）× 一个存档 = 一个 pi 会话文件。
+    // v1（{ 存档键: 会话文件 }）自动迁移：全部归到 ::legacy——与前端首个
+    // 会话固定 id 'legacy' 对位，存量 agent 上下文无缝收编
+    // （存档名是 Windows 文件名，不可能含冒号，'::' 作分隔符安全）
+
+    static MAP_VERSION = 2;
+
+    _loadSessionMap() {
+        const raw = this._readJson(this.mapFile, {});
+        if (raw && raw.version === PiAgentManager.MAP_VERSION &&
+            raw.pairs && typeof raw.pairs === 'object') {
+            return raw;
+        }
+        const pairs = {};
+        for (const [k, v] of Object.entries(raw || {})) {
+            if (typeof v === 'string') pairs[`${k}::legacy`] = v;
+        }
+        return { version: PiAgentManager.MAP_VERSION, pairs };
+    }
+
+    _saveSessionMap() {
+        this._writeJson(this.mapFile, this.sessionMap);
+    }
+
+    _pairKey(archiveName, sessionId) {
+        return `${archiveName || '__unsaved__'}::${sessionId || 'legacy'}`;
     }
 
     /** pi 生命周期日志（spawn/stderr/exit/kill）：追加到 data/pi/agent.log。
@@ -158,7 +191,7 @@ class PiAgentManager {
             if (!cfg.endpoint || !cfg.apiKey) continue;
             const envKey = `LUMEN_KEY_${i}`;
             envKeys[envKey] = cfg.apiKey;
-            providers.push({
+            const providerEntry = {
                 id: 'lumen-' + name,
                 name: 'Lumen · ' + name,
                 baseUrl: cfg.endpoint,
@@ -193,13 +226,19 @@ class PiAgentManager {
                         id: m.id,
                         name: m.displayName || m.id,
                         reasoning: m.reasoning === true,
-                        api: 'openai-completions',
+                        api: cfg.apiType === 'responses' ? 'openai-responses' : 'openai-completions',
                         input: ['text', 'image'],
                         cost: m.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
                         contextWindow: m.contextWindow || 307200,
                         maxTokens: m.maxTokens || 8192
                     }))
-            });
+            };
+            // 接口格式（设置 → API 厂商编辑区「接口格式」）：Responses 中转
+            // → pi 原生 openai-responses 客户端（流式/reasoning/工具调用 pi 全包）；
+            // 缺省 openai-completions（存量配置零影响）。字段进 _fingerprint →
+            // 改设置后 pi 自动重启重新注册，无需手动重启
+            providerEntry.api = cfg.apiType === 'responses' ? 'openai-responses' : 'openai-completions';
+            providers.push(providerEntry);
             i++;
         }
         return { providers, envKeys };
@@ -236,6 +275,7 @@ class PiAgentManager {
             this.proc = null;
             this.currentModel = null;
             this.currentArchiveKey = null;
+            this.currentPairKey = null;
         }
         if (this.starting) return this.starting;
 
@@ -256,30 +296,39 @@ class PiAgentManager {
                 // 用当前 node 直接运行 pi 的 CLI bundle（免 cmd shell 转义问题）。
                 // --append-system-prompt：追加中文语言指令（见 PI_LANG_APPEND），
                 // 数组式传参自动处理空格，无 shell 转义问题。
-                // -e lumen-guard.ts：加载写保护扩展，按权限分级（settings.json，
-                // 与 MCP 工具门禁同源）硬拦截 pi 对项目代码的 edit/write/bash
-                // 写入，拦截记录追加到 agent.log（详见 pi-extensions/lumen-guard.ts）。
-                // 用 -e 显式加载而非 .pi/extensions/ 自动发现：CLI 扩展不依赖
-                // 项目信任状态，RPC 模式下不会静默失效。
-                const guardExt = path.join(this.projectRoot, 'pi-extensions', 'lumen-guard.ts');
-                // 其余扩展（canvas/skills/mcp/web）走全局扩展目录自动发现：
-                // 拉起前差量同步 pi-extensions/*.ts → ~/.pi/agent/extensions/
-                // （内容一致跳过，毫秒级）。发行包用户首次开 agent 模式即自动
-                // 安装扩展、更新包后重启后端自动升级，全程无手动步骤；
-                // 同步失败只记日志不阻塞 spawn（pi 仍可启动，只是扩展缺失）
-                try {
-                    const sync = syncPiExtensions({ projectRoot: this.projectRoot });
-                    if (sync.synced > 0 || sync.errors.length > 0) {
-                        this._logLine('[extensions] 同步：安装 ' + sync.installed +
-                            ' / 覆盖 ' + sync.updated + ' / 跳过 ' + sync.skipped +
-                            (sync.errors.length ? '，失败：' + sync.errors.join('；') : ''));
-                    }
-                } catch (syncErr) {
-                    this._logLine('[extensions] 同步异常: ' + syncErr.message);
-                }
+                // -e 逐个显式加载 pi-extensions/*.ts：扩展彻底项目级——只在本
+                // 项目的 pi 进程生效，不再写入 ~/.pi/agent/extensions/ 全局目录
+                // （旧版差量同步的残留由 piExtensionCleanup 幂等清除，防止画布
+                // 系工具泄漏进同机其他项目启动的 pi）。用 -e 而非 .pi/extensions/
+                // 自动发现：CLI 扩展不依赖项目信任状态，RPC 模式下不会静默失效。
+                // 扩展目录缺失/读取失败只记日志不阻塞 spawn（pi 仍可启动，
+                // 只是裸助手）；lumen-guard 在其中负责写保护——按权限分级
+                // （settings.json，与 MCP 工具门禁同源）硬拦截 pi 对项目代码
+                // 的 edit/write/bash 写入，拦截记录追加到 agent.log
+                // （详见 pi-extensions/lumen-guard.ts）
                 const spawnArgs = [this.bundlePath, '--mode', 'rpc', '--session-dir', this.sessionsDir,
                      '--append-system-prompt', PI_LANG_APPEND];
-                if (fs.existsSync(guardExt)) spawnArgs.push('-e', guardExt);
+                try {
+                    const extDir = path.join(this.projectRoot, 'pi-extensions');
+                    for (const name of fs.readdirSync(extDir).sort()
+                        .filter(n => n.endsWith('.ts'))) {
+                        spawnArgs.push('-e', path.join(extDir, name));
+                    }
+                } catch (extErr) {
+                    this._logLine('[extensions] 扩展目录读取失败: ' + extErr.message);
+                }
+                // 清理全局扩展目录里旧版同步的 lumen-*.ts（幂等；正常情况
+                // 清空后每次只剩几次探测，静默无日志）
+                try {
+                    const clean = cleanupLegacyGlobalExtensions({ projectRoot: this.projectRoot });
+                    if (clean.removed.length > 0 || clean.errors.length > 0) {
+                        this._logLine('[extensions] 全局目录残留清理：删除 ' +
+                            (clean.removed.join('、') || '无') +
+                            (clean.errors.length ? '，失败：' + clean.errors.join('；') : ''));
+                    }
+                } catch (cleanErr) {
+                    this._logLine('[extensions] 残留清理异常: ' + cleanErr.message);
+                }
                 const child = spawn(process.execPath, spawnArgs,
                     { cwd: this.projectRoot, env: this._buildEnv(), windowsHide: true });
                 this.proc = child;
@@ -324,6 +373,7 @@ class PiAgentManager {
                 this.proc = null;
                 this.currentModel = null;
                 this.currentArchiveKey = null;
+                this.currentPairKey = null;
                 for (const [, p] of this.pending) {
                     clearTimeout(p.timer);
                     p.reject(new Error('pi 进程已退出'));
@@ -504,95 +554,110 @@ class PiAgentManager {
     }
 
     /**
-     * 每个存档绑定一个会话：存档变化时切换或新建会话。
-     * 映射持久化在 data/pi/session-map.json
+     * 会话绑定切换：一条聊天会话（sessionId）× 一个存档 = 一个 pi 会话
+     * （映射键 <存档键>::<会话id>，见 _loadSessionMap v2）。存档变化或
+     * 面板切会话都会走到这里；映射无文件或文件已失落在磁盘外时新建。
+     * 前端每条 prompt 都带 sessionId（对位兜底），切换请求丢失也会在此对齐
      */
-    async switchToArchive(archiveName) {
+    async switchToArchive(archiveName, sessionId) {
         await this.ensureStarted();
-        const key = archiveName || '__unsaved__';
-        if (this.currentArchiveKey === key) return;
+        const key = this._pairKey(archiveName, sessionId);
+        if (this.currentPairKey === key) {
+            this.currentArchiveKey = archiveName || '__unsaved__';
+            return;
+        }
 
-        const mapped = this.sessionMap[key];
+        const mapped = this.sessionMap.pairs[key];
         if (mapped && fs.existsSync(mapped)) {
             await this.send({ type: 'switch_session', sessionPath: mapped });
-            console.log(`[pi] 已切换到存档「${key}」的既有会话`);
+            console.log(`[pi] 已切换到绑定「${key}」的既有会话`);
         } else {
             await this.send({ type: 'new_session' });
             const st = await this.send({ type: 'get_state' });
             if (st && st.sessionFile) {
-                this.sessionMap[key] = st.sessionFile;
-                this._writeJson(this.mapFile, this.sessionMap);
+                this.sessionMap.pairs[key] = st.sessionFile;
+                this._saveSessionMap();
             }
-            console.log(`[pi] 已为存档「${key}」新建会话`);
+            console.log(`[pi] 已为绑定「${key}」新建会话`);
         }
-        this.currentArchiveKey = key;
+        this.currentPairKey = key;
+        this.currentArchiveKey = archiveName || '__unsaved__';
         // 会话恢复可能改变 pi 当前模型：作废缓存，强制下次 ensureModel 重新 set_model
         this.currentModel = null;
     }
 
     /**
-     * 重置存档绑定的 pi 会话（从头开新对话）。
-     * 面板「清空对话」时调用：pi 的对话按存档持久化在会话文件里，
-     * 只清界面会让旧上下文在下一句原样背进去（上下文持续膨胀，
-     * 历史里的过期信息甚至会误导模型自我认知）。
-     * 会话文件（即上下文本体）随清屏**全部**从磁盘删除：清屏语义为
-     * "推倒重来"，sessions/ 不留任何旧记录（所有存档的 agent 上下文
-     * 一并清除，各存档下次对话自动新建会话）。
+     * 删除一条聊天会话的全部 pi 绑定（面板会话菜单删除联动）：
+     * 跨存档的 <存档>::<sessionId> 条目全部移除，会话文件逐个删
+     * （同一会话在不同存档下用过就可能有多个文件）。当前正绑在这条
+     * 会话上时作废当前指针（下次 prompt 按新绑定重新切换/新建）
+     * @returns {number} 删除的会话文件数
      */
-    async resetSession(archiveName) {
-        const key = archiveName || '__unsaved__';
-        if (!this.proc || this.proc.exitCode !== null) {
-            // pi 未运行：清空映射与全部会话文件，下次 prompt 自动新建会话
-            this.sessionMap = {};
-            this._writeJson(this.mapFile, this.sessionMap);
-            this.currentArchiveKey = null;
-            this._wipeSessionsDir(null);
-            this._clearAttachments();
-            return;
+    async deleteChatSession(sessionId) {
+        const suffix = `::${sessionId || 'legacy'}`;
+        let removed = 0;
+        for (const [key, file] of Object.entries(this.sessionMap.pairs)) {
+            if (!key.endsWith(suffix)) continue;
+            delete this.sessionMap.pairs[key];
+            try {
+                if (file && fs.existsSync(file)) {
+                    fs.unlinkSync(file);
+                    removed++;
+                }
+            } catch (err) {
+                this._logLine(`[session] 删除会话文件失败 ${file}: ${err.message}`);
+            }
         }
-        await this.send({ type: 'new_session' });
-        const st = await this.send({ type: 'get_state' });
-        // 映射整体重建：其他存档的旧会话文件即将删除，保留条目只会变成
-        // 悬空引用（switchToArchive 对不存在的文件本就会新建会话兜底）
-        this.sessionMap = (st && st.sessionFile) ? { [key]: st.sessionFile } : {};
-        this._writeJson(this.mapFile, this.sessionMap);
-        this.currentArchiveKey = key;
-        // 新会话可能重置 pi 当前模型：作废缓存，强制下次 ensureModel 重新 set_model
-        this.currentModel = null;
-        // 删除旧会话文件（保留刚建的新会话——pi 可能尚未落盘，按路径保留）
-        this._wipeSessionsDir(st && st.sessionFile ? st.sessionFile : null);
-        // 会话推倒重来，附图引用一并作废（旧会话上下文已删，引用旧图
-        // 只会让模型编辑一张它"不记得"的图）
-        this._clearAttachments();
-    }
-
-    /** 清空全部附图登记（清屏/重置会话用：清屏语义为推倒重来，所有存档） */
-    _clearAttachments() {
-        this.attachmentsByArchive.clear();
+        this._saveSessionMap();
+        if (this.currentPairKey && this.currentPairKey.endsWith(suffix)) {
+            this.currentPairKey = null;
+        }
+        if (removed > 0) this._logLine(`[session] 已删除会话 ${sessionId} 的 ${removed} 个会话文件`);
+        return removed;
     }
 
     /**
-     * 清空 sessions/ 目录下的全部会话文件（keepPath 除外）。
-     * 只删文件不碰目录（fail-safe：会话目录里预期只有 JSONL 文件）；
-     * 单个文件删除失败只记日志，不阻塞其余清理。
+     * 重置当前会话绑定（面板「清空对话」联动，2026-11-20 多会话语义）：
+     * 只推倒当前 <存档>::<会话id>——pi 新建会话、删旧会话文件、清该
+     * 存档的附图登记；其余会话与其余存档的上下文原样保留
+     * （旧版"删光 sessions/ 全部会话文件"的推倒重来语义随多会话退役）
      */
-    _wipeSessionsDir(keepPath) {
-        try {
-            const keep = keepPath ? path.resolve(keepPath).toLowerCase() : null;
-            let removed = 0;
-            for (const name of fs.readdirSync(this.sessionsDir)) {
-                const full = path.join(this.sessionsDir, name);
-                try {
-                    if (keep && path.resolve(full).toLowerCase() === keep) continue;
-                    if (!fs.statSync(full).isFile()) continue;
-                    fs.unlinkSync(full);
-                    removed++;
-                } catch { /* 单个文件失败不阻塞其余清理 */ }
-            }
-            if (removed > 0) this._logLine(`[session] 清屏：已删除 ${removed} 个会话文件`);
-        } catch (err) {
-            this._logLine('[session] 清理会话目录失败: ' + err.message);
+    async resetSession(archiveName, sessionId) {
+        const key = this._pairKey(archiveName, sessionId);
+        const archiveKey = archiveName || '__unsaved__';
+        if (!this.proc || this.proc.exitCode !== null) {
+            // pi 未运行：只摘当前绑定，下次 prompt 自动新建会话
+            delete this.sessionMap.pairs[key];
+            this._saveSessionMap();
+            this.currentPairKey = null;
+            this.attachmentsByArchive.delete(archiveKey);
+            return;
         }
+        const oldFile = this.sessionMap.pairs[key];
+        await this.send({ type: 'new_session' });
+        const st = await this.send({ type: 'get_state' });
+        if (st && st.sessionFile) {
+            this.sessionMap.pairs[key] = st.sessionFile;
+        } else {
+            delete this.sessionMap.pairs[key];
+        }
+        this._saveSessionMap();
+        this.currentPairKey = key;
+        this.currentArchiveKey = archiveKey;
+        // 新会话可能重置 pi 当前模型：作废缓存，强制下次 ensureModel 重新 set_model
+        this.currentModel = null;
+        // 删除旧会话文件（刚建的新会话尚未落盘或路径未知的极端情况由
+        // existsSync 守住；路径相同说明 pi 复用文件，不动）
+        if (oldFile && (!st || !st.sessionFile || oldFile !== st.sessionFile)) {
+            try {
+                if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+            } catch (err) {
+                this._logLine(`[session] 删除旧会话文件失败 ${oldFile}: ${err.message}`);
+            }
+        }
+        // 会话推倒重来，该存档的附图引用一并作废（旧会话上下文已删，引用
+        // 旧图只会让模型编辑一张它"不记得"的图）；其他存档不受影响
+        this.attachmentsByArchive.delete(archiveKey);
     }
 
     /**
@@ -604,12 +669,12 @@ class PiAgentManager {
      *        头部；后续消息不重复注入，避免长会话上下文膨胀。
      *        「清空对话」重置会话后首条会重新注入
      */
-    async prompt({ message, images, archive, provider, modelId, systemPrompt }) {
+    async prompt({ message, images, archive, sessionId, provider, modelId, systemPrompt }) {
         await this.ensureStarted();
         // 先切会话再设模型：switch_session 会让 pi 从会话文件恢复
         // "上次用的模型"（可能已从设置删除），若先设模型会被顶掉，
         // 导致 pi 拿着注册表里不存在的模型调用而内部报错
-        await this.switchToArchive(archive);
+        await this.switchToArchive(archive, sessionId);
         await this.ensureModel(provider, modelId);
 
         // pi 仍在执行上一任务时自动排队（followUp），不再让第二条消息报错。

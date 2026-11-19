@@ -6,8 +6,10 @@
  *       存储在 ChatHistoryStore），F5 后恢复回填并重绑交互；快照经
  *       MutationObserver 捕获（childList/subtree/characterData 全量），
  *       防抖 800ms 合并 pi 流式期间的高频文本更新。
- * 键规则：LLM/agent 模式跨存档统一一份（'_global'）；网页桥接模式按站点
- *        分键（web-站点），切模型时由 _swapHistorySnapshot 整体互换，互不串。
+ * 键规则：LLM/agent 模式按会话细分（LlmSessionManager，2026-11-20 多会话；
+ *        首个 legacy 会话保持历史单键 '_global'，存量记录零迁移收编）；
+ *        网页桥接模式按站点分键（web-站点），切模型/会话时由
+ *        _swapHistorySnapshot 整体互换，互不串。
  *
  * 协作约定（与 LlmPiAgent / LlmWebBridge 同款模式）：
  *   - 构造函数持有 chat 引用，方法名与拆分前完全一致；
@@ -31,19 +33,23 @@ class LlmHistoryController {
         this._historyRestored = false; // 恢复完成前不落盘（避免恢复中的 DOM 覆盖快照）
         this._historyObserver = null;  // 消息区变更监听（恢复完成后挂载）
         this._currentKey = null;       // 当前已恢复/已落盘的持久化键
+        this._historyDirty = false;    // 恢复完成后有过真实内容变更（会话活跃时间推进依据）
     }
 
     /**
-     * 当前持久化键：跨存档统一一份（2026-10-05 用户决策：聊天记录不随
-     * 画布存档分家——按存档分键时，就地切换存档后观察者仍会把当前画面
-     * 写进新存档的键，串档覆写会静默销毁原存档记录；统一键后此问题不存在）。
-     * 网页桥接模式仍按桥接站点细分（模式维度，与存档无关）
+     * 当前持久化键：LLM/agent 模式按会话细分（2026-11-20 多会话，键归
+     * LlmSessionManager.keyFor——首个 legacy 会话仍是 '_global' 存量键）；
+     * 网页桥接模式仍按桥接站点细分（模式维度，与会话无关）。
+     * 会话切换复用 _swapHistorySnapshot 的整体互换（旧键落盘→清区→新键
+     * 回填重绑），恢复期间挂起持久化防串写
      */
     _historyKey() {
         if (this.chat.isWebMode()) {
             return `web-${this.chat.webBridge?.getActiveSite() || 'doubao'}`;
         }
-        return '_global';
+        return this.chat.sessions
+            ? LlmSessionManager.keyFor(this.chat.sessions.currentId)
+            : '_global';
     }
 
     /**
@@ -82,12 +88,18 @@ class LlmHistoryController {
             console.warn('切换模式恢复聊天记录失败:', err);
         } finally {
             this._historyRestored = true;
+            this._historyDirty = false;   // 恢复的既有内容不算新变更（活跃时间不因切会话前进）
+            this._startHistoryObserver();   // 重挂丢弃排队记录，防恢复内容被当新变更
         }
     }
 
-    /** 变更防抖保存（恢复完成前忽略，避免恢复中的 DOM 覆盖快照） */
+    /**
+     * 变更防抖保存（恢复完成前忽略，避免恢复中的 DOM 覆盖快照）。
+     * 有真实变更时置脏标记——落盘时推进会话活跃时间（切会话浏览不算）
+     */
     _scheduleHistorySave() {
         if (!this._historyRestored) return;
+        this._historyDirty = true;
         if (this._historySaveTimer) clearTimeout(this._historySaveTimer);
         this._historySaveTimer = setTimeout(() => {
             this._historySaveTimer = null;
@@ -102,6 +114,15 @@ class LlmHistoryController {
         clone.querySelectorAll('.pi-running, .webbridge-task').forEach((el) => el.remove());
         this._historyStore.put(key, clone.innerHTML,
             Object.fromEntries(this.chat._genParams), this.chat._piUsage || null);
+        // 顺带补自动标题（未自定义且无标题时取首条用户消息；传 key 供对位
+        // ——切会话落旧快照时指针已是新会话，不对位会把旧内容题到新会话）
+        this.chat.sessions?.maybeAutoTitle(key);
+        // 真实内容变更 → 推进该快照所属会话的活跃时间（切换浏览不推进）。
+        // 脏标记消费一次：swap 落旧快照若恰好带着未落盘的新消息也算旧会话活跃
+        if (this._historyDirty) {
+            this._historyDirty = false;
+            this.chat.sessions?.touchByKey(key);
+        }
     }
 
     /** 卸载前把防抖窗口内的最后一次变更尽力落盘 */
@@ -157,9 +178,15 @@ class LlmHistoryController {
         }
     }
 
-    /** 挂消息区变更监听（此后一切增删改都会触发防抖落盘） */
+    /** 挂消息区变更监听（此后一切增删改都会触发防抖落盘）。
+     *  重挂语义：先 disconnect 丢弃排队的旧变更记录再重新 observe——
+     *  恢复/互换写回的 DOM 不允许被当成新变更（脏标记误置会推进活跃
+     *  时间并触发同内容回写，2026-11-20 切会话刷时间问题的根因之一） */
     _startHistoryObserver() {
-        if (this._historyObserver) return;
+        if (this._historyObserver) {
+            this._historyObserver.disconnect();
+            this._historyObserver = null;
+        }
         this._historyObserver = new MutationObserver(() => this._scheduleHistorySave());
         this._historyObserver.observe(this.chat.messagesEl, {
             childList: true,

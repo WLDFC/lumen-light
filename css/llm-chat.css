@@ -1070,11 +1070,154 @@
     color: rgba(255, 255, 255, 0.45);
     user-select: none;
     white-space: nowrap;
-    /* 左右 auto margin 与图标按钮组的 margin-left:auto 三者均分剩余空隙，
-       使灰字正好居中于「pi 状态灯 → 图标按钮组」之间；
-       灰字隐藏（无数据）时仅剩图标组的 auto，按钮组仍贴最右 */
-    margin-left: auto;
+    /* 左移贴住状态灯（2026-11-20 多会话按钮让位）：固定小间距取代左 auto，
+     * 右 auto 仍把图标按钮组推到最右——头部呈「左簇：模式+状态灯+统计，
+     * 右簇：会话+系统提示词+清空+收起」两段式 */
+    margin-left: 8px;
     margin-right: auto;
+}
+
+/* ==================== 多会话：头部会话按钮 + 平铺下拉菜单 ====================
+   按钮（.llm-session-btn）复用 .llm-header-icon-btn 基类（插在系统提示词
+   左侧，仅 LLM 模式且非桥接显示，显隐由 LlmSessionManager 控制）。
+   菜单挂在 body（面板 overflow 裁剪不了它），fixed 定位在按钮正下方、
+   右对齐按钮，视口越界回退。层级 1360：与 LumenDropdown 菜单同档
+   （压过全部弹窗档），高于右键菜单 1250 */
+.llm-session-menu {
+    position: fixed;
+    display: none;
+    z-index: 1360;
+    width: 280px;
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 6px;
+    border-radius: 10px;
+    background: #17181d;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.llm-session-menu.is-open {
+    display: block;
+}
+
+/* ＋新建会话（菜单第一项，强节奏吸引主操作） */
+.llm-session-new {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    margin-bottom: 4px;
+    border: 1px dashed rgba(128, 128, 128, 0.35);
+    border-radius: 8px;
+    background: transparent;
+    color: #d1d5db;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.llm-session-new:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    border-color: rgba(128, 128, 128, 0.55);
+}
+
+/* 会话行：标题 + 悬停操作（改名/删除） */
+.llm-session-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.llm-session-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.llm-session-item.active {
+    background: rgba(59, 130, 246, 0.18);
+}
+
+.llm-session-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: #e5e7eb;
+}
+
+.llm-session-item.active .llm-session-title {
+    color: #93c5fd;
+    font-weight: 600;
+}
+
+/* 相对时间（ZCode 会话清单同款）：右对齐小字，悬停时让位给操作钮 */
+.llm-session-time {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    user-select: none;
+}
+
+.llm-session-item:hover .llm-session-time {
+    display: none;
+}
+
+/* 操作钮：hover/激活时浮现（常驻会挤窄标题） */
+.llm-session-ops {
+    display: none;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.llm-session-item:hover .llm-session-ops,
+.llm-session-item.active:hover .llm-session-ops {
+    display: flex;
+}
+
+.llm-session-op {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+}
+
+.llm-session-op:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.llm-session-op.danger:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #ef4444;
+}
+
+/* 内联改名输入框（替换标题 span 出现） */
+.llm-session-rename {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    border: 1px solid rgba(59, 130, 246, 0.6);
+    border-radius: 5px;
+    background: #0f0f12;
+    color: #fff;
+    font-size: 12px;
+    outline: none;
 }
 
 /* ==================== pi 智能体分阶段可折叠块 ====================
@@ -1173,7 +1316,37 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 11px;
     line-height: 1.5;
-    white-space: pre;         /* 代码块内保留换行缩进 */
+    white-space: pre-wrap;    /* 保留换行缩进，超长行折行适应面板宽度 */
+    overflow-wrap: anywhere;  /* 无空格长串（直链/路径）也允许断行，不出横向滚动 */
+}
+
+/* 代码块复制按钮：完全悬在框外正上方、靠齐右上角（不与框重叠；pre 是
+   横向滚动容器，按钮若进 pre 会随内容滚走）；无底色无描边纯图标幽灵钮，
+   复制成功换对勾短暂高亮（成功色 #22c55e 见 .trae/skills/配色美学） */
+.pi-md-pre-wrap {
+    position: relative;
+}
+.pi-md-copy-btn {
+    position: absolute;
+    top: -24px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    z-index: 1;
+}
+.pi-md-copy-btn:hover {
+    color: #fff;
+}
+.pi-md-copy-btn.is-done {
+    color: #22c55e;
 }
 
 /* 分隔线：弱化细线 */

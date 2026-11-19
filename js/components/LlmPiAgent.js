@@ -275,6 +275,9 @@ class LlmPiAgent {
                     // system 参数，后端在会话首条消息时拼入消息头部（见 piAgentManager）
                     systemPrompt: window.llmSystemPrompt?.getActiveContent('chat') || '',
                     archive: window.saveManager?.currentSave || null,
+                    // 多会话（2026-11-20）：随消息上报当前会话 id，后端按
+                    // <存档>::<会话id> 对位 pi 会话（切换请求丢失时此处兜底对齐）
+                    sessionId: chat.sessions?.currentId || null,
                     provider: model.provider,
                     modelId: model.modelId
                 })

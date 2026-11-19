@@ -33,6 +33,7 @@
     <link rel="stylesheet" href="css/prompt-panel.css">
     <link rel="stylesheet" href="css/comfy-params.css">
     <link rel="stylesheet" href="css/lora-manager.css">
+    <link rel="stylesheet" href="css/layer-split.css">
     <link rel="stylesheet" href="css/workflow-manager.css">
     <link rel="stylesheet" href="css/image-toolbar.css">
     <link rel="stylesheet" href="css/gen-info.css">
@@ -64,10 +65,14 @@
     <link rel="stylesheet" href="css/settings.css">
     <link rel="stylesheet" href="css/side-toolbar.css">
     <link rel="stylesheet" href="css/asset-library.css">
+    <link rel="stylesheet" href="css/workflow-template.css">
     <link rel="stylesheet" href="css/task-center.css">
     <link rel="stylesheet" href="css/recipe-manager.css">
     <!-- 提示词收藏页左侧模型标签栏样式 -->
     <link rel="stylesheet" href="css/recipe-models-sidebar.css">
+    <!-- 在线画廊视图（提示词管理器内，ADR 090）：筛选条/瀑布流/详情浮层，
+         须在 recipe-manager.css 之后（gallery-mode 隐藏规则覆盖收藏区控件） -->
+    <link rel="stylesheet" href="css/gallery-view.css">
     <!-- 保存提示词弹窗 / 收藏详情编辑弹窗样式（从 recipe-manager.css 按组件拆分） -->
     <link rel="stylesheet" href="css/save-tag-dialog.css">
     <link rel="stylesheet" href="css/tag-detail-dialog.css">
@@ -462,6 +467,8 @@
     <script defer src="js/canvas/GroupLayout.js"></script>
     <!-- 聚集区槽位布局纯函数层：区内空槽扫描/编组位置级联（CollectZone 依赖） -->
     <script defer src="js/utils/CollectSlotLayout.js"></script>
+    <!-- 并排窗口留白共享纯函数层：LoRA/提示词管理器「布局」模式右缘让位实测 -->
+    <script defer src="js/utils/SidePanelLayout.js"></script>
     <script defer src="js/utils/OcclusionLayout.js"></script>
     <script defer src="js/canvas/CanvasConnections.js"></script>
     <!-- 节点文本镜像层（@引用高亮 + 自绘光标），PromptNode/TextNode 共用 -->
@@ -473,6 +480,8 @@
     <script defer src="js/canvas/nodes/PromptSkillBar.js"></script>
     <script defer src="js/canvas/nodes/PromptNode.js"></script>
     <script defer src="js/canvas/nodes/TextNode.js"></script>
+    <!-- 书签节点（编组快捷跳转目录，数字键 1-9/0 快速跳转） -->
+    <script defer src="js/canvas/nodes/BookmarkNode.js"></script>
     <!-- 生图节点的提示词/参考图链路收集模块（ImageGenNode 依赖，需先加载） -->
     <script defer src="js/utils/ImagePipeline.js"></script>
     <!-- 画布对象交付出口纯决策层（下载/资产入库的「交什么」分流，依赖 NodeTypes） -->
@@ -504,6 +513,8 @@
     <script defer src="js/canvas/nodes/VideoGenNode.js"></script>
     <!-- Comfy 动态参数行控制器：画布 Comfy 生图节点与右侧面板共用 -->
     <script defer src="js/components/ComfyParamRows.js"></script>
+    <!-- LoRA 叠加区混入：ComfyParamRows 的 LoRA 域拆分（ADR 083，必须紧随主文件加载） -->
+    <script defer src="js/components/comfy-param-rows/ComfyLoraStack.js"></script>
     <!-- LoRA 封面选择器：面板叠加区 / 画布 LoRA 节点 / Comfy 内嵌 LoRA 行共用的下拉替换组件 -->
     <script defer src="js/components/LoraFileSelect.js"></script>
     <!-- 数量步进器行为层：节点生成按钮旁与面板运行按钮旁共用 -->
@@ -530,6 +541,8 @@
          各生成链路在 begin/end 处登记，窗口订阅 lumen-tasks-changed 重渲 -->
     <script defer src="js/components/TaskRegistry.js"></script>
     <script defer src="js/components/TaskCenter.js"></script>
+    <!-- 工作流模板：左侧工具栏弹出窗口（资产库同尺寸），模板存取 UI 后续迭代接入 -->
+    <script defer src="js/components/WorkflowTemplateLibrary.js"></script>
     <script defer src="js/canvas/Canvas.js"></script>
     <script defer src="js/api/LumenSocket.js"></script>
     <!-- LumenSocket 子模块：桥接命令按能力域混入（partial-class，ADR 027），须后于主类加载 -->
@@ -560,6 +573,7 @@
     <script defer src="js/components/ChatHistoryStore.js"></script>
     <script defer src="js/components/BackupManager.js"></script>
     <script defer src="js/components/LlmHistoryController.js"></script>
+    <script defer src="js/components/LlmSessionManager.js"></script>
     <script defer src="js/components/LlmApiSender.js"></script>
     <script defer src="js/components/LlmChat.js"></script>
     <script defer src="js/components/LlmMessageRail.js"></script>
@@ -612,6 +626,10 @@
     <script defer src="js/components/LumenBatchManager.js"></script>
     <script defer src="js/components/LumenTreeList.js"></script>
     <script defer src="js/components/LumenConfirmDialog.js"></script>
+    <!-- 并排布局开关预制件：LoRA/提示词/漫画编辑器「布局」钮共用（依赖 SidePanelLayout） -->
+    <script defer src="js/components/LumenLayoutPanel.js"></script>
+    <!-- 在线画廊视图（提示词管理器内，ADR 090）：依赖 LumenDropdown，先于 RecipeManager -->
+    <script defer src="js/components/RecipeGallery.js"></script>
     <script defer src="js/components/RecipeManager.js"></script>
     <!-- 工作流编辑器（顶栏 Comfy 按钮：节点图 + 全参数编辑，写回 workflows/*.json） -->
     <script defer src="js/components/WorkflowEditor.js"></script>
@@ -646,8 +664,8 @@
     <script defer src="js/components/manga-editor/MangaHistory.js"></script>
     <script defer src="js/components/manga-editor/MangaDraftStore.js"></script>
     <script defer src="js/components/manga-editor/MangaAi.js"></script>
-    <script defer src="js/components/manga-editor/MangaBackground.js"></script>
     <script defer src="js/components/manga-editor/MangaTemplates.js"></script>
+    <script defer src="js/components/manga-editor/MangaTemplateDetect.js"></script>
     <script defer src="js/components/manga-editor/MangaExport.js"></script>
     <script defer src="js/components/manga-editor/MangaPages.js"></script>
     <script defer src="js/components/manga-editor/MangaGenerate.js"></script>
@@ -674,6 +692,16 @@
     <script defer src="js/components/lora-manager/LoraSendPopup.js"></script>
     <script defer src="js/components/lora-manager/LoraConfirmDelete.js"></script>
     <script defer src="js/components/LoraManager.js"></script>
+    <!-- 图层拆分：主类（壳/状态机/识别解析纯函数）先于混入模块加载，
+         app.js 在 LoraManager 之后实例化（顶栏按钮要插在 LoRA 左边） -->
+    <script defer src="js/components/LayerSplit.js"></script>
+    <script defer src="js/components/layer-split/LayerSplitDom.js"></script>
+    <script defer src="js/components/layer-split/LayerSplitDetect.js"></script>
+    <script defer src="js/components/layer-split/LayerSplitLayers.js"></script>
+    <script defer src="js/components/layer-split/LayerSplitInpaint.js"></script>
+    <script defer src="js/components/layer-split/LayerSplitExport.js"></script>
+    <script defer src="js/components/layer-split/LayerSplitCutout.js"></script>
+    <script defer src="js/components/layer-split/LayerSplitPersist.js"></script>
     <script defer src="js/app.js"></script>
 </body>
 </html>

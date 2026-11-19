@@ -263,7 +263,7 @@
     border-radius: 12px;
     background: rgba(0, 0, 0, 0.2);
     font-size: 11px;
-    margin-left: 5px;    /* 留出图标按钮的宽度 */
+    margin-left: 0;      /* 左移贴近模式选择器（2026-11-20 多会话按钮让位，头部左簇收紧） */
     transition: all 0.3s ease;
     user-select: none;
 }
@@ -635,23 +635,6 @@
 /* 视频槽（含内容时）显示角标 */
 .thumbnail-slot.is-video .thumbnail-video-badge {
     display: block;
-}
-
-/* LoadImage 直注槽的节点角标（免节点通道：左上角小标签显示对应
- * 工作流节点 id，提交时按「节点 id → 槽位内容」映射直注） */
-.thumbnail-node-badge {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    padding: 0 4px;
-    border-radius: 4px;
-    background: rgba(37, 99, 235, 0.85);
-    color: #fff;
-    font-size: 8px;
-    line-height: 13px;
-    pointer-events: none;
-    user-select: none;
-    z-index: 2;
 }
 
 
