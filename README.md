@@ -8,6 +8,8 @@ AI 绘画工作台：无限画布 + ComfyUI 工作流（本地 / RunningHub 云�
 
 ![LumenLight 界面总览](docs/images/ui-overview.png)
 
+![LumenLight 界面展示](docs/images/QQ_2026-11-21_02-05-48.png)
+
 ![ImageStudio 编辑器：PS 式图层编辑](docs/images/QQ20261109-034553.png)
 
 
