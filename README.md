@@ -10,7 +10,7 @@ AI 绘画工作台：无限画布 + ComfyUI 工作流（本地 / RunningHub 云�
 
 ![LumenLight 界面展示](docs/images/QQ_2026-11-21_02-05-48.png)
 
-![ImageStudio 编辑器：PS 式图层编辑](docs/images/QQ20261109-034553.png)
+![ImageStudio 编辑器：PS 式图层编辑](docs/images/QQ20261109-034553.webp)
 
 
 ## 特色功能
@@ -26,7 +26,7 @@ AI 绘画工作台：无限画布 + ComfyUI 工作流（本地 / RunningHub 云�
 - **漫画编辑器**：多页漫画分镜创作——分镜模板一键铺格，逐页图层编辑（画笔/文字/形状/调色/抠图/移除），页面所见即所得导出 PNG 或整本打包成书；
 - **生成同款**：画布上任意生成图可回看完整参数，一键回填复现。
 
-![坐标编辑器：手画元素框位，自动编译成坐标提示词](docs/images/QQ20261104-001207.png)
+![坐标编辑器：手画元素框位，自动编译成坐标提示词](docs/images/QQ20261104-001207.webp)
 
 <p align="center">
   <img src="docs/images/QQ_2026-11-12_01-56-45.png" width="49%" alt="物体移除前：画面带有豆包 AI 生成水印">
